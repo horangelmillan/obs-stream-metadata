@@ -43,6 +43,18 @@ TOKEN_URL = "https://id.kick.com/oauth/token"
 REVOKE_URL = "https://id.kick.com/oauth/revoke"
 CHANNELS_URL = "https://api.kick.com/public/v1/channels"
 SCOPES = "channel:write channel:read"
+# id.kick.com/api.kick.com estan tras Cloudflare con Browser Integrity
+# Check: rechaza el User-Agent por defecto de urllib (403 code 1010).
+# El runner PoC envia cabeceras de navegador real (solo test local).
+BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+              "AppleWebKit/537.36 (KHTML, like Gecko) "
+              "Chrome/126.0.0.0 Safari/537.36")
+
+
+def add_browser_headers(req):
+    req.add_header("User-Agent", BROWSER_UA)
+    req.add_header("Accept", "application/json, text/plain, */*")
+    req.add_header("Accept-Language", "en-US,en;q=0.9")
 
 
 def b64url_sha256(verifier: str) -> str:
@@ -53,6 +65,7 @@ def b64url_sha256(verifier: str) -> str:
 def post_form(url, fields, token=None):
     data = urllib.parse.urlencode(fields).encode()
     req = urllib.request.Request(url, data=data, method="POST")
+    add_browser_headers(req)
     if token:
         req.add_header("Authorization", "Bearer " + token)
     try:
@@ -64,6 +77,7 @@ def post_form(url, fields, token=None):
 
 def api_get(url, token):
     req = urllib.request.Request(url, method="GET")
+    add_browser_headers(req)
     req.add_header("Authorization", "Bearer " + token)
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
@@ -75,6 +89,7 @@ def api_get(url, token):
 def api_patch(url, token, body):
     data = json.dumps(body).encode()
     req = urllib.request.Request(url, data=data, method="PATCH")
+    add_browser_headers(req)
     req.add_header("Authorization", "Bearer " + token)
     req.add_header("Content-Type", "application/json")
     try:
