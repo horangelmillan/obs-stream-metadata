@@ -202,11 +202,9 @@ QString youTubeSnippetPayload(const QString &fetchedJson, const QString &title,
 	snippet[QStringLiteral("title")] = title;
 	snippet[QStringLiteral("description")] = desc;
 	out[QStringLiteral("snippet")] = snippet;
-	// contentDetails con monitorStream: requerido por update; se
-	// preserva tal cual vino del GET (F-016).
-	if (root.contains(QStringLiteral("contentDetails")))
-		out[QStringLiteral("contentDetails")] =
-			root.value(QStringLiteral("contentDetails"));
+	// Con part=snippet el body NO debe incluir contentDetails: la API
+	// viva lo rechaza con 400 unexpectedPart (corrige F-016). El snippet
+	// se envia completo (preserva scheduledStartTime, categoryId...).
 	return QString::fromUtf8(
 		QJsonDocument(out).toJson(QJsonDocument::Compact));
 }

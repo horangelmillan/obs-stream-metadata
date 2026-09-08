@@ -226,9 +226,10 @@ def main() -> int:
     print(f"6. Recurso actual: title={sn.get('title', '')!r} "
           f"lifeCycle={items[0].get('status', {}).get('lifeCycleStatus', '')}")
 
-    put_body = {"id": bid,
-                "snippet": dict(sn, title=a.title),
-                "contentDetails": full.get("contentDetails", {})}
+    # part=snippet solo: el body NO puede incluir contentDetails
+    # (la API lo rechaza con unexpectedPart). Solo snippet (completo,
+    # con title sustituido) + id; el resto de parts queda intacto.
+    put_body = {"id": bid, "snippet": dict(sn, title=a.title)}
     s, upd = api_put(f"{UPDATE_URL}?part=snippet", token, put_body)
     if s != 200:
         print(f"FAIL update: HTTP {s} {str(upd)[:300]}")
@@ -247,8 +248,7 @@ def main() -> int:
         if not a.restore or len(a.restore) > 100:
             print("8b. Restore omitido: titulo original invalido (>100/vacio)")
         else:
-            rb = {"id": bid, "snippet": dict(sn, title=a.restore),
-                  "contentDetails": full.get("contentDetails", {})}
+            rb = {"id": bid, "snippet": dict(sn, title=a.restore)}
             s, _ = api_put(f"{UPDATE_URL}?part=snippet", token, rb)
             print(f"8b. Restore: HTTP {s}")
 

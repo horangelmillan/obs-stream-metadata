@@ -85,7 +85,7 @@ int main(int argc, char **argv)
 		      sn.value(QStringLiteral("scheduledStartTime")).toString() ==
 			      QStringLiteral("2026-09-08T20:00:00Z") &&
 		      sn.value(QStringLiteral("categoryId")).toString() == QStringLiteral("20") &&
-		      o.contains(QStringLiteral("contentDetails")),
+		      !o.contains(QStringLiteral("contentDetails")),
 	      "youtube-merge");
 
 	// HTTP §28: 204 = éxito (Kick).
