@@ -28,7 +28,7 @@ y cierra con PR (CI verde + aprobación).
 - **Salidas:** `docs/` completo, CI Phase 0 verde, ADRs 001-004, F-001..F-005.
 - **Criterio de salida (cumplido):** `master` limpio, cero `src/`/`CMakeLists.txt`.
 
-## P1 — Toolchain & Skeleton (T-011 resto + T-012)
+## P1 — Toolchain & Skeleton (T-011 resto + T-012 + T-013) ✅ VALIDADA 2026-09-08
 
 - **Objetivo:** entorno reproducible que compila el template oficial sin funcionalidad propia.
 - **Alcance:** instalar VS17 2022 + SDK + CMake (ADR-005); clonar `obs-plugintemplate` como referencia; compilarlo con `ENABLE_FRONTEND_API=ON ENABLE_QT=ON`; añadir CI C++ (build Windows x64).
@@ -36,6 +36,7 @@ y cierra con PR (CI verde + aprobación).
 - **Dependencias:** ADR-005. **Riesgo R1:** el template fija obs-studio 31.1.1 — subir a 32.2.2 y verificar.
 - **Entrada:** ADR-005 aprobado. **Salida:** build verde local + CI del template compilado.
 - **Validación:** `cmake --build` ok; artefacto `.dll/.pdb` generado; `git status` limpio de secretos.
+- **Resultado T-013:** `buildspec.json` propio (OBS 32.2.2 + obs-deps/Qt6 2026-07-15, ADR-007); configure ok (106.8s, VS2022/SDK22621); `obs-stream-metadata.dll` x64 (12.800 bytes + PDB); carga + unload en OBS 32.2.2 real ×2 (log + módulos en memoria); Qt 6.11.1 == 6.11.1; sin crash, sentinels limpios. CI C++ pendiente (difere a P2; build local es la evidencia P1).
 
 ## P2 — Dock PoC (T-020)
 

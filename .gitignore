@@ -1,5 +1,11 @@
 # Build / CMake
 build/
+build_x64/
+build_x86_64/
+build_macos/
+build_arm64/
+.deps/
+cmake/.CMakeBuildNumber
 out/
 cmake-build-*/
 CMakeCache.txt
