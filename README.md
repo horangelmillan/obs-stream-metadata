@@ -1,7 +1,7 @@
 # OBS Stream Metadata (Twitch / YouTube / Kick)
 
 Plugin nativo de OBS Studio (C++ / Qt6) para gestionar **título y descripción de streams**.
-Estado: **Phase 1 (P1) validada — esqueleto compila y carga en OBS 32.2.2, sin código funcional todavía**.
+Estado: **Phase 2 (P2) validada — dock nativo visible en OBS 32.2.2, sin código funcional todavía**.
 
 Fuente técnica principal: `AGENTS.md` (investigación previa, 2026-09-07).
 Reglas operativas para agentes: `AGENTS.md` + `docs/`.
@@ -39,4 +39,4 @@ Ver `docs/STATE.md` (fuente de verdad).
 - **Phase 0 cerrada:** harness agente (docs, CI, Git) sin código funcional.
 - **Fases P0–P7 definidas** (`docs/PHASES.md`, ADR-006), orden risk-first.
 - **Toolchain instalado y validado (T-012):** VS2022 17.14 + MSVC 19.44 + ATL + SDK 10.0.22621 + CMake 3.31.6 + Git 2.49.0; target OBS 32.2.2 + Qt 6.11.1; sin Qt manual (ADR-005).
-- **Próximo paso:** P2 — dock Qt6 mínimo (T-020) sobre la base P1.
+- **Próximo paso:** P3 — PoCs OAuth + título por proveedor (T-030).

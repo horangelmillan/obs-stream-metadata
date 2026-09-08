@@ -38,14 +38,15 @@ y cierra con PR (CI verde + aprobación).
 - **Validación:** `cmake --build` ok; artefacto `.dll/.pdb` generado; `git status` limpio de secretos.
 - **Resultado T-013:** `buildspec.json` propio (OBS 32.2.2 + obs-deps/Qt6 2026-07-15, ADR-007); configure ok (106.8s, VS2022/SDK22621); `obs-stream-metadata.dll` x64 (12.800 bytes + PDB); carga + unload en OBS 32.2.2 real ×2 (log + módulos en memoria); Qt 6.11.1 == 6.11.1; sin crash, sentinels limpios. CI C++ pendiente (difere a P2; build local es la evidencia P1).
 
-## P2 — Dock PoC (T-020)
+## P2 — Dock PoC (T-020) ✅ VALIDADA 2026-09-08
 
 - **Objetivo:** demostrar que un dock propio carga en OBS 32.2.2 sin congelar la UI.
-- **Alcance:** `OBS_DECLARE_MODULE` + `obs_module_load` + `QWidget` registrado vía `obs_frontend_add_dock_by_id`; un botón; log `[stream-metadata]` sin secretos.
+- **Alcance:** `OBS_DECLARE_MODULE` + `obs_module_load` + `QWidget` registrado vía `obs_frontend_add_dock_by_id` (id `obs-stream-metadata-dock`, título `Stream Metadata`); 3 labels PoC; log `[obs-stream-metadata]` sin secretos.
 - **No-objetivos:** OAuth, HTTP contra plataformas, persistencia, estética.
 - **Dependencias:** P1. **Riesgos:** incompatibilidad Qt (ver R2 de ADR-005); threading desde el inicio (nada de red en hilo UI, `AGENTS.md` §26).
 - **Entrada:** template compila. **Salida:** plugin carga/descarga, dock abre/cierra.
 - **Validación:** checklist manual: OBS lo lista, abre/cierra sin crash, log limpio.
+- **Resultado T-020:** `add_dock_by_id` elegido tras leer `OBSStudioAPI.cpp`/`OBSBasic` (F-013); ownership OBS (plugin nunca borra); `remove_dock` en unload (no-op seguro en shutdown); geometría restaurada por `DockState` (40,40 400x300 verificado); contenido autoverificado (`3 labels` en log); 5 ciclos abrir/cerrar limpios, sin crash ni sentinels. Límite del harness: sin píxeles de contenido Qt ni toggle de menú automatizable en sesión sin foreground (F-014); verificación manual de 30 s pendiente por el usuario (Paneles → Stream Metadata → arrastrar).
 
 ## P3 — Provider PoCs (T-030: Twitch, YouTube, Kick)
 
