@@ -3,7 +3,7 @@
 > Único archivo que responde: dónde estamos, qué hacemos, qué falta.
 > Actualizar en cada tarea terminada.
 
-- **Fase actual:** Phase 2 (P2) — T-020 terminada en rama `feat/t-020-dock-poc` (pendiente PR). P1 mergeada (PR #6, `8205089`). T-012 mergeada (PR #4). T-010/T-011/T-040 mergeadas (PR #3).
+- **Fase actual:** Phase 2 (P2) — T-020 terminada en rama `feat/t-020-dock-poc`, PR #7 abierta (CI verde), pendiente de aprobación/merge. P1 mergeada (PR #6, `8205089`).
 - **Rama base:** `master` (confirmado por ADR-004; `default_branch: master`, sin branch protection, CI anclado a `master`).
 - **Repo remoto:** `horangelmillan/obs-stream-metadata` (público, GitHub-flow con PRs).
 - **Qué estamos haciendo:** nada — esperar merge de la PR T-020. Siguiente tras merge: P3 PoCs OAuth + título por proveedor (T-030).
