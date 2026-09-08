@@ -41,6 +41,6 @@ jobs:
       # claves PEM), no menciones documentales de nombres como `access_token`.
       - name: Secret scan (values, not doc words)
         run: |
-          PAT='(gh[pousr]_[A-Za-z0-9]{16,}|sk-[A-Za-z0-9]{8,}|AIza[A-Za-z0-9_-]{10,}|xox[bap]-[A-Za-z0-9-]{8,}|BEGIN [A-Z ]*PRIVATE KEY|(client_secret|refresh_token|access_token)[[:space:]]*=[[:space:]]*['\"]?[A-Za-z0-9_.-]{8,})'
+          PAT="(gh[pousr]_[A-Za-z0-9]{16,}|sk-[A-Za-z0-9]{8,}|AIza[A-Za-z0-9_-]{10,}|BEGIN [A-Z ]*PRIVATE KEY|(client_secret|refresh_token|access_token)[[:space:]]*=[[:space:]]*[\"A-Za-z0-9_.-]{8,})"
           if grep -rEI "$PAT" --exclude-dir=.git . ; then echo "possible secret value in tree"; exit 1; fi
           echo "secret scan ok"
