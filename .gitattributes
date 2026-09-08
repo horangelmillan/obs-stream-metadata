@@ -1,0 +1,3 @@
+# Normaliza finales de línea a LF en el repositorio, independiente del
+# `core.autocrlf` de cada máquina (ver ADR-004, T-040).
+* text=auto
