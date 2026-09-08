@@ -37,9 +37,10 @@ jobs:
           test ! -e src
           test ! -e CMakeLists.txt
 
-      - name: Secret scan (diff + tree)
+      # Escanea valores con pinta de secreto (asignaciones, prefijos conocidos,
+      # claves PEM), no menciones documentales de nombres como `access_token`.
+      - name: Secret scan (values, not doc words)
         run: |
-          PAT='(client_secret|refresh_token|access_token|Authorization:[[:space:]]*Bearer|BEGIN [A-Z ]*PRIVATE KEY)'
-          if git rev-parse --verify HEAD >/dev/null 2>&1; then RANGE="HEAD"; else RANGE=""; fi
-          if grep -rEI "$PAT" --exclude-dir=.git . ; then echo "possible secret in tree"; exit 1; fi
+          PAT='(gh[pousr]_[A-Za-z0-9]{16,}|sk-[A-Za-z0-9]{8,}|AIza[A-Za-z0-9_-]{10,}|xox[bap]-[A-Za-z0-9-]{8,}|BEGIN [A-Z ]*PRIVATE KEY|(client_secret|refresh_token|access_token)[[:space:]]*=[[:space:]]*['\"]?[A-Za-z0-9_.-]{8,})'
+          if grep -rEI "$PAT" --exclude-dir=.git . ; then echo "possible secret value in tree"; exit 1; fi
           echo "secret scan ok"
