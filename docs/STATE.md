@@ -3,7 +3,7 @@
 > Único archivo que responde: dónde estamos, qué hacemos, qué falta.
 > Actualizar en cada tarea terminada.
 
-- **Fase actual:** Phase 1 (P1) — T-013 terminada en rama `feat/p1-bootstrap-obs-32` (pendiente PR). T-012 mergeada (PR #4, `e54248b`); avance README mergeado (PR #5, `f303874`). T-010/T-011/T-040 mergeadas (`ecf6234`, PR #3).
+- **Fase actual:** Phase 1 (P1) — T-013 terminada en rama `feat/p1-bootstrap-obs-32`, PR #6 abierta (CI verde), pendiente de aprobación/merge. T-012 mergeada (PR #4, `e54248b`); avance README mergeado (PR #5, `f303874`). T-010/T-011/T-040 mergeadas (`ecf6234`, PR #3).
 - **Rama base:** `master` (confirmado por ADR-004; `default_branch: master`, sin branch protection, CI anclado a `master`).
 - **Repo remoto:** `horangelmillan/obs-stream-metadata` (público, GitHub-flow con PRs).
 - **Qué estamos haciendo:** nada — esperar merge de la PR T-013. Siguiente tras merge: P2 dock Qt6 mínimo (T-020) sobre la base P1.
