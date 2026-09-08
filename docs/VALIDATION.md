@@ -9,6 +9,22 @@
 
 Toda afirmación "funciona" requiere evidencia (comando + salida). "Probablemente funciona" no es válido.
 
+## P4 parcial (T-031, 2026-09-08, rama `feat/t-031-mvp-integration`)
+
+```text
+CONFIGURE: PASS (preset windows-x64 incremental, Qt6 Network resuelto vía obs-deps)
+BUILD:     PASS (plugin .dll + metadata-selfcheck.exe, RelWithDebInfo, 0 errores)
+SELFCHECK: PASS 19/19 (metadata: validación restrictiva, payloads, 204/401/429, mensajes sin secretos)
+REGRESIÓN: PASS 28/28 (provider-poc-selfcheck intacto, PoC no tocada)
+SECRET:    PASS (gate P4 + secret-scan de valores, sin matches en src/tools/docs)
+OBS LOAD:  PASS ×2 (módulo en memoria + `dock created (metadata mvp)` + `dock shown`)
+UNLOAD:    PASS ×2 (`dock removed` + `plugin unloaded` al cerrar elegante)
+SENTINELS: PASS (vacíos tras ambos ciclos; sin crash)
+LIVE:      PENDIENTE del operador (OAuth real + título visible Twitch/YouTube/Kick
+           desde el dock; procedimiento en TROUBLESHOOTING T-031; Kick verificar en directo, F-023)
+FINAL: P4 PARTIAL — no avanzar a P5 hasta la matriz AGENTS §19 en verde
+```
+
 ## P1 validada (T-013, 2026-09-08, OBS 32.2.2 x64)
 
 ```text

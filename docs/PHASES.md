@@ -61,7 +61,17 @@ y cierra con PR (CI verde + aprobación).
 - **Validación:** verificación en web de cada plataforma; tokens de prueba nunca en repo/logs.
 - **Resultado T-030 (2026-09-08):** P3 PASS — triple LIVE PASS con read-back (Twitch device flow; YouTube Desktop+PKCE, `mine` solo, PUT `id+snippet`; Kick PKCE+localhost, 204, read-back en directo por doble vía). Findings F-019–F-024. Descripción YouTube queda para P4 (solo se validó título, sin regresión).
 
-## P4 — Unified Dock (UI mínima real)
+## P4 — Unified Dock (UI mínima real) — EN-PROGRESO (T-031, 2026-09-08)
+
+Implementado en `feat/t-031-mvp-integration` (PARTIAL, sin validación viva):
+`src/metadata.*` (modelo + validación restrictiva + payloads + mensajes §16),
+`src/metadata_dock.*` (checkboxes, título, descripción solo-YouTube,
+selector de broadcast, Connect/Disconnect por proveedor, Apply secuencial
+async con resultado independiente, refresh-una-vez ante 401), tokens solo
+en memoria (limitación documentada, P5 decide storage), gate CI P1→P4.
+Evidencia: build 0 errores, selfchecks 19/19 + 28/28, secret-scan limpio,
+OBS 32.2.2 ×2 ciclos limpios. Pendiente del operador: OAuth real + updates
+visibles por plataforma (matriz §19).
 
 - **Objetivo:** el dock usable del MVP (`AGENTS.md` §37): cuentas vinculadas, título, descripción, selector de broadcast YouTube, aplicar por plataforma, resultado independiente por plataforma (sin todo-o-nada, §19).
 - **Alcance:** formulario Qt; matriz de capacidades visible (Twitch/Kick: descripción no disponible, §3); estado conectado/como-quién (§38); conectar/desconectar por proveedor (§29).
