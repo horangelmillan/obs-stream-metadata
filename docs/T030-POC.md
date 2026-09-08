@@ -69,7 +69,9 @@ Los valores `<...>` los pone el operador; nunca se commitean.
 
 ```text
 1. Generar state (+ PKCE donde aplique) — ver provider_poc.h.
-2. Twitch:  POST /oauth2/device (client_id + scope) → abrir verification_uri,
+2. Twitch (preferido): `python tools/t030_live_twitch.py --client-id <ID> --title "T030 LIVE Twitch <ts>" [--restore "<original>"]`
+   (device flow con salida redactada: nunca imprime tokens; los revoca al final).
+   Manual alternativo: POST /oauth2/device (client_id + scope) → abrir verification_uri,
             introducir user_code → sondear token hasta obtenerlo.
    YouTube/Kick: levantar tools/t030_oauth_callback.py con el state →
             abrir la URL de autorización en el navegador → autorizar.
@@ -88,8 +90,10 @@ Los valores `<...>` los pone el operador; nunca se commitean.
 ## 6. Aceptación T-030 (estado real)
 
 ```text
-Twitch:  OAuth(manual pendiente)  token  PEND  broadcaster-id PEND
-         title-update PEND  verificación externa PEND  errores PEND
+Twitch:  OAuth PASS (device flow, login sonokigame, user 182281392, scope ok)
+         title-update PASS (PATCH 204 + read-back "T030 LIVE Twitch 20260908")
+         verificación externa PASS (GET read-back; web pendiente del operador)
+         tokens revocados tras la prueba. Estado: PASS (2026-09-08).
 YouTube: OAuth(manual pendiente)  token  PEND  broadcast-id PEND
          title-update PEND  verificación externa PEND  errores PEND
 Kick:    OAuth(manual pendiente)  token  PEND  channel PEND  204 PEND

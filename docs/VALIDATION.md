@@ -34,6 +34,10 @@ SELFCHECK: PASS 28/28 (PKCE RFC 7636, state, URLs 3 proveedores,
            validadores §20, payloads exactos, merge YouTube, HTTP §28
            incl. 204=éxito) — provider-poc-selfcheck.exe, exit 0
 CI-LOCAL:  PASS (grep gate P1 sin matches en src/cmake; secret-scan sin matches)
-LIVE:      PENDING (requiere apps del operador + consentimiento; §5 T030-POC.md)
+TWITCH:    PASS vivo 2026-09-08 (OAuth device flow; /validate login sonokigame /
+           user 182281392 / scope channel:manage:broadcast; PATCH 204 + read-back
+           "T030 LIVE Twitch 20260908"; tokens revocados; runner redactado F-018)
+YOUTUBE:   PENDING (operador) — requiere cliente Desktop + broadcast existente
+KICK:      PENDING (operador) — requiere app con redirect localhost + secret local
 FINAL: P3 PARTIAL — no avanzar a P4
 ```
