@@ -213,16 +213,25 @@ def main() -> int:
     print("5. PATCH 204 (sin body) OK")
 
     # Kick puede tardar en propagar el titulo: reintentar con espera.
-    final, s = "", 0
+    # Dos vias: GET channels (stream_title) y, si hay directo activo,
+    # GET users/livestreams (title del livestream activo).
+    live_url = ("https://api.kick.com/public/v1/users/livestreams?user_id="
+                + urllib.parse.quote(str(me.get("broadcaster_user_id", ""))))
+    final, s, live_title = "", 0, ""
     for attempt in (1, 2, 3, 4):
         if attempt > 1:
             time.sleep(20)
         s, ch = api_get(CHANNELS_URL, token)
         items = ch.get("data", []) if s == 200 else []
         final = items[0].get("stream_title", "") if items else ""
-        print(f"6. Read-back intento {attempt}: HTTP {s}, "
-              f"stream_title={final!r}")
-        if s == 200 and final == a.title:
+        sl, lv = api_get(live_url, token)
+        litems = lv.get("data", []) if sl == 200 else []
+        live_title = litems[0].get("title", "") if litems else ""
+        print(f"6. Read-back intento {attempt}: channels HTTP {s}, "
+              f"stream_title={final!r}; livestreams HTTP {sl}, "
+              f"title={live_title!r}")
+        if final == a.title or live_title == a.title:
+            final = a.title
             break
     if s != 200 or final != a.title:
         print(f"FAIL read-back tras 4 intentos: HTTP {s}, "
