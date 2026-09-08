@@ -182,22 +182,23 @@ def main() -> int:
 
     bid = a.broadcast_id
     if not bid:
+        # La API exige exactamente UN filtro (broadcastStatus|id|mine):
+        # mine=true solo devuelve los propios (default: todos los estados);
+        # el filtrado active/upcoming se hace en local por lifeCycleStatus.
+        q = urllib.parse.urlencode({"part": "id,snippet,status",
+                                    "mine": "true",
+                                    "maxResults": "50"})
+        s, lst = api_get(f"{LIST_URL}?{q}", token)
+        if s != 200:
+            print(f"FAIL list mine: HTTP {s} {str(lst)[:200]}")
+            return 25
         found = []
-        for status in ("active", "upcoming"):
-            q = urllib.parse.urlencode({"part": "id,snippet,status",
-                                        "mine": "true",
-                                        "broadcastStatus": status,
-                                        "maxResults": "25"})
-            s, lst = api_get(f"{LIST_URL}?{q}", token)
-            if s != 200:
-                print(f"FAIL list {status}: HTTP {s} {str(lst)[:200]}")
-                return 25
-            for it in lst.get("items", []):
-                sn, st = it.get("snippet", {}), it.get("status", {})
-                found.append((it["id"], sn.get("title", ""),
-                              st.get("lifeCycleStatus", "")))
+        for it in lst.get("items", []):
+            sn, st = it.get("snippet", {}), it.get("status", {})
+            found.append((it["id"], sn.get("title", ""),
+                          st.get("lifeCycleStatus", "")))
         if not found:
-            print("FAIL broadcast_selection: sin broadcasts active/upcoming "
+            print("FAIL broadcast_selection: sin broadcasts propios "
                   "(crea uno en YouTube Studio primero)")
             return 26
         print("4. Broadcasts (mine, active/upcoming):")
