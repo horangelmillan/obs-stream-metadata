@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """T-030: prueba viva de YouTube con salida redactada (una sola orden).
 
-Flujo installed-app + PKCE (cliente Desktop, sin secret):
+Flujo installed-app + PKCE (cliente Desktop; Google exige client_secret
+local en el intercambio desde ~2025 aunque sea Desktop — se pide por
+--client-secret / env GOOGLE_CLIENT_SECRET / pregunta oculta, nunca se
+imprime ni se commitea):
   state + PKCE -> navegador del sistema -> loopback local ->
   code (solo memoria) -> token exchange -> listar broadcasts ->
   GET recurso -> PUT liveBroadcasts.update (solo snippet.title) ->
@@ -22,7 +25,9 @@ NO toca la descripcion: solo modifica snippet.title (resto preservado).
 """
 
 import argparse
+import getpass
 import json
+import os
 import secrets
 import sys
 import threading
@@ -110,6 +115,9 @@ def wait_for_code(port, expected_state, timeout=600):
 def main() -> int:
     ap = argparse.ArgumentParser(description="Prueba viva YouTube T-030 (redactada)")
     ap.add_argument("--client-id", required=True)
+    ap.add_argument("--client-secret", default="",
+                    help="si se omite: env GOOGLE_CLIENT_SECRET o pregunta "
+                    "oculta (Google lo exige incluso en Desktop, 2025+)")
     ap.add_argument("--title", required=True, help="titulo de prueba")
     ap.add_argument("--restore", default="", help="titulo original a restaurar")
     ap.add_argument("--port", type=int, default=9004)
@@ -143,9 +151,19 @@ def main() -> int:
     code = res["code"]
     print("2. Callback OK (state coincide, code en memoria, longitud oculta)")
 
+    secret = (a.client_secret or os.environ.get("GOOGLE_CLIENT_SECRET", ""))
+    if not secret:
+        secret = getpass.getpass(
+            "client_secret Google (Desktop: no es confidencial, no se muestra): "
+        ).strip()
+    if not secret:
+        print("FAIL configuracion: Google exige client_secret en el "
+              "intercambio (incluso Desktop)")
+        return 11
     fields = {"grant_type": "authorization_code", "code": code,
-              "client_id": a.client_id, "redirect_uri": redirect,
-              "code_verifier": verifier}
+              "client_id": a.client_id, "client_secret": secret,
+              "redirect_uri": redirect, "code_verifier": verifier}
+    secret = ""
     data = urllib.parse.urlencode(fields).encode()
     req = urllib.request.Request(TOKEN_URL, data=data, method="POST")
     try:
