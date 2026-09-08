@@ -212,13 +212,27 @@ def main() -> int:
         return 25
     print("5. PATCH 204 (sin body) OK")
 
-    s, ch = api_get(CHANNELS_URL, token)
-    items = ch.get("data", []) if s == 200 else []
-    final = items[0].get("stream_title", "") if items else ""
+    # Kick puede tardar en propagar el titulo: reintentar con espera.
+    final, s = "", 0
+    for attempt in (1, 2, 3, 4):
+        if attempt > 1:
+            time.sleep(20)
+        s, ch = api_get(CHANNELS_URL, token)
+        items = ch.get("data", []) if s == 200 else []
+        final = items[0].get("stream_title", "") if items else ""
+        print(f"6. Read-back intento {attempt}: HTTP {s}, "
+              f"stream_title={final!r}")
+        if s == 200 and final == a.title:
+            break
     if s != 200 or final != a.title:
-        print(f"FAIL read-back: HTTP {s}, stream_title={final!r}")
+        print(f"FAIL read-back tras 4 intentos: HTTP {s}, "
+              f"stream_title={final!r} (esperado {a.title!r})")
+        print("NOTA: los tokens de esta sesion NO se revocaron "
+              "(el fallo interrumpe antes del revoke). "
+              "Revoca el acceso manualmente en la configuracion de Kick.")
         return 26
-    print(f"6. Read-back OK: {final!r} — verificalo en kick.com/{me.get('slug', '')}")
+    print(f"6b. Read-back OK: {final!r} — verificalo en "
+          f"kick.com/{me.get('slug', '')}")
 
     if a.restore:
         s, _ = api_patch(CHANNELS_URL, token, {"stream_title": a.restore})
