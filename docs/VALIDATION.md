@@ -38,3 +38,26 @@ CIERRE LIMPIO: PASS ×5 (dock removed + plugin unloaded; sin crash; sentinels va
 SEGUNDA CARGA: PASS ×5 (5 ciclos abrir/cerrar)
 FINAL: P2 PASS (pendiente confirmación manual de 30 s por el usuario: Paneles → Stream Metadata → arrastrar/acoplar)
 ```
+
+## P3 parcial (T-030, 2026-09-08, rama `feat/t-030-poc-providers`)
+
+```text
+CONFIGURE: PASS (preset windows-x64, 5.2s incremental; frontend+Qt ON)
+BUILD:     PASS (plugin .dll + provider-poc.lib, RelWithDebInfo, 0 errores)
+SELFCHECK: PASS 28/28 (PKCE RFC 7636, state, URLs 3 proveedores,
+           validadores §20, payloads exactos, merge YouTube, HTTP §28
+           incl. 204=éxito) — provider-poc-selfcheck.exe, exit 0
+CI-LOCAL:  PASS (grep gate P1 sin matches en src/cmake; secret-scan sin matches)
+TWITCH:    PASS vivo 2026-09-08 (OAuth device flow; /validate login sonokigame /
+           user 182281392 / scope channel:manage:broadcast; PATCH 204 + read-back
+           "T030 LIVE Twitch 20260908"; tokens revocados; runner redactado F-018)
+YOUTUBE:   PASS vivo 2026-09-08 (OAuth Desktop+PKCE+loopback; token con
+           secret local F-019; list mine=true F-020; broadcast Y9yFOeQw83s
+           ready; PUT 200 solo id+snippet F-021 + read-back "T030 LIVE
+           YouTube test1"; revoke access 200; runner tools/t030_live_youtube.py)
+KICK:      PASS vivo 2026-09-08 (OAuth 2.1+PKCE localhost sonokigame/128456005;
+           token tras fix Cloudflare-UA F-022; PATCH 204 + read-back en directo
+           por doble vía "T030 LIVE Kick test1" F-023; revoke 200/200;
+           runner tools/t030_live_kick.py)
+FINAL: P3 PASS — P4 desbloqueada
+```
