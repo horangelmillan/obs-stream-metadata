@@ -8,3 +8,19 @@
 6. **APIs reales:** solo cuando sea necesario; credenciales reales nunca en repo/logs; sin polling (cuota YouTube §11.9).
 
 Toda afirmación "funciona" requiere evidencia (comando + salida). "Probablemente funciona" no es válido.
+
+## P1 validada (T-013, 2026-09-08, OBS 32.2.2 x64)
+
+```text
+CONFIGURE: PASS (106.8s; OBS 32.2.2 sources + obs-deps/Qt6 2026-07-15; VS17 2022; SDK 22621)
+BUILD:     PASS (obs-stream-metadata.dll 12.800 bytes + .pdb, x64, RelWithDebInfo)
+ARTEFACTO: PASS (build_x64/RelWithDebInfo + rundir con locale/en-US.ini)
+INSTALACIÓN: PASS (staging verificado; despliegue dev vía OBS_PLUGINS_PATH/DATA_PATH, F-010)
+OBS LOAD:  PASS ×2 (módulo en memoria + `[obs-stream-metadata] plugin loaded successfully (version 0.1.0)` en log)
+UNLOAD:    PASS ×2 (`[obs-stream-metadata] plugin unloaded` al cerrar)
+RELOAD:    PASS (segundo arranque carga de nuevo; unload en caliente no existe en OBS — limitación documentada, F-012)
+ESTABILIDAD: PASS (A load, B reapertura, C ciclo unload/reload vía shutdown/startup, D cierre limpio sin crash ni sentinels)
+FINAL: P1 PASS
+```
+
+Procedimiento reproducible: ver `docs/TROUBLESHOOTING.md` (CWD, sentinels, env-vars).
