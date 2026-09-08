@@ -1,16 +1,17 @@
 /*
-obs-stream-metadata — Stream Metadata dock PoC (T-020)
-Contenido mínimo del dock nativo. Sin red, sin cuentas, sin OAuth.
+obs-stream-metadata — Stream Metadata dock (T-031 MVP).
+Hosts the product MetadataDock widget. Lifecycle/ownership unchanged
+from the P2 PoC (F-013): OBS owns the widget, never delete it here.
 */
 
 #include "dock-poc.h"
+
+#include "metadata_dock.h"
 
 #include <obs-frontend-api.h>
 #include <plugin-support.h>
 
 #include <QDockWidget>
-#include <QLabel>
-#include <QVBoxLayout>
 #include <QWidget>
 
 /* Identificador estable del dock (no traducible). OBS persiste la
@@ -30,17 +31,7 @@ bool stream_metadata_dock_create(void)
 		return true;
 	}
 
-	QWidget *widget = new QWidget();
-	QVBoxLayout *layout = new QVBoxLayout(widget);
-
-	QLabel *title = new QLabel("Stream Metadata", widget);
-	QLabel *subtitle = new QLabel("Dock PoC", widget);
-	QLabel *status = new QLabel("OBS 32.2.2\nFrontend API OK", widget);
-
-	layout->addWidget(title);
-	layout->addWidget(subtitle);
-	layout->addWidget(status);
-	widget->setLayout(layout);
+	QWidget *widget = new MetadataDock();
 
 	if (!obs_frontend_add_dock_by_id(DOCK_ID, DOCK_TITLE, widget)) {
 		obs_log(LOG_WARNING, "dock registration failed, dropping widget");
@@ -49,8 +40,7 @@ bool stream_metadata_dock_create(void)
 	}
 
 	dock_widget = widget;
-	const QList<QLabel *> labels = widget->findChildren<QLabel *>();
-	obs_log(LOG_INFO, "dock created (%d labels)", labels.size());
+	obs_log(LOG_INFO, "dock created (metadata mvp)");
 
 	/* PoC: mostrar el dock al arrancar. El layout guardado de OBS
 	 * (restoreState) se aplica DESPUÉS de cargar módulos, así que la
