@@ -1,8 +1,8 @@
 # T-030 — PoCs OAuth + título por proveedor (P3)
 
-> Estado: **PARTIAL** — lógica offline verificada (selfcheck 28/28);
-> verificación viva (OAuth real + título visible en plataforma) pendiente
-> del operador con cuentas propias. No avanzar a P4 hasta completarla.
+> Estado: **PASS** — lógica offline verificada (selfcheck 28/28) +
+> verificación viva de los tres proveedores (OAuth real + título real +
+> read-back) completada el 2026-09-08. P3 cerrada; P4 (T-031) desbloqueada.
 
 ## 1. Qué demuestra esta PoC y qué no
 
@@ -26,13 +26,13 @@ No (va en P4/P5 o requiere cuentas del operador):
 |---|---|---|---|
 | OAuth | 2.0 **Device Code Flow** (cliente público, sin secret en el binario) o Authorization Code (exige secret en servidor) | 2.0 **installed-app** + PKCE, cliente tipo **Desktop app** (sin secret) | 2.1 Authorization Code + PKCE S256, `state` obligatorio |
 | Autorizar | `POST https://id.twitch.tv/oauth2/device` → `device_code` + `user_code` + `verification_uri` (`twitch.tv/activate`) | Navegador del sistema → `https://accounts.google.com/o/oauth2/v2/auth` | Navegador del sistema → `GET https://id.kick.com/oauth/authorize` |
-| Token | `POST https://id.twitch.tv/oauth2/token` (`grant_type` device) | `POST https://oauth2.googleapis.com/token` (`authorization_code` + `code_verifier`) | `POST https://id.kick.com/oauth/token` (`authorization_code` + `code_verifier` **+ secret**) |
+| Token | `POST https://id.twitch.tv/oauth2/token` (`grant_type` device) | `POST https://oauth2.googleapis.com/token` (`authorization_code` + `code_verifier` **+ secret local**: Google lo exige incluso en Desktop, F-019) | `POST https://id.kick.com/oauth/token` (`authorization_code` + `code_verifier` **+ secret**) con cabeceras de navegador (Cloudflare 1010 bloquea urllib, F-022) |
 | Scope MVP | `channel:manage:broadcast` (único) | `https://www.googleapis.com/auth/youtube.force-ssl` (único) | `channel:write` (+ `channel:read` solo si hace falta identidad) |
 | Redirect | N/A en device flow (sin callback) | loopback `http://127.0.0.1:<puerto>` (listener aleatorio) | `http://localhost/...` (**no** `127.0.0.1`: bug NextJS, ver F-017) |
 | Refresh | refresh de **un solo uso**, expira a 30 días inactivo; access ~4 h | refresh de larga vida (guardarlo; límites por cliente/usuario) | `POST .../oauth/token` con `grant_type` refresh |
 | Validar | `GET https://id.twitch.tv/oauth2/validate` (tras cada sesión) | campo `scope` en la respuesta del token | `POST https://id.kick.com/oauth/token/introspect` (Bearer) |
 | Revocar | `POST https://id.twitch.tv/oauth2/revoke` | `POST https://oauth2.googleapis.com/revoke` | `POST https://id.kick.com/oauth/revoke` |
-| Título | `PATCH https://api.twitch.tv/helix/channels?broadcaster_id=<id>` + `Client-Id` + Bearer, `{"title":"..."}` (≤140). `broadcaster_id` = usuario del token | `PUT https://www.googleapis.com/youtube/v3/liveBroadcasts?part=snippet` con recurso **completo** (GET previo + fusión, F-016). Título 1–100, desc ≤5000 | `PATCH https://api.kick.com/public/v1/channels`, `{"stream_title":"..."}`. `204` = éxito (sin body). Límite: el que diga el servidor |
+| Título | `PATCH https://api.twitch.tv/helix/channels?broadcaster_id=<id>` + `Client-Id` + Bearer, `{"title":"..."}` (≤140). `broadcaster_id` = usuario del token | `PUT https://www.googleapis.com/youtube/v3/liveBroadcasts?part=snippet` con `{"id","snippet"}` (snippet completo del GET previo + título sustituido; **sin** `contentDetails`: da 400 `unexpectedPart`, F-021). Listar con `mine=true` solo (filtros excluyentes, F-020). Título 1–100, desc ≤5000 | `PATCH https://api.kick.com/public/v1/channels`, `{"stream_title":"..."}`. `204` = éxito (sin body). Verificar **en directo**: en offline el 204 aplica pero el título no es legible hasta el directo (F-023); read-back por doble vía (`GET channels` + `GET users/livestreams`). Límite: el que diga el servidor |
 | Descripción | NO equivalente (F-001) | SÍ (`snippet.description`) | NO equivalente (`channel_description` = canal, F-003) |
 
 Fuentes (consultadas 2026-09-08): Twitch `dev.twitch.tv/docs/authentication/getting-tokens-oauth`
@@ -48,7 +48,12 @@ errores `invalidTitle/invalidDescription/liveBroadcastNotFound/...`).
 - **Twitch:** el Authorization Code exige secret → en un plugin de
   escritorio el secret embebido no es seguro. PoC usa **Device Flow**
   (cliente público, sin secret). F-015.
-- **YouTube:** cliente Desktop no necesita secret. Sin implicación.
+- **YouTube:** Google exige `client_secret` en el intercambio incluso
+  para clientes Desktop (F-019). Para app instalada el secret no es
+  confidencial (extensión del ID); la PoC lo pide solo local
+  (`--client-secret` / env / pregunta oculta). P5 debe decidir custodia
+  (app registrada por el usuario o intermediario); no embeber un secret
+  compartido.
 - **Kick:** el token endpoint exige `client_secret` incluso con PKCE.
   Un plugin desktop no puede custodiarlo → documentado como riesgo
   abierto: o app registrada por el usuario (secret local suyo) o
@@ -94,10 +99,18 @@ Twitch:  OAuth PASS (device flow, login sonokigame, user 182281392, scope ok)
          title-update PASS (PATCH 204 + read-back "T030 LIVE Twitch 20260908")
          verificación externa PASS (GET read-back; web pendiente del operador)
          tokens revocados tras la prueba. Estado: PASS (2026-09-08).
-YouTube: OAuth(manual pendiente)  token  PEND  broadcast-id PEND
-         title-update PEND  verificación externa PEND  errores PEND
-Kick:    OAuth(manual pendiente)  token  PEND  channel PEND  204 PEND
-         verificación externa PEND  errores PEND
+YouTube: OAuth PASS (installed-app + PKCE + loopback, cuenta sonokigame)
+         token PASS (access + refresh; secret Desktop local, F-019)
+         broadcast PASS (list mine=true solo, F-020; elegido Y9yFOeQw83s ready)
+         title-update PASS (PUT 200 solo id+snippet, F-021; "T030 LIVE YouTube test1")
+         read-back PASS (coincide; revoke access 200, refresh 400 best-effort)
+         Estado: PASS (2026-09-08). Restore del título original: pendiente del operador.
+Kick:    OAuth PASS (2.1 + PKCE + localhost, slug sonokigame, user 128456005)
+         token PASS (access+refresh 48 chars, 7200s, UA navegador por Cloudflare 1010, F-022)
+         PATCH PASS (204 "T030 LIVE Kick test1")
+         read-back PASS en directo (channels + users/livestreams coinciden;
+         en offline el 204 aplica pero no es legible, F-023)
+         revoke access+refresh 200. Estado: PASS (2026-09-08).
 Lógica offline (URLs/PKCE/validadores/payloads/HTTP): PASS 28/28
-P3 = PARTIAL. No avanzar a P4 hasta tener los tres PASS vivos.
+P3 = PASS. P4 (T-031) desbloqueada.
 ```

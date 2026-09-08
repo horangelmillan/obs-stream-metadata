@@ -59,6 +59,7 @@ y cierra con PR (CI verde + aprobación).
 - **Dependencias:** P2. **Riesgos:** selección de broadcast YouTube (F-004, el mayor riesgo del proyecto); redirect URIs `localhost` en Kick (`AGENTS.md` §14.9); cuota YouTube (sin polling).
 - **Entrada:** dock carga. **Salida:** título cambiado y verificado en cada plataforma + descripción en YouTube.
 - **Validación:** verificación en web de cada plataforma; tokens de prueba nunca en repo/logs.
+- **Resultado T-030 (2026-09-08):** P3 PASS — triple LIVE PASS con read-back (Twitch device flow; YouTube Desktop+PKCE, `mine` solo, PUT `id+snippet`; Kick PKCE+localhost, 204, read-back en directo por doble vía). Findings F-019–F-024. Descripción YouTube queda para P4 (solo se validó título, sin regresión).
 
 ## P4 — Unified Dock (UI mínima real)
 

@@ -51,7 +51,13 @@ CI-LOCAL:  PASS (grep gate P1 sin matches en src/cmake; secret-scan sin matches)
 TWITCH:    PASS vivo 2026-09-08 (OAuth device flow; /validate login sonokigame /
            user 182281392 / scope channel:manage:broadcast; PATCH 204 + read-back
            "T030 LIVE Twitch 20260908"; tokens revocados; runner redactado F-018)
-YOUTUBE:   PENDING (operador) — requiere cliente Desktop + broadcast existente
-KICK:      PENDING (operador) — requiere app con redirect localhost + secret local
-FINAL: P3 PARTIAL — no avanzar a P4
+YOUTUBE:   PASS vivo 2026-09-08 (OAuth Desktop+PKCE+loopback; token con
+           secret local F-019; list mine=true F-020; broadcast Y9yFOeQw83s
+           ready; PUT 200 solo id+snippet F-021 + read-back "T030 LIVE
+           YouTube test1"; revoke access 200; runner tools/t030_live_youtube.py)
+KICK:      PASS vivo 2026-09-08 (OAuth 2.1+PKCE localhost sonokigame/128456005;
+           token tras fix Cloudflare-UA F-022; PATCH 204 + read-back en directo
+           por doble vía "T030 LIVE Kick test1" F-023; revoke 200/200;
+           runner tools/t030_live_kick.py)
+FINAL: P3 PASS — P4 desbloqueada
 ```
