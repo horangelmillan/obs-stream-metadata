@@ -9,7 +9,7 @@ Estados: pendiente / en-progreso / bloqueada / hecha / deuda / investigación / 
 | T-002 | en-progreso | 0 | Informe final 13 puntos Phase 0 | informe entregado al usuario | — |
 | T-010 | hecha | 1 | Definir fases 1-8 reales (alcance OBS/Qt/OAuth) | `PHASES.md` actualizado + ADR | F-001 |
 | T-011 | hecha | 1 | Confirmar toolchain Windows (VS2022/CMake3.28+/Qt6/OBS SDK) | evidencia versiones | F-002 |
-| T-012 | pendiente | 1 | Instalar toolchain según ADR-005 + compilar template de referencia | build template ok local | ADR-005 |
+| T-012 | hecha | 1 | Instalar toolchain según ADR-005 + validar (build template en P1) | VS17.14/MSVC19.44/ATL/SDK22621/CMake3.31.6/Git2.49.0 verificados; Qt no manual; configure CMake ok | ADR-005 |
 | T-020 | futuro | 2 | PoC dock Qt6 mínimo (botón, sin OAuth) | plugin carga en OBS 32.2.2 | AGENTS §5-7 |
 | T-030 | futuro | 3 | PoCs OAuth + título por proveedor (Twitch/YouTube/Kick) + desc YouTube | cambios verificados en plataformas | AGENTS §10-14 |
 | T-031 | futuro | 4 | Dock unificado: título/desc + apply por plataforma + resultado independiente | matriz AGENTS §19 en verde | F-001, F-004 |

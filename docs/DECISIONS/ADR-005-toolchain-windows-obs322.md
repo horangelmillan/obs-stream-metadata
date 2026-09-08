@@ -1,6 +1,6 @@
 # ADR-005 — Toolchain Windows fijado para el plugin OBS (target 32.2.2)
 
-- **Fecha:** 2026-09-08 · **Tarea:** T-011 · **Estado:** decidido (instalación pendiente, tarea posterior).
+- **Fecha:** 2026-09-08 · **Tarea:** T-011 (decisión) / T-012 (instalación) · **Estado:** decidido e instalado (verificado 2026-09-08, F-008).
 - **Problema:** fijar un entorno reproducible para compilar un plugin nativo OBS en Windows sin incompatibilidades binarias (especialmente Qt).
 
 ## Decisión
@@ -22,12 +22,19 @@
 - Pero el PoC debe compilarse y probarse contra el OBS **instalado y actual** (32.2.2): elimina riesgo de skew de versiones durante las pruebas reales (T-020/T-030) y coincide con `AGENTS.md` §34.
 - Fijar target moderno concreto no impide declarar compatibilidad 30.0+ más adelante, cuando haya CI que lo verifique.
 
-## Estado local verificado (2026-09-08, esta máquina)
+## Estado local verificado (2026-09-08, esta máquina — T-012)
 
-- OBS 32.2.2 x64 instalado (`C:\Program Files\obs-studio`) con Qt 6.11.1 embebido.
-- **Ausente en PATH:** `cmake`, `msbuild`, `qmake`/`qmake6`; sin `C:\Program Files\Microsoft Visual Studio`. Confirma F-002: toolchain pendiente de instalar.
+- OBS 32.2.2 x64 instalado (`C:\Program Files\obs-studio`) con Qt 6.11.1 embebido (`Qt6Core.dll` 6.11.1.0 + Gui/Network/Svg/Widgets/Xml).
+- **Instalado en T-012** (vía `winget`, procedimiento en `TROUBLESHOOTING.md`):
+  - Visual Studio 2022 Community **17.14.37614.0** (`C:\Program Files\Microsoft Visual Studio\2022\Community`), workload C++ Desktop + ATL + SDK 22621 + CMake tools.
+  - MSVC **19.44.35228** (toolset 14.44.35207, `Hostx64\x64\cl.exe`); MSBuild 17.14.51.
+  - **ATL:** `VC\Tools\MSVC\14.44.35207\atlmfc\include\atlbase.h` presente.
+  - Windows SDK: **`10.0.22621.0`** presente (además 10.0.26100.0, traído por VS; CMake auto-selecciona el más nuevo si no se fija `CMAKE_SYSTEM_VERSION`).
+  - CMake **3.31.6-msvc6** (bundled VS; sin instalación separada, según wiki template: el CMake integrado hace opcional la instalación aparte). Acepta el rango del template `cmake_minimum_required(VERSION 3.28...3.30)` — configure de prueba ok con generador "Visual Studio 17 2022".
+  - Git for Windows **2.49.0.windows.1** (preexistente).
+- **Qt NO instalado manualmente:** sin `C:\Qt`, sin `qmake` en PATH (verificado). Lo proveerá el bootstrap del template (obs-deps prebuilt Qt6) en P1.
 
-## Qué instalar (tarea posterior, NO esta sesión)
+## Qué instalar (ejecutado en T-012, 2026-09-08 — NO repetir sin motivo)
 
 1. Visual Studio 2022 Community (workload C++ Desktop + ATL + Windows SDK 10.0.22621 o superior compatible).
 2. CMake ≥ 3.28 (3.30.5 recomendado; el propio VS trae soporte CMake integrado como alternativa).
