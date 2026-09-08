@@ -24,3 +24,16 @@ FINAL: P1 PASS
 ```
 
 Procedimiento reproducible: ver `docs/TROUBLESHOOTING.md` (CWD, sentinels, env-vars).
+
+## P3 parcial (T-030, 2026-09-08, rama `feat/t-030-poc-providers`)
+
+```text
+CONFIGURE: PASS (preset windows-x64, 5.2s incremental; frontend+Qt ON)
+BUILD:     PASS (plugin .dll + provider-poc.lib, RelWithDebInfo, 0 errores)
+SELFCHECK: PASS 28/28 (PKCE RFC 7636, state, URLs 3 proveedores,
+           validadores §20, payloads exactos, merge YouTube, HTTP §28
+           incl. 204=éxito) — provider-poc-selfcheck.exe, exit 0
+CI-LOCAL:  PASS (grep gate P1 sin matches en src/cmake; secret-scan sin matches)
+LIVE:      PENDING (requiere apps del operador + consentimiento; §5 T030-POC.md)
+FINAL: P3 PARTIAL — no avanzar a P4
+```

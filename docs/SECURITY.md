@@ -6,3 +6,4 @@
 - Datos de prueba: ficticios y marcados como tales. Logs con IDs enmascarados.
 - Desconexión por proveedor elimina tokens/identidad local; evaluar endpoint de revocación (AGENTS §29).
 - Incidente: rotar credencial, `revert` del commit, registrar en FINDINGS.
+- PoC T-030: tokens solo en memoria + intercambio manual del operador; `tools/t030_oauth_callback.py` no escribe disco ni logs (muestra el code una vez por consola local para el intercambio inmediato). Sin secret embebido: Twitch usa device flow (F-015); Kick deja abierto el problema del secret de escritorio (F-017, resolver en P5).
