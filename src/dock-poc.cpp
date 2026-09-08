@@ -9,9 +9,12 @@ from the P2 PoC (F-013): OBS owns the widget, never delete it here.
 #include "metadata_dock.h"
 
 #include <obs-frontend-api.h>
+#include <obs-module.h>
 #include <plugin-support.h>
 
+#include <QCoreApplication>
 #include <QDockWidget>
+#include <QSslSocket>
 #include <QWidget>
 
 /* Identificador estable del dock (no traducible). OBS persiste la
@@ -32,6 +35,19 @@ bool stream_metadata_dock_create(void)
 	}
 
 	QWidget *widget = new MetadataDock();
+
+	/* OBS ships no Qt TLS backend (no tls/ plugin dir in its Qt
+	 * runtime): HTTPS from QNetworkAccessManager fails without it.
+	 * Our install carries qschannelbackend.dll under our data dir
+	 * (F-027); appending it is enough, QSslSocket resolves lazily. */
+	const char *module_data =
+		obs_get_module_data_path(obs_current_module());
+	if (module_data) {
+		QCoreApplication::addLibraryPath(
+			QString::fromUtf8(module_data));
+	}
+	obs_log(LOG_INFO, "tls backend ready: %s",
+		QSslSocket::supportsSsl() ? "yes" : "no");
 
 	if (!obs_frontend_add_dock_by_id(DOCK_ID, DOCK_TITLE, widget)) {
 		obs_log(LOG_WARNING, "dock registration failed, dropping widget");

@@ -71,7 +71,11 @@ $env:STREAM_META_YOUTUBE_CLIENT_SECRET = '<secret>'
 $env:STREAM_META_KICK_CLIENT_ID = '<id>'
 $env:STREAM_META_KICK_CLIENT_SECRET = '<secret>'
 $env:OBS_PLUGINS_PATH = '<staging>\obs-stream-metadata\bin\64bit'
-$env:OBS_PLUGINS_DATA_PATH = '<staging>\obs-stream-metadata\data'
+# DATA_PATH es la BASE: OBS antepone /%module% (OBSBasic.cpp:136-139, F-027),
+# asi que el contenido de <staging>\obs-stream-metadata\data\ debe copiarse a
+# <base>\obs-stream-metadata\ (una vez por staging):
+# Copy-Item -Recurse '<staging>\obs-stream-metadata\data\*' '<base>\obs-stream-metadata\'
+$env:OBS_PLUGINS_DATA_PATH = '<base>'
 Start-Process 'C:\Program Files\obs-studio\bin\64bit\obs64.exe' -WorkingDirectory 'C:\Program Files\obs-studio\bin\64bit'
 ```
 

@@ -156,6 +156,9 @@ private:
 	void startConnectBusy(meta::Platform p);
 	void finishConnectOk(meta::Platform p, const QString &display);
 	void finishConnectError(meta::Platform p, const QString &msg);
+	// Connect-phase HTTP error: user message + redacted log with code.
+	void connectHttpError(meta::Platform p, const char *step, int http,
+			      bool netFail);
 	void startApplyNext();
 	void finishPlatform(meta::Platform p, bool ok, const QString &msg);
 	void finishApply();

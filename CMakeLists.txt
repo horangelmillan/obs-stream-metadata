@@ -46,4 +46,24 @@ if(ENABLE_QT)
   target_include_directories(metadata-selfcheck PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 endif()
 
+if(WIN32 AND ENABLE_QT)
+  # OBS's own Qt runtime ships no TLS backend plugin: HTTPS from the dock
+  # fails without it (F-027). Bundle Schannel's backend from our pinned
+  # obs-deps Qt next to our data dir; the dock adds it via addLibraryPath.
+  get_target_property(_qt_core_loc Qt6::Core IMPORTED_LOCATION_RELEASE)
+  if(NOT _qt_core_loc)
+    get_target_property(_qt_core_loc Qt6::Core IMPORTED_LOCATION)
+  endif()
+  if(_qt_core_loc)
+    get_filename_component(_qt_bin "${_qt_core_loc}" DIRECTORY)
+    set(_qt_tls_dll "${_qt_bin}/../plugins/tls/qschannelbackend.dll")
+    if(EXISTS "${_qt_tls_dll}")
+      install(FILES "${_qt_tls_dll}" DESTINATION "${CMAKE_PROJECT_NAME}/data/tls")
+      message(STATUS "Bundling Qt TLS backend: ${_qt_tls_dll}")
+    else()
+      message(WARNING "Qt TLS backend not found at ${_qt_tls_dll}, HTTPS will fail at runtime")
+    endif()
+  endif()
+endif()
+
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})

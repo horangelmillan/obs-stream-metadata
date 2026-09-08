@@ -330,6 +330,23 @@ void MetadataDock::finishConnectError(meta::Platform p, const QString &msg)
 	obs_log(LOG_WARNING, "oauth failed: %s", meta::platformName(p));
 }
 
+void MetadataDock::connectHttpError(meta::Platform p, const char *step,
+				    int http, bool netFail)
+{
+	obs_log(LOG_WARNING, "connect %s %s http %d",
+		meta::platformName(p), step, http);
+	if (netFail || http == 0)
+		finishConnectError(p, tr("Could not reach %1 (network).")
+					  .arg(meta::platformName(p)));
+	else if (http == 400)
+		finishConnectError(p, tr("%1 rejected the request (check "
+					 "client ID / secret / redirect).")
+					  .arg(meta::platformName(p)));
+	else
+		finishConnectError(p, meta::userMessage(
+					  meta::classifyStatus(http), p));
+}
+
 // --- connect: Twitch device flow (no secret, F-015) --------------------
 
 void MetadataDock::onConnectTwitch()
@@ -788,7 +805,7 @@ void MetadataDock::onReply(QNetworkReply *reply)
 
 	case Op::TwDevice: {
 		if (netFail || http != 200) {
-			fail(P::Twitch, tr("Could not reach Twitch."));
+			connectHttpError(P::Twitch, "device", http, netFail);
 			return;
 		}
 		const QJsonObject o = replyJson(reply);
@@ -883,7 +900,8 @@ void MetadataDock::onReply(QNetworkReply *reply)
 
 	case Op::YtExchange: {
 		if (netFail || http != 200) {
-			fail(P::YouTube, tr("Token exchange failed."));
+			connectHttpError(P::YouTube, "exchange", http,
+					 netFail);
 			return;
 		}
 		const QJsonObject o = replyJson(reply);
@@ -927,7 +945,7 @@ void MetadataDock::onReply(QNetworkReply *reply)
 
 	case Op::KkExchange: {
 		if (netFail || http != 200) {
-			fail(P::Kick, tr("Token exchange failed."));
+			connectHttpError(P::Kick, "exchange", http, netFail);
 			return;
 		}
 		const QJsonObject o = replyJson(reply);
