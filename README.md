@@ -34,4 +34,9 @@ docs/                harness: STATE, WORKFLOW, TOOLS, RESEARCH, GIT, BACKLOG,
 
 ## Estado actual
 
-Ver `docs/STATE.md`. Próximo paso: Phase 1 — esqueleto plugin OBS (pendiente de definir tras Phase 0).
+Ver `docs/STATE.md` (fuente de verdad).
+
+- **Phase 0 cerrada:** harness agente (docs, CI, Git) sin código funcional.
+- **Fases P0–P7 definidas** (`docs/PHASES.md`, ADR-006), orden risk-first.
+- **Toolchain instalado y validado (T-012):** VS2022 17.14 + MSVC 19.44 + ATL + SDK 10.0.22621 + CMake 3.31.6 + Git 2.49.0; target OBS 32.2.2 + Qt 6.11.1; sin Qt manual (ADR-005).
+- **Próximo paso:** P1 — compilar el template oficial y cargarlo en OBS 32.2.2 (sin código propio todavía).
