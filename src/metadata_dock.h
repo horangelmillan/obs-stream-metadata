@@ -107,6 +107,7 @@ private:
 	Account kk_;
 	QTcpServer *callbackServer_ = nullptr;
 	meta::Platform callbackFor_ = meta::Platform::YouTube;
+	bool callbackDone_ = false; // first callback wins (favicon guard)
 	Op pending_ = Op::None;
 	bool applyAfterList_ = false;
 	bool retried_ = false; // one refresh retry per platform update

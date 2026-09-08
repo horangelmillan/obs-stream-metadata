@@ -390,7 +390,10 @@ bool MetadataDock::listenCallback(quint16 &port, bool kick)
 		&MetadataDock::onCallbackConnection);
 	QHostAddress host = kick ? QHostAddress::LocalHost
 				 : QHostAddress(QStringLiteral("127.0.0.1"));
-	if (!callbackServer_->listen(host, 0))
+	// Kick requires the EXACT registered redirect (F-017), so the
+	// documented fixed port is used. Loopback ports need no
+	// pre-registration for Google installed apps: ephemeral is fine.
+	if (!callbackServer_->listen(host, kick ? port : 0))
 		return false;
 	port = callbackServer_->serverPort();
 	redirect_ = QStringLiteral("http://%1:%2%3")
@@ -410,8 +413,8 @@ void MetadataDock::onCallbackConnection()
 	if (!sock)
 		return;
 	connect(sock, &QTcpSocket::readyRead, this, [this, sock]() {
-		const QByteArray req = sock->readAll();
-		handleCallbackData(req);
+		if (!callbackDone_)
+			handleCallbackData(sock->readAll());
 		const QByteArray body = "Authorized. You can close this tab.";
 		sock->write("HTTP/1.1 200 OK\r\nContent-Type: "
 			    "text/plain\r\nConnection: close\r\n\r\n" +
@@ -427,8 +430,15 @@ void MetadataDock::handleCallbackData(const QByteArray &request)
 		QString::fromLatin1(request.left(eol < 0 ? 256 : eol));
 	if (!line.startsWith(QStringLiteral("GET ")))
 		return;
-	const QUrl url(QStringLiteral("http://x") +
-		       line.section(QLatin1Char(' '), 1, 1));
+	const QString target = line.section(QLatin1Char(' '), 1, 1);
+	const QString path = target.left(target.indexOf(QLatin1Char('?')));
+	// Ignore anything but the callback path itself (e.g. /favicon.ico).
+	const QString expected = callbackFor_ == meta::Platform::Kick
+					 ? QStringLiteral("/cb")
+					 : QStringLiteral("/");
+	if (path != expected)
+		return;
+	const QUrl url(QStringLiteral("http://x") + target);
 	const QUrlQuery q(url);
 	if (q.queryItemValue(QStringLiteral("state")) !=
 	    account(callbackFor_).state) {
@@ -446,6 +456,7 @@ void MetadataDock::handleCallbackData(const QByteArray &request)
 				   tr("No authorization code received."));
 		return;
 	}
+	callbackDone_ = true; // first callback wins; ignore later requests
 	if (callbackFor_ == meta::Platform::YouTube)
 		startYouTubeExchange(code);
 	else
@@ -467,6 +478,7 @@ void MetadataDock::onConnectYouTube()
 	}
 	quint16 port = 0;
 	callbackFor_ = meta::Platform::YouTube;
+	callbackDone_ = false;
 	if (!listenCallback(port, false)) {
 		finishConnectError(meta::Platform::YouTube,
 				   tr("Could not open loopback callback."));
@@ -537,11 +549,14 @@ void MetadataDock::onConnectKick()
 				      "locally first."));
 		return;
 	}
-	quint16 port = 3000;
+	quint16 port = 3000; // must match the registered redirect (F-017)
 	callbackFor_ = meta::Platform::Kick;
+	callbackDone_ = false;
 	if (!listenCallback(port, true)) {
 		finishConnectError(meta::Platform::Kick,
-				   tr("Could not open localhost callback."));
+				   tr("Port localhost:3000 is busy or blocked. "
+				      "Free it: the redirect must match the "
+				      "registered one."));
 		return;
 	}
 	a.clientId = id;
