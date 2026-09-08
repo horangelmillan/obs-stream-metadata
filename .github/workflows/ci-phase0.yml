@@ -1,0 +1,46 @@
+name: ci-phase0
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  phase0-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Required files exist
+        run: |
+          test -f README.md
+          test -f AGENTS.md
+          test -f .gitignore
+          test -f docs/STATE.md
+          test -f docs/WORKFLOW.md
+          test -f docs/TOOLS.md
+          test -f docs/RESEARCH.md
+          test -f docs/GIT.md
+          test -f docs/BACKLOG.md
+          test -f docs/FINDINGS.md
+          test -f docs/PHASES.md
+          test -f docs/VALIDATION.md
+          test -f docs/SECURITY.md
+          test -f docs/TROUBLESHOOTING.md
+
+      - name: No functional code yet (Phase 0 gate)
+        run: |
+          test ! -e src
+          test ! -e CMakeLists.txt
+
+      # Escanea valores con pinta de secreto (asignaciones, prefijos conocidos,
+      # claves PEM), no menciones documentales de nombres como `access_token`.
+      - name: Secret scan (values, not doc words)
+        run: |
+          PAT="(gh[pousr]_[A-Za-z0-9]{16,}|sk-[A-Za-z0-9]{8,}|AIza[A-Za-z0-9_-]{10,}|BEGIN [A-Z ]*PRIVATE KEY|(client_secret|refresh_token|access_token)[[:space:]]*=[[:space:]]*[\"A-Za-z0-9_.-]{8,})"
+          if grep -rEI "$PAT" --exclude-dir=.git . ; then echo "possible secret value in tree"; exit 1; fi
+          echo "secret scan ok"
