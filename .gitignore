@@ -1,0 +1,66 @@
+# Build / CMake
+build/
+out/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.ninja
+.ninja_*
+
+# Compiled / OBS plugin outputs
+*.o
+*.obj
+*.lib
+*.dll
+*.so
+*.dylib
+*.exe
+*.pdb
+*.ilk
+*.exp
+*.aps
+*.user
+*.suo
+*.sln.docstates
+
+# Visual Studio / VSCode (local)
+.vs/
+x64/
+x86/
+Release/
+Debug/
+.vscode/*
+
+# Qt
+*.pro.user
+*.qmlc
+*.jsc
+moc_*
+ui_*
+qrc_*
+
+# OBS local
+obs-studio/
+obs-build/
+
+# Secrets — nunca commitear (ver docs/SECURITY.md)
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*token*.json
+*secret*.json
+credentials.json
+client_secret*.json
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs
+*.log
+logs/
