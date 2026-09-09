@@ -13,7 +13,8 @@ import os
 import re
 
 from backend.kernel import Account
-from backend.ports import RateLimiter, SecretStore, SessionStore, TokenPair, TokenStore
+from backend.ports import (Installation, InstallationStore, RateLimiter, SecretStore,
+                           SessionStore, TokenPair, TokenStore)
 
 
 class EnvSecretStore(SecretStore):
@@ -75,6 +76,53 @@ class AllowAllRateLimiter(RateLimiter):
 
     def allow(self, key: str) -> bool:
         return True
+
+
+class FixedWindowRateLimiter(RateLimiter):
+    """Ventana fija en memoria (single-instance). Producción distribuida:
+    mismo port contra store compartido (pendiente, ver ADR-010)."""
+
+    def __init__(self, limit: int, window_s: int, clock=None) -> None:
+        self._limit = limit
+        self._window = window_s
+        self._clock = clock or __import__("time").time
+        self._hits: dict[str, list[float]] = {}
+
+    def allow(self, key: str) -> bool:
+        now = self._clock()
+        cutoff = now - self._window
+        hits = [t for t in self._hits.get(key, []) if t > cutoff]
+        if len(hits) >= self._limit:
+            self._hits[key] = hits
+            return False
+        hits.append(now)
+        self._hits[key] = hits
+        return True
+
+
+class InMemoryInstallationStore(InstallationStore):
+    """Development/tests: secreto en memoria clara. Producción: cifrado en
+    reposo (el secreto solo lo usa la capa auth para verificar HMAC)."""
+
+    DEVELOPMENT_ONLY = True
+
+    def __init__(self) -> None:
+        self._data: dict[str, tuple[Installation, str]] = {}
+
+    def create(self, installation: Installation, secret: str) -> None:
+        self._data[installation.id] = (installation, secret)
+
+    def load(self, installation_id: str) -> tuple[Installation, str] | None:
+        return self._data.get(installation_id)
+
+    def revoke(self, installation_id: str) -> None:
+        found = self._data.get(installation_id)
+        if found is not None:
+            installation, secret = found
+            self._data[installation_id] = (
+                Installation(id=installation.id,
+                             created_at=installation.created_at,
+                             revoked=True), secret)
 
 
 # --- Redacción para logs/respuestas (guardrail, no única defensa) ---

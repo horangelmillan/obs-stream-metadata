@@ -1,9 +1,15 @@
-"""HTTP/API base stdlib (T-043 §7-8): health/readiness/version + errores JSON.
+"""HTTP/API stdlib (T-043 base + T-044 auth): health/ready/version + /auth/*.
 
-Convenciones: requestId por request (resp. header X-Request-Id), cuerpos JSON
-con límite, validación básica, sin stack traces ni secretos en respuestas.
-Rutas no públicas exigen sesión (401); la validación real llega en T-044,
-aquí el gate existe como frontera documentada.
+Convenciones: requestId por request (header X-Request-Id), cuerpos JSON con
+límite, validación, errores seguros sin secretos ni trazas. Rutas no públicas
+exigen sesión vigente (401); /auth/* rate-limitado por IP/instalación.
+Contrato T-044 (ver ADR-010):
+  POST /auth/bootstrap            {} -> 201 {installation_id, installation_secret}
+  POST /auth/session              {installation_id, timestamp, nonce, signature}
+                                  -> 200 {session_token, expires_in}
+  POST /auth/refresh              {session_token, ...firma} -> 200 (rotada)
+  POST /auth/revoke               {session_token} -> 200 {}
+  POST /auth/installation/revoke  {installation_id, ...firma} -> 200 {}
 """
 from __future__ import annotations
 
@@ -13,18 +19,42 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from backend import auth as auth_boundary
+from backend.auth import (AUTH_PER_INSTALL_LIMIT, AUTH_PER_INSTALL_WINDOW_S,
+                          AUTH_PER_IP_LIMIT, AUTH_PER_IP_WINDOW_S,
+                          BOOTSTRAP_GLOBAL_LIMIT, BOOTSTRAP_GLOBAL_WINDOW_S,
+                          BOOTSTRAP_PER_IP_LIMIT, BOOTSTRAP_PER_IP_WINDOW_S,
+                          AuthService)
 from backend.config import Settings
 from backend.errors import AppError, ErrorCode
 from backend.logging_setup import API_VERSION, BACKEND_NAME, BACKEND_VERSION, get_logger
-from backend.ports import RateLimiter, SessionStore
+from backend.ports import RateLimiter
+from backend.stores import FixedWindowRateLimiter, InMemoryInstallationStore
 
 
 class BackendApp:
-    def __init__(self, settings: Settings, sessions: SessionStore,
-                 limiter: RateLimiter, ready_check=None) -> None:
+    def __init__(self, settings: Settings, sessions, limiter: RateLimiter,
+                 ready_check=None, auth_service: AuthService | None = None,
+                 limiters: dict | None = None, clock=None) -> None:
         self.settings = settings
         self.sessions = sessions
         self.limiter = limiter
+        self._clock = clock or time.time
+        self.auth = auth_service or AuthService(InMemoryInstallationStore(),
+                                               sessions, clock=self._clock)
+        self.limiters = limiters or {
+            "bootstrap_ip": FixedWindowRateLimiter(BOOTSTRAP_PER_IP_LIMIT,
+                                                   BOOTSTRAP_PER_IP_WINDOW_S,
+                                                   clock=self._clock),
+            "bootstrap_global": FixedWindowRateLimiter(BOOTSTRAP_GLOBAL_LIMIT,
+                                                       BOOTSTRAP_GLOBAL_WINDOW_S,
+                                                       clock=self._clock),
+            "auth_install": FixedWindowRateLimiter(AUTH_PER_INSTALL_LIMIT,
+                                                   AUTH_PER_INSTALL_WINDOW_S,
+                                                   clock=self._clock),
+            "auth_ip": FixedWindowRateLimiter(AUTH_PER_IP_LIMIT,
+                                              AUTH_PER_IP_WINDOW_S,
+                                              clock=self._clock),
+        }
         self._ready_check = ready_check or (lambda: (True, "ok"))
         self.started_at = time.time()
         self.log = get_logger("http", settings.log_level)
@@ -43,12 +73,49 @@ class BackendApp:
         return code, {"ready": ok, "detail": detail if ok else "not-ready"}
 
     def check_access(self, path: str, headers) -> None:
-        """Gate de autenticación (frontera T-044): rutas no públicas → 401."""
+        """Gate: rutas no públicas exigen sesión vigente (401/401-expired)."""
         if auth_boundary.is_public(path):
             return
+        if path.startswith("/auth/"):
+            return  # /auth/* tiene su propio control por endpoint
         token = auth_boundary.extract_bearer(headers.get("Authorization", ""))
-        if not token or self.sessions.load_session(token) is None:
-            raise AppError(ErrorCode.AUTHENTICATION, "no valid session")
+        self.auth.validate_session(token or "")
+
+    def _limited(self, name: str, key: str) -> None:
+        if not self.limiters[name].allow(key):
+            raise AppError(ErrorCode.RATE_LIMITED, f"{name} limit")
+
+
+def _json_body(handler: BaseHTTPRequestHandler, limit: int) -> dict:
+    length = handler.headers.get("Content-Length")
+    if length is None:
+        raise AppError(ErrorCode.INVALID_REQUEST, "length required")
+    try:
+        size = int(length)
+    except ValueError:
+        raise AppError(ErrorCode.INVALID_REQUEST, "bad content-length")
+    if size <= 0 or size > limit:
+        raise AppError(ErrorCode.INVALID_REQUEST, "bad body size")
+    try:
+        body = json.loads(handler.rfile.read(size).decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        raise AppError(ErrorCode.INVALID_REQUEST, "body must be JSON") from None
+    if not isinstance(body, dict):
+        raise AppError(ErrorCode.INVALID_REQUEST, "body must be a JSON object")
+    return body
+
+
+def _need(body: dict, *names: str) -> None:
+    missing = [n for n in names if not isinstance(body.get(n), str) or not body[n]]
+    if missing:
+        raise AppError(ErrorCode.INVALID_REQUEST, "missing fields")
+
+
+def _need_int(body: dict, name: str) -> int:
+    value = body.get(name)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise AppError(ErrorCode.INVALID_REQUEST, f"bad {name}")
+    return value
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -66,29 +133,68 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _route_post(self, path: str, body: dict, request_id: str,
+                    client_ip: str) -> tuple[int, dict]:
+        app = self.server.app
+        if path == "/auth/bootstrap":
+            app._limited("bootstrap_ip", f"bootstrap:{client_ip}")
+            app._limited("bootstrap_global", "bootstrap:global")
+            return 201, app.auth.bootstrap()
+        if path == "/auth/session":
+            _need(body, "installation_id", "nonce", "signature")
+            ts = _need_int(body, "timestamp")
+            app._limited("auth_install", f"session:{body['installation_id']}")
+            app._limited("auth_ip", f"ip:{client_ip}")
+            return 200, app.auth.create_session(body["installation_id"], ts,
+                                                body["nonce"], body["signature"])
+        if path == "/auth/refresh":
+            _need(body, "session_token", "installation_id", "nonce", "signature")
+            ts = _need_int(body, "timestamp")
+            app._limited("auth_install", f"refresh:{body['installation_id']}")
+            app._limited("auth_ip", f"ip:{client_ip}")
+            return 200, app.auth.refresh_session(body["session_token"],
+                                                 body["installation_id"], ts,
+                                                 body["nonce"], body["signature"])
+        if path == "/auth/revoke":
+            _need(body, "session_token")
+            app.auth.revoke_session(body["session_token"])
+            return 200, {}
+        if path == "/auth/installation/revoke":
+            _need(body, "installation_id", "nonce", "signature")
+            ts = _need_int(body, "timestamp")
+            app._limited("auth_install", f"revoke:{body['installation_id']}")
+            app.auth.revoke_installation(body["installation_id"], ts,
+                                         body["nonce"], body["signature"])
+            return 200, {}
+        raise AppError(ErrorCode.INVALID_REQUEST, f"unknown path {path}")
+
     def _handle(self, method: str) -> None:
         request_id = uuid.uuid4().hex[:16]
         t0 = time.time()
         path = self.path.split("?", 1)[0].rstrip("/") or "/"
+        client_ip = self.client_address[0] if self.client_address else "unknown"
         status = 500
         try:
-            if method != "GET":
-                raise AppError(ErrorCode.INVALID_REQUEST, f"unsupported method {method}")
             if not self.server.app.limiter.allow("global"):
-                raise AppError(ErrorCode.PROVIDER_RATE_LIMITED, "rate limited")
-            self.server.app.check_access(path, self.headers)
-            if path == "/health":
-                payload, status = self.server.app.health(), 200
-            elif path == "/ready":
-                status, payload = self.server.app.ready()
-            elif path == "/version":
-                payload, status = self.server.app.version(), 200
+                raise AppError(ErrorCode.RATE_LIMITED, "global limit")
+            if method == "GET":
+                self.server.app.check_access(path, self.headers)
+                if path == "/health":
+                    payload, status = self.server.app.health(), 200
+                elif path == "/ready":
+                    status, payload = self.server.app.ready()
+                elif path == "/version":
+                    payload, status = self.server.app.version(), 200
+                else:
+                    raise AppError(ErrorCode.INVALID_REQUEST, f"unknown path {path}")
+            elif method == "POST":
+                body = _json_body(self, self.server.app.settings.body_limit_bytes)
+                status, payload = self._route_post(path, body, request_id, client_ip)
             else:
-                raise AppError(ErrorCode.INVALID_REQUEST, f"unknown path {path}")
+                raise AppError(ErrorCode.INVALID_REQUEST, f"unsupported method {method}")
             self._send(status, payload, request_id)
         except AppError as exc:
             status = exc.http_status()
-            # detail interno solo al log; la respuesta lleva mensaje seguro
             self.server.app.log.warning("request error code=%s",
                                         exc.code.value,
                                         extra={"requestId": request_id})
@@ -109,7 +215,7 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         self._handle("GET")
 
-    def do_POST(self) -> None:  # reservado: validation base ya cubierta
+    def do_POST(self) -> None:
         self._handle("POST")
 
 
