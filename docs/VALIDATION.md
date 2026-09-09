@@ -9,20 +9,32 @@
 
 Toda afirmación "funciona" requiere evidencia (comando + salida). "Probablemente funciona" no es válido.
 
-## P4 parcial (T-031, 2026-09-08, rama `feat/t-031-mvp-integration`)
+## P4 validada (T-031 PASS, 2026-09-08/09, rama `feat/t-031-mvp-integration`)
 
 ```text
-CONFIGURE: PASS (preset windows-x64 incremental, Qt6 Network resuelto vía obs-deps)
+CONFIGURE: PASS (preset windows-x64 incremental, Qt6 Network vía obs-deps)
 BUILD:     PASS (plugin .dll + metadata-selfcheck.exe, RelWithDebInfo, 0 errores)
-SELFCHECK: PASS 19/19 (metadata: validación restrictiva, payloads, 204/401/429, mensajes sin secretos)
-REGRESIÓN: PASS 28/28 (provider-poc-selfcheck intacto, PoC no tocada)
-SECRET:    PASS (gate P4 + secret-scan de valores, sin matches en src/tools/docs)
-OBS LOAD:  PASS ×2 (módulo en memoria + `dock created (metadata mvp)` + `dock shown`)
-UNLOAD:    PASS ×2 (`dock removed` + `plugin unloaded` al cerrar elegante)
-SENTINELS: PASS (vacíos tras ambos ciclos; sin crash)
-LIVE:      PENDIENTE del operador (OAuth real + título visible Twitch/YouTube/Kick
-           desde el dock; procedimiento en TROUBLESHOOTING T-031; Kick verificar en directo, F-023)
-FINAL: P4 PARTIAL — no avanzar a P5 hasta la matriz AGENTS §19 en verde
+SELFCHECK: PASS 19/19 (metadata) + 28/28 (provider-poc, regresión intacta)
+SECRET:    PASS (gate P4 + scan de valores en src/tools/docs; logs sin secretos)
+CI:        PASS (phase0-gates success en PR #9, incl. fixes)
+LIVE DOCK: PASS — T1 Twitch OAuth+PATCH+read-back web; T2 YouTube OAuth+lista
+           (Y9yFOeQw83s)+PUT título+descripción+read-back Studio (edición
+           posterior del operador explica el texto actual); T3 Kick OAuth+
+           PATCH 204+read-back dashboard (offline, regla F-023 anotada)
+MULTI:     PASS T4 (✓✓✓ + triple dashboard) — T6/T7/T8 cubiertos por T1/T2/T3
+DESC:      PASS T5 (solo YouTube; Twitch/Kick ignoran sin error)
+NEGATIVOS: PASS T9 (max 100 bloquea sin red) / T10 (5000 bloquea) /
+           T11 (sin plataforma) / T12 (sin auth) / T13 (✓✓✗ parcial) /
+           T14 (OAuth cancel → Error, sin cuelgue) / T15 (401 → refresh
+           único → Needs reconnection, sin loops)
+ASYNC:     PASS T16 (dock movible durante Apply)
+LIFECYCLE: PASS T17/T18 (ciclos elegantes, sin crash ni sentinels) +
+           persistencia de acoplamiento verificada; dock acoplado con
+           scroll (F-028), `tls backend ready: yes` en log
+FIXES LIVE: F-026 (callback first-wins + puerto Kick 3000), F-027 (TLS
+           Schannel empaquetado + connectHttpError + DATA_PATH dev),
+           F-028 (scroll + resultado=connected)
+FINAL: P4 PASS — T-031 cerrada. No avanzar a P5 en esta sesión.
 ```
 
 ## P1 validada (T-013, 2026-09-08, OBS 32.2.2 x64)

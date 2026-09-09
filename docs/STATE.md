@@ -3,7 +3,7 @@
 > Único archivo que responde: dónde estamos, qué hacemos, qué falta.
 > Actualizar en cada tarea terminada.
 
-- **Fase actual:** Phase 4 (P4) — T-031 en-progreso en rama `feat/t-031-mvp-integration` (desde `master` 88a8b72, P3 mergeada vía squash). Dock MVP implementado: `src/metadata.*` (validación/producto) + `src/metadata_dock.*` (UI + coordinator async, tokens solo en memoria) + gate CI P1→P4. Build + selfchecks + 2 ciclos OBS limpios. **Pendiente del operador: validación viva** (OAuth real + título visible por plataforma desde el dock).
+- **Fase actual:** Phase 4 (P4) — **T-031 PASS 2026-09-09** (rama `feat/t-031-mvp-integration`, PR #9 abierta sin merge). Matriz viva §19 en verde (T1–T20) + fixes F-026/F-027/F-028. Siguiente: P5 Hardening (T-032) en otra sesión; no empezar aquí (§31).
 - **Rama base:** `master` (confirmado por ADR-004; `default_branch: master`, sin branch protection, CI anclado a `master`).
 - **Repo remoto:** `horangelmillan/obs-stream-metadata` (público, GitHub-flow con PRs).
 - **Qué estamos haciendo:** T-030 (P3 PASS, 2026-09-08): investigación oficial cerrada (F-015/016/017 + `docs/T030-POC.md`); lógica offline en `poc/t030/` con selfcheck 28/28 PASS; **Twitch + YouTube + Kick LIVE PASS** (runners redactados `tools/t030_live_*.py`; YouTube: OAuth Desktop+PKCE, broadcast `Y9yFOeQw83s`, PUT id+snippet, read-back; Kick: OAuth 2.1+PKCE localhost, PATCH 204, read-back en directo por doble vía). Hallazgos nuevos F-019–F-024. **P4 (T-031) desbloqueada.** Pendiente menor del operador: restaurar título YouTube original + revocar grants Kick de las sesiones con FAIL.
@@ -13,4 +13,4 @@
 - **Restricción activa:** dock P2 en `src/` (sin OAuth/APIs/red/cuentas) + PoC de proveedores en `poc/t030/` (fuera de `src/` para no tripear el gate P1 de CI). Integración dock+proveedores, a partir de P4 (T-031).
 - **Contexto técnico:** `AGENTS.md` (válido) + ADR-005 (toolchain: OBS 32.2.2 target / ≥30.0 mín, VS17 2022, SDK 10.0.22621, CMake ≥3.28, Qt6 vía obs-deps del template) + ADR-006 / `PHASES.md` (P0-P7 risk-first).
 - **Deuda conocida:** R1/R2 cerrados en T-013 (buildspec 32.2.2 + Qt 6.11.1 exacto, ADR-007); cuota/límites y broadcast YouTube pendientes de verificación experimental en P3.
-- **Última actualización:** 2026-09-08 — T-031 implementada sin validación viva (P4 PARTIAL): dock MVP compila, selfchecks 19/19 + 28/28, secret-scan limpio, OBS 32.2.2 ×2 ciclos (created/shown/removed/unloaded, sin crash ni sentinels). Siguiente: operador ejecuta `docs/TROUBLESHOOTING.md` (T-031, env vars locales) y matriz AGENTS §19.
+- **Última actualización:** 2026-09-09 — T-031 PASS (P4 cerrada): matriz viva completa con read-back por plataforma, fixes F-026/F-027/F-028 mergeados en la rama, CI verde. PR #9 lista para revisión/merge (fuera de esta sesión).
