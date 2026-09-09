@@ -87,3 +87,28 @@ plataforma. Kick: verificar **en directo** (en offline el 204 aplica
 pero no es legible, F-023). Negativos: título 101 con YouTube
 seleccionado (bloquea antes de red), token revocado (401 → refresh o
 reconexión), plataforma sin conectar (error individual, el resto sigue).
+
+## T-032 — alta de credenciales BYO-app + persistencia DPAPI (2026-09-09)
+
+Las env vars `STREAM_META_*` ya no se leen (código `env()` eliminado).
+Alta una sola vez por plataforma, con tus propias apps:
+
+1. Twitch: consola dev → app OAuth (device flow, sin secret) → Client ID.
+   YouTube: Cloud Console → cliente **Desktop** + YouTube Data API
+   habilitada → Client ID + Client Secret. Kick: portal dev con redirect
+   `http://localhost:3000/cb` → Client ID + Client Secret.
+2. En el dock, escribe cada valor en su campo (los secrets muestran
+   puntos) y pulsa Connect por plataforma como en T-031.
+3. Al conectar, la sesión queda cifrada (DPAPI) en
+   `%APPDATA%\obs-studio\plugin_config\obs-stream-metadata\accounts.json`
+   — verifica que el fichero existe y que NO contiene tus valores en
+   claro (ábrelo con un editor: solo verás etiquetas y blobs base64).
+4. Reinicia OBS: las cuentas deben aparecer `Connected as …` sin pedir
+   nada. Disconnect revoca en el proveedor (mira `revoke <plat> http 2xx`
+   en el log) y borra el registro.
+5. 429/5xx en Apply: el resultado muestra `Retrying…` hasta 2 veces
+   (2 s, 4 s) y luego informa; jamás reintenta en bucle.
+
+Instalación del staging y reglas de CWD/cierre elegante: idénticas a
+T-031 (arriba). Si OBS está en uso, instala en un staging nuevo; el
+DLL en uso está bloqueado.

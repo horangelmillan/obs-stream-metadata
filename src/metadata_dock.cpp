@@ -1,12 +1,15 @@
 /*
 T-031: MVP dock. Qt Widgets + QNetworkAccessManager (async, no extra libs).
-Tokens/secrets: process memory only, never persisted, printed or logged.
+T-032: app credentials typed into the dock (BYO-app, ADR-008); tokens and
+secrets in memory + DPAPI-encrypted store, never plaintext/printed/logged.
 */
 
 #include "metadata_dock.h"
 
 #include <obs-frontend-api.h>
+#include <obs-module.h>
 #include <plugin-support.h>
+#include <util/bmem.h>
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -42,9 +45,9 @@ const char *kTwScope = "channel:manage:broadcast";
 const char *kYtScope = "https://www.googleapis.com/auth/youtube.force-ssl";
 const char *kKkScope = "channel:write channel:read"; // read: identity label
 
-QString env(const char *name)
+QString field(QLineEdit *edit)
 {
-	return QString::fromLocal8Bit(qgetenv(name)).trimmed();
+	return edit ? edit->text().trimmed() : QString();
 }
 
 QJsonObject replyJson(QNetworkReply *reply)
@@ -108,10 +111,31 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 	addRow(meta::Platform::YouTube, QStringLiteral("YouTube"));
 	addRow(meta::Platform::Kick, QStringLiteral("Kick"));
 
+	QLabel *credTitle =
+		new QLabel(tr("App credentials (register your own app per "
+			      "platform)"),
+			   this);
+	top->addWidget(credTitle);
+	twIdEdit_ = new QLineEdit(this);
+	twIdEdit_->setPlaceholderText(tr("Twitch Client ID"));
+	top->addWidget(twIdEdit_);
+	ytIdEdit_ = new QLineEdit(this);
+	ytIdEdit_->setPlaceholderText(tr("YouTube Client ID"));
+	top->addWidget(ytIdEdit_);
+	ytSecretEdit_ = new QLineEdit(this);
+	ytSecretEdit_->setPlaceholderText(tr("YouTube Client Secret"));
+	ytSecretEdit_->setEchoMode(QLineEdit::Password);
+	top->addWidget(ytSecretEdit_);
+	kkIdEdit_ = new QLineEdit(this);
+	kkIdEdit_->setPlaceholderText(tr("Kick Client ID"));
+	top->addWidget(kkIdEdit_);
+	kkSecretEdit_ = new QLineEdit(this);
+	kkSecretEdit_->setPlaceholderText(tr("Kick Client Secret"));
+	kkSecretEdit_->setEchoMode(QLineEdit::Password);
+	top->addWidget(kkSecretEdit_);
 	QLabel *credNote = new QLabel(
-		tr("OAuth: register one app per platform; IDs/secrets come "
-		   "from local env vars and live only in memory (never "
-		   "stored or logged)."),
+		tr("Typed once: kept in memory and stored encrypted on this "
+		   "PC (DPAPI). Never logged, never shared."),
 		this);
 	credNote->setWordWrap(true);
 	top->addWidget(credNote);
@@ -180,6 +204,22 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 	net_ = new QNetworkAccessManager(this);
 	connect(net_, &QNetworkAccessManager::finished, this,
 		&MetadataDock::onReply);
+
+	// T-032: encrypted account store (module config dir). Missing dir
+	// or DPAPI failure -> memory-only fallback, never plaintext.
+	const QString sp = storePath();
+	if (!sp.isEmpty())
+		store_ = new secure::Store(sp);
+	else
+		obs_log(LOG_WARNING, "account store unavailable, "
+				     "sessions will not survive restart");
+	loadStore();
+}
+
+MetadataDock::~MetadataDock()
+{
+	delete store_;
+	store_ = nullptr;
 }
 
 // --- helpers ----------------------------------------------------------
@@ -328,6 +368,7 @@ void MetadataDock::finishConnectOk(meta::Platform p, const QString &display)
 	setStatus(p, tr("Connected as %1").arg(display));
 	setResult(p, true, tr("connected"));
 	obs_log(LOG_INFO, "oauth connected: %s", meta::platformName(p));
+	saveStore(); // tokens survive restart (DPAPI, never plaintext)
 }
 
 void MetadataDock::finishConnectError(meta::Platform p, const QString &msg)
@@ -361,17 +402,152 @@ void MetadataDock::connectHttpError(meta::Platform p, const char *step,
 					  meta::classifyStatus(http), p));
 }
 
+// --- secure store (T-032) ------------------------------------------------
+
+QString MetadataDock::storePath()
+{
+	char *raw = obs_module_config_path("accounts.json");
+	if (!raw)
+		return QString();
+	const QString path = QString::fromUtf8(raw);
+	bfree(raw);
+	return path;
+}
+
+void MetadataDock::saveStore()
+{
+	if (!store_)
+		return;
+	secure::Data d;
+	auto fill = [](const Account &a, secure::Record &r) {
+		r.connected = a.connected && !a.access.isEmpty();
+		if (!r.connected)
+			return;
+		r.display = a.display;
+		r.broadcaster = a.broadcaster;
+		r.access = a.access;
+		r.refresh = a.refresh;
+		r.clientId = a.clientId;
+		r.secret = a.secret;
+	};
+	fill(tw_, d.twitch);
+	fill(yt_, d.youtube);
+	fill(kk_, d.kick);
+	if (!d.anyConnected()) {
+		store_->clear();
+		return;
+	}
+	if (!store_->save(d))
+		obs_log(LOG_WARNING, "account store save failed");
+}
+
+void MetadataDock::loadStore()
+{
+	if (!store_)
+		return;
+	secure::Data d;
+	if (!store_->load(d))
+		return; // fresh start: nothing persisted yet
+	auto restore = [](Account &a, const secure::Record &r) {
+		a.clear();
+		if (!r.connected)
+			return;
+		a.connected = true;
+		a.display = r.display;
+		a.broadcaster = r.broadcaster;
+		a.access = r.access;
+		a.refresh = r.refresh;
+		a.clientId = r.clientId;
+		a.secret = r.secret;
+	};
+	restore(tw_, d.twitch);
+	restore(yt_, d.youtube);
+	restore(kk_, d.kick);
+	if (tw_.connected)
+		twIdEdit_->setText(tw_.clientId);
+	if (yt_.connected) {
+		ytIdEdit_->setText(yt_.clientId);
+		ytSecretEdit_->setText(yt_.secret);
+	}
+	if (kk_.connected) {
+		kkIdEdit_->setText(kk_.clientId);
+		kkSecretEdit_->setText(kk_.secret);
+	}
+	for (meta::Platform p :
+	     {meta::Platform::Twitch, meta::Platform::YouTube,
+	      meta::Platform::Kick}) {
+		if (!account(p).connected)
+			continue;
+		setStatus(p, tr("Connected as %1").arg(account(p).display));
+		setResult(p, true, tr("connected"));
+		obs_log(LOG_INFO, "session restored: %s",
+			meta::platformName(p));
+	}
+}
+
+// --- revoke on Disconnect (T-032, best effort) ---------------------------
+
+void MetadataDock::startRevoke(meta::Platform p, const Account &snapshot)
+{
+	revokeFor_ = p;
+	revokeClientId_ = snapshot.clientId;
+	revokeQueue_.clear();
+	if (!snapshot.access.isEmpty())
+		revokeQueue_ << snapshot.access;
+	if (!snapshot.refresh.isEmpty() &&
+	    snapshot.refresh != snapshot.access)
+		revokeQueue_ << snapshot.refresh;
+	sendNextRevoke();
+}
+
+void MetadataDock::sendNextRevoke()
+{
+	if (revokeQueue_.isEmpty()) {
+		pending_ = Op::None;
+		return;
+	}
+	const QString tok = revokeQueue_.takeFirst();
+	const meta::RevokeEndpoint ep = meta::revokeEndpoint(revokeFor_);
+	Op op = Op::RevTw;
+	if (revokeFor_ == meta::Platform::YouTube)
+		op = Op::RevYt;
+	else if (revokeFor_ == meta::Platform::Kick)
+		op = Op::RevKk;
+	QUrl url(QString::fromLatin1(ep.url));
+	QUrlQuery q;
+	if (ep.tokenField[0] == QLatin1Char('\0')) {
+		// Twitch: client_id + token in query, empty form body.
+		q.addQueryItem(QStringLiteral("client_id"), revokeClientId_);
+		q.addQueryItem(QStringLiteral("token"), tok);
+		url.setQuery(q);
+		sendForm(url, QString(), op);
+	} else {
+		q.addQueryItem(QString::fromLatin1(ep.tokenField), tok);
+		sendForm(url, q.toString(QUrl::FullyEncoded), op, QString(),
+			 ep.browserUa);
+	}
+}
+
+void MetadataDock::wipeLocal(meta::Platform p)
+{
+	account(p).clear();
+	if (p == meta::Platform::YouTube)
+		broadcastCombo_->clear();
+	setStatus(p, tr("Not connected"));
+	setResult(p, true, tr("disconnected"));
+	saveStore(); // drop the record; survivors stay encrypted
+}
+
 // --- connect: Twitch device flow (no secret, F-015) --------------------
 
 void MetadataDock::onConnectTwitch()
 {
 	Account &a = tw_;
 	a.clear();
-	const QString id = env("STREAM_META_TWITCH_CLIENT_ID");
+	const QString id = field(twIdEdit_);
 	if (id.isEmpty()) {
 		finishConnectError(meta::Platform::Twitch,
-				   tr("Set STREAM_META_TWITCH_CLIENT_ID "
-				      "locally first."));
+				   tr("Enter your Twitch Client ID first."));
 		return;
 	}
 	a.clientId = id;
@@ -386,9 +562,9 @@ void MetadataDock::onConnectTwitch()
 
 void MetadataDock::onDisconnectTwitch()
 {
-	tw_.clear();
-	setStatus(meta::Platform::Twitch, tr("Not connected"));
-	setResult(meta::Platform::Twitch, true, tr("disconnected"));
+	const Account snap = tw_; // revoke needs the wiped tokens
+	wipeLocal(meta::Platform::Twitch);
+	startRevoke(meta::Platform::Twitch, snap);
 }
 
 void MetadataDock::onTwitchPollTimeout()
@@ -498,13 +674,12 @@ void MetadataDock::onConnectYouTube()
 {
 	Account &a = yt_;
 	a.clear();
-	const QString id = env("STREAM_META_YOUTUBE_CLIENT_ID");
-	const QString secret = env("STREAM_META_YOUTUBE_CLIENT_SECRET");
+	const QString id = field(ytIdEdit_);
+	const QString secret = field(ytSecretEdit_);
 	if (id.isEmpty() || secret.isEmpty()) {
 		finishConnectError(meta::Platform::YouTube,
-				   tr("Set STREAM_META_YOUTUBE_CLIENT_ID and "
-				      "STREAM_META_YOUTUBE_CLIENT_SECRET "
-				      "locally first."));
+				   tr("Enter your YouTube Client ID and "
+				      "Client Secret first."));
 		return;
 	}
 	quint16 port = 0;
@@ -561,23 +736,21 @@ void MetadataDock::startYouTubeExchange(const QString &code)
 
 void MetadataDock::onDisconnectYouTube()
 {
-	yt_.clear();
-	broadcastCombo_->clear();
-	setStatus(meta::Platform::YouTube, tr("Not connected"));
-	setResult(meta::Platform::YouTube, true, tr("disconnected"));
+	const Account snap = yt_;
+	wipeLocal(meta::Platform::YouTube);
+	startRevoke(meta::Platform::YouTube, snap);
 }
 
 void MetadataDock::onConnectKick()
 {
 	Account &a = kk_;
 	a.clear();
-	const QString id = env("STREAM_META_KICK_CLIENT_ID");
-	const QString secret = env("STREAM_META_KICK_CLIENT_SECRET");
+	const QString id = field(kkIdEdit_);
+	const QString secret = field(kkSecretEdit_);
 	if (id.isEmpty() || secret.isEmpty()) {
 		finishConnectError(meta::Platform::Kick,
-				   tr("Set STREAM_META_KICK_CLIENT_ID and "
-				      "STREAM_META_KICK_CLIENT_SECRET "
-				      "locally first."));
+				   tr("Enter your Kick Client ID and "
+				      "Client Secret first."));
 		return;
 	}
 	quint16 port = 3000; // must match the registered redirect (F-017)
@@ -633,9 +806,9 @@ void MetadataDock::startKickExchange(const QString &code)
 
 void MetadataDock::onDisconnectKick()
 {
-	kk_.clear();
-	setStatus(meta::Platform::Kick, tr("Not connected"));
-	setResult(meta::Platform::Kick, true, tr("disconnected"));
+	const Account snap = kk_;
+	wipeLocal(meta::Platform::Kick);
+	startRevoke(meta::Platform::Kick, snap);
 }
 
 void MetadataDock::onRefreshBroadcasts()
@@ -691,7 +864,13 @@ void MetadataDock::startApplyNext()
 		return;
 	}
 	const P p = applyQueue_.takeFirst();
-	retried_ = false;
+	if (!backoffResume_) {
+		// Fresh platform: one refresh retry + full backoff budget.
+		// A backoff resend keeps both (bounded, no loops).
+		retried_ = false;
+		backoffCount_ = 0;
+	}
+	backoffResume_ = false;
 	if (!account(p).connected) {
 		finishPlatform(p, false,
 			       meta::userMessage(meta::Outcome::AuthRequired,
@@ -764,6 +943,33 @@ void MetadataDock::finishApply()
 	pending_ = Op::None;
 	applyButton_->setEnabled(true);
 	applyButton_->setText(tr("Apply changes"));
+}
+
+bool MetadataDock::scheduleBackoff(meta::Platform p, meta::Outcome oc,
+				   int http)
+{
+	if (oc != meta::Outcome::RateLimited &&
+	    oc != meta::Outcome::ServerRetry)
+		return false;
+	if (backoffCount_ >= meta::kBackoffMaxRetries)
+		return false;
+	++backoffCount_;
+	backoffResume_ = true; // keep the refresh-once budget
+	applyQueue_.prepend(p);
+	setResult(p, true, tr("Retrying…"));
+	obs_log(LOG_WARNING, "apply %s http %d backing off (%d/%d)",
+		meta::platformName(p), http, backoffCount_,
+		meta::kBackoffMaxRetries);
+	QTimer::singleShot(meta::backoffDelayMs(backoffCount_), this,
+			   &MetadataDock::onBackoffTimeout);
+	return true;
+}
+
+void MetadataDock::onBackoffTimeout()
+{
+	// Bounded resend of the same platform update (§28: limited
+	// backoff, never a retry loop). startApplyNext keeps retried_.
+	startApplyNext();
 }
 
 void MetadataDock::refreshWithToken(meta::Platform p, Op resumeOp)
@@ -1055,6 +1261,7 @@ void MetadataDock::onReply(QNetworkReply *reply)
 
 	case Op::UpTw:
 	case Op::UpTwRetry: {
+		const P p = P::Twitch;
 		const meta::Outcome oc = netFail
 						 ? meta::Outcome::NetworkError
 						 : meta::classifyStatus(http);
@@ -1064,7 +1271,8 @@ void MetadataDock::onReply(QNetworkReply *reply)
 			refreshWithToken(P::Twitch, Op::TwRefresh);
 			return;
 		}
-		const P p = P::Twitch;
+		if (scheduleBackoff(p, oc, http))
+			return;
 		if (oc == meta::Outcome::Success) {
 			finishPlatform(p, true,
 				       meta::userMessage(oc, p));
@@ -1088,6 +1296,7 @@ void MetadataDock::onReply(QNetworkReply *reply)
 			tw_.refresh =
 				o.value(QStringLiteral("refresh_token"))
 					.toString();
+			saveStore(); // rotated tokens persist encrypted
 			QUrl url(QStringLiteral(
 				"https://api.twitch.tv/helix/channels"));
 			QUrlQuery q;
@@ -1120,6 +1329,8 @@ void MetadataDock::onReply(QNetworkReply *reply)
 			refreshWithToken(P::YouTube, Op::YtRefresh);
 			return;
 		}
+		if (scheduleBackoff(P::YouTube, oc, http))
+			return;
 		if (oc == meta::Outcome::AuthRequired) {
 			yt_.connected = false;
 			setStatus(P::YouTube, tr("Needs reconnection."));
@@ -1135,6 +1346,7 @@ void MetadataDock::onReply(QNetworkReply *reply)
 			const QJsonObject o = replyJson(reply);
 			yt_.access = o.value(QStringLiteral("access_token"))
 					     .toString();
+			saveStore(); // rotated tokens persist encrypted
 			const QString item =
 				broadcastCombo_->currentData().toString();
 			QUrl url(QStringLiteral(
@@ -1172,6 +1384,8 @@ void MetadataDock::onReply(QNetworkReply *reply)
 			refreshWithToken(P::Kick, Op::KkRefresh);
 			return;
 		}
+		if (scheduleBackoff(P::Kick, oc, http))
+			return;
 		if (oc == meta::Outcome::AuthRequired) {
 			kk_.connected = false;
 			setStatus(P::Kick, tr("Needs reconnection."));
@@ -1190,6 +1404,7 @@ void MetadataDock::onReply(QNetworkReply *reply)
 			kk_.refresh =
 				o.value(QStringLiteral("refresh_token"))
 					.toString();
+			saveStore(); // rotated tokens persist encrypted
 			sendJson(QUrl(QStringLiteral(
 					 "https://api.kick.com/public/v1/"
 					 "channels")),
@@ -1205,6 +1420,18 @@ void MetadataDock::onReply(QNetworkReply *reply)
 					       P::Kick));
 			startApplyNext();
 		}
+		return;
+	}
+
+	case Op::RevTw:
+	case Op::RevYt:
+	case Op::RevKk: {
+		// Best-effort revoke: local state is already wiped; the
+		// code is the only thing worth logging. Chain the next
+		// token (refresh) if any.
+		obs_log(LOG_INFO, "revoke %s http %d",
+			meta::platformName(revokeFor_), http);
+		sendNextRevoke();
 		return;
 	}
 	}

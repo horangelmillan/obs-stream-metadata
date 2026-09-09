@@ -14,7 +14,7 @@ Estados: pendiente / en-progreso / bloqueada / hecha / deuda / investigación / 
 | T-020 | hecha | 2 | PoC dock Qt6 mínimo (add_dock_by_id, sin OAuth) | dock registrado + visible + geometría restaurada + 5 ciclos limpios en OBS 32.2.2 | F-013, F-014, AGENTS §5-7 |
 | T-030 | hecha | 3 | PoCs OAuth + título por proveedor (Twitch/YouTube/Kick) + desc YouTube | lógica offline PASS 28/28 + triple LIVE PASS (Twitch/YouTube/Kick) con read-back | AGENTS §10-14, docs/T030-POC.md, F-015–F-024 |
 | T-031 | hecha | 4 | Dock unificado: título/desc + apply por plataforma + resultado independiente | matriz viva §19 en verde (T1–T20: OAuth+updates reales, parcial, validación, 401, async, persistencia) + fixes F-026/F-027/F-028 | F-001, F-004, F-025–F-028 |
-| T-032 | futuro | 5 | Hardening: storage seguro OS, revoke en Disconnect, backoff 429/5xx, fin de env-vars, distribución secrets F-017/F-019 | sobrevive reinicio sin plaintext; revocación verificada por proveedor; 429 sin reintento agresivo; cero secretos en repo/logs; matriz T1–T20 sin regresión | AGENTS §16-18, §26-29, F-017, F-019, F-027 |
+| T-032 | en-progreso | 5 | Hardening: storage seguro OS, revoke en Disconnect, backoff 429/5xx, fin de env-vars, distribución secrets F-017/F-019 | sobrevive reinicio sin plaintext; revocación verificada por proveedor; 429 sin reintento agresivo; cero secretos en repo/logs; matriz T1–T20 sin regresión | AGENTS §16-18, §26-29, ADR-008, F-029–F-032 |
 | T-033 | futuro | 6 | Testing integración + negativos AGENTS §39-40 | gate §50 en verde | AGENTS §39-40, §50 |
 | T-034 | futuro | 7 | Packaging/release instalador plugin | flujo §36 funciona | template wiki Distribute |
 | T-040 | hecha | 0 | Normalizar `core.autocrlf` y convención `master` vs `main` | ADR + config | — |

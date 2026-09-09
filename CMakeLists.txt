@@ -24,6 +24,10 @@ endif()
 if(ENABLE_QT)
   find_package(Qt6 COMPONENTS Widgets Core Network)
   target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::Core Qt6::Widgets Qt6::Network)
+  if(WIN32)
+    # T-032: DPAPI (CryptProtectData) for the encrypted account store.
+    target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE crypt32)
+  endif()
   target_compile_options(
     ${CMAKE_PROJECT_NAME}
     PRIVATE $<$<C_COMPILER_ID:Clang,AppleClang>:-Wno-quoted-include-in-framework-header -Wno-comma>
@@ -35,14 +39,19 @@ if(ENABLE_QT)
 endif()
 
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/plugin-main.c src/dock-poc.cpp src/metadata.cpp
-                                                     src/metadata_dock.cpp)
+                                                     src/secure_store.cpp src/metadata_dock.cpp)
 
 if(ENABLE_QT)
   add_subdirectory(poc/t030)
 
   # T-031 product selfcheck (QtCore only, on demand).
-  add_executable(metadata-selfcheck EXCLUDE_FROM_ALL src/metadata_selfcheck.cpp src/metadata.cpp)
+  # T-032: also covers backoff/revoke policy + DPAPI store round-trip.
+  add_executable(metadata-selfcheck EXCLUDE_FROM_ALL src/metadata_selfcheck.cpp src/metadata.cpp
+                                                     src/secure_store.cpp)
   target_link_libraries(metadata-selfcheck PRIVATE Qt6::Core)
+  if(WIN32)
+    target_link_libraries(metadata-selfcheck PRIVATE crypt32)
+  endif()
   target_include_directories(metadata-selfcheck PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 endif()
 

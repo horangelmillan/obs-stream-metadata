@@ -1,23 +1,26 @@
 /*
-obs-stream-metadata — T-031 MVP dock (Twitch / YouTube / Kick)
+obs-stream-metadata — T-031 MVP dock (Twitch / YouTube / Kick),
+T-032 hardening.
 
-Minimal product UI: platform checkboxes, title, description (YouTube
-only), YouTube broadcast selector, per-provider Connect/Disconnect,
-Apply with independent per-platform results.
+Minimal product UI: per-platform app credentials (BYO-app, ADR-008),
+platform checkboxes, title, description (YouTube only), YouTube
+broadcast selector, per-provider Connect/Disconnect, Apply with
+independent per-platform results.
 
 Async by design: a single QNetworkAccessManager (signal-driven, never
 blocking) + single-shot timers; sequential platform updates (§19:
 sequential is acceptable, correctness first).
 
-Credentials: client IDs/secrets come from LOCAL env vars at Connect
-time and tokens live ONLY in process memory. Nothing is persisted,
-printed or logged (lengths at most). Documented provisional
-limitation for P5 (F-017, F-019, §25).
+Credentials: client IDs/secrets are typed once into the dock and kept
+in memory + DPAPI-encrypted store (never plaintext, never logged).
+Disconnect revokes server-side (best effort) then wipes local state.
+Apply retries 429/5xx at most twice with backoff (no loops).
 */
 
 #pragma once
 
 #include "metadata.h"
+#include "secure_store.h"
 #include <QWidget>
 
 class QCheckBox;
@@ -37,6 +40,7 @@ class MetadataDock : public QWidget {
 	Q_OBJECT
 public:
 	explicit MetadataDock(QWidget *parent = nullptr);
+	~MetadataDock() override;
 
 private slots:
 	void onApply();
@@ -49,6 +53,7 @@ private slots:
 	void onRefreshBroadcasts();
 	void onReply(QNetworkReply *reply);
 	void onTwitchPollTimeout();
+	void onBackoffTimeout();
 	void onCallbackConnection();
 
 private:
@@ -72,6 +77,9 @@ private:
 		UpYtRetry,
 		UpKk,
 		UpKkRetry,
+		RevTw, // fire-and-forget revoke on Disconnect (best effort)
+		RevYt,
+		RevKk,
 	};
 
 	struct Account {
@@ -111,11 +119,24 @@ private:
 	Op pending_ = Op::None;
 	bool applyAfterList_ = false;
 	bool retried_ = false; // one refresh retry per platform update
+	bool backoffResume_ = false; // resend after backoff: keep retried_
+	int backoffCount_ = 0; // 429/5xx resends so far (<= kBackoffMaxRetries)
 	int twPollsLeft_ = 0;  // remaining Twitch device-flow polls
 	QString redirect_;     // exact redirect_uri of the current attempt
 	QList<meta::Platform> applyQueue_;
+	// Revoke chain state (Disconnect clears local first, revoke is
+	// best-effort in the background; codes only in logs).
+	meta::Platform revokeFor_ = meta::Platform::Twitch;
+	QString revokeClientId_;
+	QStringList revokeQueue_;
+	secure::Store *store_ = nullptr; // DPAPI account store (may be null)
 
 	// UI
+	QLineEdit *twIdEdit_ = nullptr;
+	QLineEdit *ytIdEdit_ = nullptr;
+	QLineEdit *ytSecretEdit_ = nullptr;
+	QLineEdit *kkIdEdit_ = nullptr;
+	QLineEdit *kkSecretEdit_ = nullptr;
 	QCheckBox *twCheck_ = nullptr;
 	QCheckBox *ytCheck_ = nullptr;
 	QCheckBox *kkCheck_ = nullptr;
@@ -162,6 +183,8 @@ private:
 	void startApplyNext();
 	void finishPlatform(meta::Platform p, bool ok, const QString &msg);
 	void finishApply();
+	// 429/5xx during Apply: bounded resend (true) or terminal (false).
+	bool scheduleBackoff(meta::Platform p, meta::Outcome oc, int http);
 	QString pkceChallenge(const QString &verifier);
 	QString randomUrlSafe(int chars);
 	void openBrowser(const QString &url);
@@ -170,4 +193,12 @@ private:
 	void startYouTubeExchange(const QString &code);
 	void startKickExchange(const QString &code);
 	void refreshWithToken(meta::Platform p, Op resumeOp);
+	void saveStore();
+	void loadStore();
+	QString storePath();
+	// Fire-and-forget server-side revoke, then wipe local state.
+	// The reply handlers only log the HTTP code (best effort).
+	void startRevoke(meta::Platform p, const Account &snapshot);
+	void sendNextRevoke();
+	void wipeLocal(meta::Platform p);
 };

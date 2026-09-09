@@ -92,6 +92,7 @@ OBS 32.2.2 ×ciclos limpios + fixes F-026/F-027/F-028. T-031 cerrada con PASS.
 - **Dependencias:** P4 PASS. **Riesgos:** mecanismo de storage seguro en Windows por investigar (DPAPI); secret embebido prohibido.
 - **Salida:** reinicio/revocación/rate-limit se comportan según §28-29.
 - **Validación:** expiración/revocación por proveedor (§39.5-9) + matriz T1–T20 sin regresión.
+- **Resultado T-032 (2026-09-09, en-progreso):** implementado en `feat/t-032-hardening`: `src/secure_store.*` (DPAPI CurrentUser, `accounts.json` en config dir, F-029), revoke real por proveedor (F-030), backoff 429/5xx máx 2 (2 s/4 s) sin loops (F-031), 5 campos locales fin de env vars + ADR-008 BYO-app (F-032). Offline verde: build 0 errores, selfchecks 35/35 + 28/28, scans limpios. Pendiente operador: reinicio con cuentas, revoke en web, matriz T1–T20 (P6/T-033).
 
 ## P6 — Integration Testing
 
