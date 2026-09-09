@@ -8,22 +8,33 @@ Producción: mismo wiring con SecretStore/TokenStore/SessionStore productivos
 """
 from __future__ import annotations
 
+from backend.adapters.youtube import YouTubeProvider
 from backend.config import load_settings
 from backend.http_server import BackendApp, serve
 from backend.logging_setup import get_logger
-from backend.stores import AllowAllRateLimiter, EnvSecretStore, InMemorySessionStore
+from backend.oauth import ConnectService
+from backend.stores import (AllowAllRateLimiter, EnvSecretStore, InMemoryConnectionStore,
+                            InMemoryOAuthTransactionStore, InMemorySessionStore,
+                            InMemoryTokenStore)
 
 
 def create_app(secrets=None, sessions=None, limiter=None,
-               ready_check=None, settings=None) -> BackendApp:
+               ready_check=None, settings=None, youtube=None,
+               enable_youtube: bool = False) -> BackendApp:
     settings = settings or load_settings()
-    # secrets se inyecta para dejar el punto de integración documentado;
-    # ningún flujo T-043 lo consume (OAuth real: T-045/46).
-    _ = secrets or EnvSecretStore()
+    secrets = secrets or EnvSecretStore()
+    sessions = sessions or InMemorySessionStore()
+    if youtube is None and enable_youtube:
+        redirect = (settings.public_base_url.rstrip("/") +
+                    "/connect/youtube/callback")
+        youtube = ConnectService(
+            YouTubeProvider(secrets, redirect),
+            InMemoryOAuthTransactionStore(), InMemoryConnectionStore(),
+            InMemoryTokenStore())
     return BackendApp(settings=settings,
-                      sessions=sessions or InMemorySessionStore(),
+                      sessions=sessions,
                       limiter=limiter or AllowAllRateLimiter(),
-                      ready_check=ready_check)
+                      ready_check=ready_check, youtube=youtube)
 
 
 def main() -> None:

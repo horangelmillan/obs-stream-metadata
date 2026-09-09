@@ -104,3 +104,44 @@ class InstallationStore(ABC):
 
     @abstractmethod
     def revoke(self, installation_id: str) -> None: ...
+
+
+class OAuthTransactionStore(ABC):
+    """Transacciones OAuth de un solo uso (T-045 §8).
+
+    Entrada: dict con {id, provider, installation_id, state, code_verifier,
+    created_at, expires_at, consumed}. El verifier solo lo lee el adapter
+    durante el exchange; jamás sale en respuestas ni logs."""
+
+    @abstractmethod
+    def save(self, transaction: dict) -> None: ...
+
+    @abstractmethod
+    def load(self, transaction_id: str) -> dict | None: ...
+
+    @abstractmethod
+    def consume(self, transaction_id: str) -> dict | None:
+        """Marca consumida y devuelve la entrada, o None si no existe,
+        expiró o ya fue consumida (anti-replay)."""
+
+    @abstractmethod
+    def find_by_state(self, state: str) -> dict | None:
+        """Localiza transacción vigente por state (callback). None si no hay
+        coincidencia válida (state inválido, expirada o consumida)."""
+
+
+class ConnectionStore(ABC):
+    """Conexiones proveedor por instalación (T-045 §16).
+
+    Entrada: dict con {provider, installation_id, account:{provider_user_id,
+    display_name, scopes}, tokens:{access_token, refresh_token, expires_in,
+    obtained_at}}. Contenido de metadata (títulos) nunca persistido."""
+
+    @abstractmethod
+    def save(self, installation_id: str, provider: str, entry: dict) -> None: ...
+
+    @abstractmethod
+    def load(self, installation_id: str, provider: str) -> dict | None: ...
+
+    @abstractmethod
+    def delete(self, installation_id: str, provider: str) -> None: ...

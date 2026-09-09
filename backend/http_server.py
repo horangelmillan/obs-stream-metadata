@@ -34,7 +34,8 @@ from backend.stores import FixedWindowRateLimiter, InMemoryInstallationStore
 class BackendApp:
     def __init__(self, settings: Settings, sessions, limiter: RateLimiter,
                  ready_check=None, auth_service: AuthService | None = None,
-                 limiters: dict | None = None, clock=None) -> None:
+                 limiters: dict | None = None, clock=None,
+                 youtube=None) -> None:
         self.settings = settings
         self.sessions = sessions
         self.limiter = limiter
@@ -58,6 +59,11 @@ class BackendApp:
         self._ready_check = ready_check or (lambda: (True, "ok"))
         self.started_at = time.time()
         self.log = get_logger("http", settings.log_level)
+        self.youtube = youtube  # ConnectService (T-045); None = no configurado
+
+    def youtube_redirect_uri(self) -> str:
+        return (self.settings.public_base_url.rstrip("/") +
+                "/connect/youtube/callback")
 
     # --- rutas públicas ---
     def health(self) -> dict:
@@ -72,14 +78,17 @@ class BackendApp:
         code = 200 if ok else 503
         return code, {"ready": ok, "detail": detail if ok else "not-ready"}
 
-    def check_access(self, path: str, headers) -> None:
-        """Gate: rutas no públicas exigen sesión vigente (401/401-expired)."""
+    def check_access(self, path: str, headers):
+        """Gate: rutas no públicas exigen sesión vigente (401/401-expired).
+        Devuelve el SessionRecord validado, o None en rutas públicas y
+        /auth/* (control propio por endpoint)."""
+        from backend.auth import SessionRecord
         if auth_boundary.is_public(path):
-            return
+            return None
         if path.startswith("/auth/"):
-            return  # /auth/* tiene su propio control por endpoint
+            return None  # /auth/* tiene su propio control por endpoint
         token = auth_boundary.extract_bearer(headers.get("Authorization", ""))
-        self.auth.validate_session(token or "")
+        return self.auth.validate_session(token or "")
 
     def _limited(self, name: str, key: str) -> None:
         if not self.limiters[name].allow(key):
@@ -118,6 +127,18 @@ def _need_int(body: dict, name: str) -> int:
     return value
 
 
+def _parse_query(target: str) -> dict:
+    parts = target.split("?", 1)
+    if len(parts) < 2:
+        return {}
+    out: dict[str, str] = {}
+    for pair in parts[1].split("&"):
+        if "=" in pair:
+            key, _, value = pair.partition("=")
+            out[key] = value
+    return out
+
+
 class _Handler(BaseHTTPRequestHandler):
     app: BackendApp  # inyectada por serve()
 
@@ -134,7 +155,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _route_post(self, path: str, body: dict, request_id: str,
-                    client_ip: str) -> tuple[int, dict]:
+                    client_ip: str, query: dict) -> tuple[int, dict]:
         app = self.server.app
         if path == "/auth/bootstrap":
             app._limited("bootstrap_ip", f"bootstrap:{client_ip}")
@@ -166,7 +187,32 @@ class _Handler(BaseHTTPRequestHandler):
             app.auth.revoke_installation(body["installation_id"], ts,
                                          body["nonce"], body["signature"])
             return 200, {}
+        if path == "/connect/youtube":
+            record = app.check_access(path, self.headers)
+            if app.youtube is None:
+                raise AppError(ErrorCode.INTERNAL, "youtube not configured")
+            app._limited("auth_install", f"yt-connect:{record.installation_id}")
+            return 200, app.youtube.start(record.installation_id,
+                                          app.youtube_redirect_uri())
+        if path == "/connect/youtube/disconnect":
+            record = app.check_access(path, self.headers)
+            if app.youtube is None:
+                raise AppError(ErrorCode.INTERNAL, "youtube not configured")
+            app._limited("auth_install", f"yt-disc:{record.installation_id}")
+            app.youtube.disconnect(record.installation_id)
+            return 200, {"provider": "youtube", "status": "disconnected"}
         raise AppError(ErrorCode.INVALID_REQUEST, f"unknown path {path}")
+
+    def _route_callback(self, query: dict) -> tuple[int, dict]:
+        import urllib.parse as _up
+        service = self.server.app.youtube
+        if service is None:
+            raise AppError(ErrorCode.INTERNAL, "youtube not configured")
+        decode = _up.unquote
+        result = service.callback(decode(query.get("state", "")),
+                                  decode(query.get("code", "")),
+                                  decode(query.get("error", "")))
+        return 200, result
 
     def _handle(self, method: str) -> None:
         request_id = uuid.uuid4().hex[:16]
@@ -178,18 +224,31 @@ class _Handler(BaseHTTPRequestHandler):
             if not self.server.app.limiter.allow("global"):
                 raise AppError(ErrorCode.RATE_LIMITED, "global limit")
             if method == "GET":
-                self.server.app.check_access(path, self.headers)
-                if path == "/health":
-                    payload, status = self.server.app.health(), 200
-                elif path == "/ready":
-                    status, payload = self.server.app.ready()
-                elif path == "/version":
-                    payload, status = self.server.app.version(), 200
+                query = _parse_query(self.path)
+                if path == "/connect/youtube/callback":
+                    # Sin bearer (viene del navegador): la transacción+state
+                    # son la autorización; rate-limit por IP.
+                    self.server.app._limited("auth_ip", f"cb:{client_ip}")
+                    status, payload = self._route_callback(query)
                 else:
-                    raise AppError(ErrorCode.INVALID_REQUEST, f"unknown path {path}")
+                    record = self.server.app.check_access(path, self.headers)
+                    if path == "/health":
+                        payload, status = self.server.app.health(), 200
+                    elif path == "/ready":
+                        status, payload = self.server.app.ready()
+                    elif path == "/version":
+                        payload, status = self.server.app.version(), 200
+                    elif path == "/connect/youtube/status":
+                        payload = self.server.app.youtube.status(
+                            record.installation_id)
+                        status = 200
+                    else:
+                        raise AppError(ErrorCode.INVALID_REQUEST,
+                                       f"unknown path {path}")
             elif method == "POST":
                 body = _json_body(self, self.server.app.settings.body_limit_bytes)
-                status, payload = self._route_post(path, body, request_id, client_ip)
+                status, payload = self._route_post(path, body, request_id,
+                                                   client_ip, _parse_query(""))
             else:
                 raise AppError(ErrorCode.INVALID_REQUEST, f"unsupported method {method}")
             self._send(status, payload, request_id)
