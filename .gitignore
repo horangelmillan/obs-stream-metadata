@@ -18,6 +18,9 @@ Makefile
 # Compiled / OBS plugin outputs
 *.o
 *.obj
+# Python
+__pycache__/
+*.pyc
 *.lib
 *.dll
 *.so
@@ -54,6 +57,7 @@ obs-build/
 # Secrets — nunca commitear (ver docs/SECURITY.md)
 .env
 .env.*
+dev.env
 *.key
 *.pem
 *.p12

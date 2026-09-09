@@ -1,6 +1,7 @@
 # ADR-008 — Credenciales BYO-app + custodia DPAPI (P5)
 
 - **Fecha:** 2026-09-09 · **Tarea:** T-032 · **Estado:** decidido, implementado, pendiente validación viva del operador.
+- **Nota de estado (2026-09-09, T-038/ADR-009):** ADR-008 describe la arquitectura BYO-app de P5/T-032, vigente como **modo operador/debug + hardening local** (DPAPI, revoke, backoff). La arquitectura de distribución la define ADR-009 (backend YouTube+Kick, Twitch directo). Ver `docs/ARCHITECTURE-BACKEND.md`.
 - **Problema (F-017/F-019):** YouTube exige `client_secret` incluso en clientes Desktop y Kick exige secret aun con PKCE. Un secret compartido embebido en el binario no es custodiable (repo público) y las env vars de T-031 no son UX final ni sobreviven reinicios.
 - **Elección:**
   1. **BYO-app (bring-your-own-app):** el operador registra una app por plataforma (Twitch consola dev, Google Cloud cliente Desktop + YouTube Data API, Kick portal dev con redirect `http://localhost:3000/cb`) y escribe IDs/secrets **una vez** en el dock. Secret embebido compartido: PROHIBIDO.
