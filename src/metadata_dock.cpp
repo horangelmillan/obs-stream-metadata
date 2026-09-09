@@ -12,6 +12,7 @@ Tokens/secrets: process memory only, never persisted, printed or logged.
 #include <QComboBox>
 #include <QCryptographicHash>
 #include <QDesktopServices>
+#include <QFrame>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -23,6 +24,7 @@ Tokens/secrets: process memory only, never persisted, printed or logged.
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QRandomGenerator>
+#include <QScrollArea>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTimer>
@@ -54,7 +56,10 @@ QJsonObject replyJson(QNetworkReply *reply)
 
 MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 {
-	QVBoxLayout *top = new QVBoxLayout(this);
+	// Scrollable body: when docked into OBS the panel must scroll
+	// instead of forcing the main window wide.
+	QWidget *body = new QWidget(this);
+	QVBoxLayout *top = new QVBoxLayout(body);
 
 	QLabel *platTitle = new QLabel(tr("Platforms"), this);
 	top->addWidget(platTitle);
@@ -162,7 +167,15 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 	generalMsg_->setWordWrap(true);
 	top->addWidget(generalMsg_);
 
-	setLayout(top);
+	body->setLayout(top);
+	QScrollArea *scroll = new QScrollArea(this);
+	scroll->setWidget(body);
+	scroll->setWidgetResizable(true);
+	scroll->setFrameShape(QFrame::NoFrame);
+	QVBoxLayout *outer = new QVBoxLayout(this);
+	outer->setContentsMargins(0, 0, 0, 0);
+	outer->addWidget(scroll);
+	setLayout(outer);
 
 	net_ = new QNetworkAccessManager(this);
 	connect(net_, &QNetworkAccessManager::finished, this,
@@ -313,6 +326,7 @@ void MetadataDock::finishConnectOk(meta::Platform p, const QString &display)
 	devicePrompt_->setVisible(false);
 	pending_ = Op::None;
 	setStatus(p, tr("Connected as %1").arg(display));
+	setResult(p, true, tr("connected"));
 	obs_log(LOG_INFO, "oauth connected: %s", meta::platformName(p));
 }
 
