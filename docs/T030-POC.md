@@ -14,11 +14,10 @@ Sí:
 - Clasificación HTTP §28 (`204` = éxito, `401/403/404/429/5xx` mapeados).
 - Receptor localhost mínimo (`tools/t030_oauth_callback.py`, stdlib, un uso).
 
-No (va en P4/P5 o requiere cuentas del operador):
+No (va en P5 o requiere cuentas del operador):
 
-- Intercambio real code→token ni llamadas HTTP vivas (necesitan client
-  registrado y autorización del usuario; ver §5).
-- Integración con el dock, storage definitivo, refresh automático.
+- Intercambio real code→token ni llamadas HTTP vivas desde el dock (resuelto en P4/T-031 para UI; el procedimiento manual §5 sigue válido para los runners);
+- storage definitivo, refresh robusto (el dock T-031 ya reintenta una vez ante 401).
 
 ## 2. Matriz por proveedor
 

@@ -45,7 +45,8 @@ Despliegue dev (sin admin; F-010 — `%APPDATA%\obs-studio\plugins` NO se escane
 
 ```powershell
 # <staging>\obs-stream-metadata\bin\64bit\*.dll -> $env:OBS_PLUGINS_PATH
-# <staging>\obs-stream-metadata\data\ -> $env:OBS_PLUGINS_DATA_PATH\obs-stream-metadata\
+# DATA_PATH es la BASE: OBS antepone /%module% (F-027). Copiar una vez:
+# Copy-Item -Recurse '<staging>\obs-stream-metadata\data\*' '<base>\obs-stream-metadata\'
 $env:OBS_PLUGINS_PATH = '<dir-con-dll>'; $env:OBS_PLUGINS_DATA_PATH = '<base-data>'
 Start-Process 'C:\Program Files\obs-studio\bin\64bit\obs64.exe' -WorkingDirectory 'C:\Program Files\obs-studio\bin\64bit'
 ```
