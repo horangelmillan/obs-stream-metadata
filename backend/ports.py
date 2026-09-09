@@ -79,3 +79,28 @@ class RateLimiter(ABC):
     @abstractmethod
     def allow(self, key: str) -> bool:
         """True si la request puede continuar; False si debe responder 429."""
+
+
+@dataclass(frozen=True)
+class Installation:
+    """Identidad de instalación: identificador (no-secreto) + secreto por
+    instalación (solo backend y plugin propietario, revocado/aislado)."""
+
+    id: str
+    created_at: str = ""  # ISO-8601 UTC
+    revoked: bool = False
+
+
+class InstallationStore(ABC):
+    """Registro de instalaciones + secreto por instalación (cifrado en
+    producción; memoria dev en stores.py)."""
+
+    @abstractmethod
+    def create(self, installation: Installation, secret: str) -> None: ...
+
+    @abstractmethod
+    def load(self, installation_id: str) -> tuple[Installation, str] | None:
+        """Devuelve (installation, secret) o None. Solo la capa auth la usa."""
+
+    @abstractmethod
+    def revoke(self, installation_id: str) -> None: ...

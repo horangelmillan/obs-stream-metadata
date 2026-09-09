@@ -26,7 +26,7 @@ Estados: pendiente / en-progreso / bloqueada / hecha / deuda / investigación / 
 | T-041 | pendiente | 6 | Migración UX fuera de BYO-app (`Connect` sin exponer app credentials) | UX §36-38 sin IDs/secrets visibles | T-038, T-039 |
 | T-042 | pendiente | 7 | Arquitectura backend Kick si se confirma necesaria (auth plugin→backend, anti-abuso, rate-limit, logs, rotación, privacidad, coste; NO diseñar/implementar ahora) | alcance conceptual aprobado | F-036 |
 | T-043 | hecha | 7 | Backend foundation (servicio HTTPS + DB mínima + secret manager + dominio/TLS) | fundación stdlib `backend/` en verde: 27 tests, health/ready/version, kernel/ports/adapters aislados, sin secretos | ADR-009 |
-| T-044 | pendiente | 7 | Auth plugin↔backend (identidad instalación + sesiones cortas + rate-limit, sin secreto permanente) | abuso mitigado sin secreto embebido | ADR-009 |
+| T-044 | hecha | 7 | Auth plugin↔backend (identidad instalación + sesiones cortas + rate-limit, sin secreto permanente) | ADR-010 + `/auth/*` + cliente Qt async + 43 tests + build/DLL/selfcheck en verde | ADR-009, ADR-010 |
 | T-045 | pendiente | 7 | Adapter OAuth YouTube en backend (exchange/refresh/revoke + verificación Google) | Connect YouTube sin secret en cliente | ADR-009 |
 | T-046 | pendiente | 7 | Adapter OAuth Kick en backend (exchange/refresh/revoke) | Connect Kick sin secret en cliente | ADR-009 |
 | T-047 | pendiente | 7 | Twitch directo endurecido (Client ID distribuido + DCF, sin backend) | Connect Twitch sin cambios UX | F-015, F-033 |
