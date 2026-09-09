@@ -39,7 +39,8 @@ if(ENABLE_QT)
 endif()
 
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/plugin-main.c src/dock-poc.cpp src/metadata.cpp
-                                                     src/secure_store.cpp src/metadata_dock.cpp)
+                                                     src/secure_store.cpp src/metadata_dock.cpp
+                                                     src/backend_auth.cpp)
 
 if(ENABLE_QT)
   add_subdirectory(poc/t030)

@@ -34,6 +34,10 @@ struct Data {
 	Record twitch;
 	Record youtube;
 	Record kick;
+	// T-044: backend installation identity. clientId = installation_id,
+	// secret = installation_secret (both DPAPI blobs); access stays empty.
+	// Never a provider credential; never shown in UI.
+	Record backendInstall;
 	bool anyConnected() const
 	{
 		return twitch.connected || youtube.connected ||
