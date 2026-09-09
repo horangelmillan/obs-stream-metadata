@@ -8,11 +8,22 @@ import urllib.error
 from backend.app import create_app
 from backend.config import Settings
 from backend.http_server import serve
-from backend.stores import InMemorySessionStore
 
 
 def _get(base, path, headers=None):
     req = urllib.request.Request(base + path, method="GET", headers=headers or {})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status, dict(r.headers), r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, dict(e.headers), e.read()
+
+
+def _post(base, path, payload, headers=None):
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(base + path, data=data, method="POST",
+                                 headers={"Content-Type": "application/json",
+                                          **(headers or {})})
     try:
         with urllib.request.urlopen(req, timeout=5) as r:
             return r.status, dict(r.headers), r.read()
@@ -82,22 +93,25 @@ class HttpTest(unittest.TestCase):
         self.assertEqual(json.loads(body)["error"]["code"], "authentication_error")
 
     def test_session_allows_reserved_paths_shape(self):
-        """El gate existe: con sesión válida no hay 401 (aunque la ruta no exista aún)."""
-        sessions = InMemorySessionStore()
-        sessions.save_session("tok-1", {"installation": "i1"})
-        app = create_app(settings=Settings(host="127.0.0.1", port=0),
-                         sessions=sessions)
-        server = serve(app)
-        port = server.server_address[1]
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        try:
-            status, _, _ = _get(f"http://127.0.0.1:{port}", "/connect/youtube",
-                                {"Authorization": "Bearer tok-1"})
-            self.assertNotEqual(status, 401)
-        finally:
-            server.shutdown()
-            server.server_close()
+        """El gate existe: con sesión vigente emitida por /auth/* no hay 401."""
+        import time as _time
+        from backend.auth import sign_installation_secret
+        status, _, body = _post(self.base, "/auth/bootstrap", {})
+        self.assertEqual(status, 201)
+        creds = json.loads(body)
+        ts = int(_time.time())
+        nonce = "n" * 32
+        sig = sign_installation_secret(creds["installation_secret"],
+                                       creds["installation_id"], ts, nonce)
+        status, _, body = _post(self.base, "/auth/session",
+                                {"installation_id": creds["installation_id"],
+                                 "timestamp": ts, "nonce": nonce,
+                                 "signature": sig})
+        self.assertEqual(status, 200)
+        token = json.loads(body)["session_token"]
+        status, _, _ = _get(self.base, "/connect/youtube",
+                            {"Authorization": "Bearer " + token})
+        self.assertNotEqual(status, 401)
 
 
 if __name__ == "__main__":
