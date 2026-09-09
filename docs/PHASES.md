@@ -101,6 +101,7 @@ OBS 32.2.2 ×ciclos limpios + fixes F-026/F-027/F-028. T-031 cerrada con PASS.
 - **Dependencias:** P5. **Riesgos:** cuota YouTube (minimizar llamadas); flakiness de red (backoff limitado, sin loops ante 429).
 - **Entrada:** hardening completo. **Salida:** §39-40 en verde documentado.
 - **Validación:** gate `AGENTS.md` §50 (definición de terminado del MVP).
+- **Resultado T-033 (2026-09-09, en-progreso):** negativos offline §40 cubiertos en `src/metadata_selfcheck.cpp` (68/68 + 28/28 regresión, build 0 errores, sin cambios de producto); matriz viva §39-40 pendiente del operador (procedimiento en `TROUBLESHOOTING.md` T-033). P6 PARTIAL hasta el live.
 
 ## P7 — Packaging & Release
 

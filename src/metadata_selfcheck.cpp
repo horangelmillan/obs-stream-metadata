@@ -1,5 +1,6 @@
 // T-031 product selfcheck: validation + payloads + outcome mapping.
 // T-032: + backoff policy + revoke endpoints + DPAPI store round-trip.
+// T-033 (P6): + offline negatives AGENTS.md §40 (no network).
 // No network. Test-only fake values, never real credentials.
 // Usage: metadata-selfcheck.exe -> exit 0.
 #include "metadata.h"
@@ -7,6 +8,8 @@
 
 #include <QCoreApplication>
 #include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QTemporaryDir>
 #include <cstdio>
 
@@ -101,11 +104,122 @@ int main(int argc, char **argv)
 		      !msg.contains(QStringLiteral("token")),
 	      "message-safe");
 
+	// T-033 (P6): §40 negative boundaries offline — no network.
+	// YouTube title minimum (empty) and upper edges.
+	CHECK(!validate(Metadata{QString(), QString()}, yt).isEmpty(),
+	      "youtube-empty-title");
+	CHECK(validate(Metadata{QString(100, QLatin1Char('x')), QString()},
+		       yt)
+		      .isEmpty(),
+	      "youtube-100");
+	CHECK(validate(Metadata{QStringLiteral("T"),
+				QString(5000, QLatin1Char('x'))},
+		       yt)
+		      .isEmpty(),
+	      "ytdesc-5000");
+	// Mixed Twitch+YouTube stays restrictive at the Twitch edge too.
+	CHECK(!validate(Metadata{QString(141, QLatin1Char('x')), QString()},
+			both)
+		      .isEmpty(),
+	      "mixed-141-fails");
+
+	// Full §28 status map (offline classification only).
+	CHECK(classifyStatus(200) == Outcome::Success, "http-200");
+	CHECK(classifyStatus(400) == Outcome::BadRequest, "http-400");
+	CHECK(classifyStatus(403) == Outcome::Forbidden, "http-403");
+	CHECK(classifyStatus(404) == Outcome::NotFound, "http-404");
+	CHECK(classifyStatus(409) == Outcome::Conflict, "http-409");
+	CHECK(classifyStatus(500) == Outcome::ServerRetry, "http-500");
+	CHECK(classifyStatus(503) == Outcome::ServerRetry, "http-503");
+	CHECK(classifyStatus(0) == Outcome::NetworkError, "http-0");
+	CHECK(classifyStatus(999) == Outcome::NetworkError, "http-999");
+
+	// Every user message is non-empty, safe, and specific (§16, §28).
+	{
+		const Outcome all[] = {
+			Outcome::Success,     Outcome::BadRequest,
+			Outcome::AuthRequired, Outcome::Forbidden,
+			Outcome::NotFound,    Outcome::Conflict,
+			Outcome::RateLimited, Outcome::ServerRetry,
+			Outcome::NetworkError,
+		};
+		const Platform plats[] = {Platform::Twitch,
+					  Platform::YouTube, Platform::Kick};
+		for (Outcome o : all) {
+			for (Platform p : plats) {
+				const QString um = userMessage(o, p);
+				if (um.isEmpty() ||
+				    um.contains(QStringLiteral("Bearer")) ||
+				    um.contains(QStringLiteral("token")) ||
+				    um.contains(QStringLiteral("http"))) {
+					std::printf("FAIL message-safe-all\n");
+					return 1;
+				}
+			}
+		}
+		std::printf("PASS message-safe-all\n");
+	}
+	CHECK(userMessage(Outcome::BadRequest, Platform::YouTube)
+		      .contains(QStringLiteral("1-100")),
+	      "msg-yt-400");
+	CHECK(userMessage(Outcome::NotFound, Platform::YouTube)
+		      .contains(QStringLiteral("broadcast")),
+	      "msg-yt-404");
+	CHECK(userMessage(Outcome::Forbidden, Platform::Kick)
+		      .contains(QStringLiteral("permissions")),
+	      "msg-kick-403");
+	CHECK(userMessage(Outcome::Conflict, Platform::YouTube)
+		      .contains(QStringLiteral("modifiable")),
+	      "msg-yt-409");
+	CHECK(userMessage(Outcome::RateLimited, Platform::Twitch)
+		      .contains(QStringLiteral("rate limited")),
+	      "msg-tw-429");
+	CHECK(userMessage(Outcome::Success, Platform::Kick)
+		      .contains(QStringLiteral("updated")),
+	      "msg-kick-204");
+
+	// YouTube PUT keeps id + fetched snippet fields, sets title/desc,
+	// and never sends contentDetails with part=snippet (F-021).
+	{
+		const QString fetched = QStringLiteral(
+			"{\"id\":\"B1\",\"snippet\":{\"title\":\"Old\","
+			"\"description\":\"OldD\",\"categoryId\":\"22\","
+			"\"scheduledStartTime\":\"2026-09-09T00:00:00Z\"},"
+			"\"contentDetails\":{\"monitorStream\":{}}}");
+		const QString out =
+			youTubePayload(fetched, QStringLiteral("New"),
+				       QStringLiteral("NewD"));
+		const QJsonObject o =
+			QJsonDocument::fromJson(out.toUtf8()).object();
+		const QJsonObject sn =
+			o.value(QStringLiteral("snippet")).toObject();
+		CHECK(o.value(QStringLiteral("id")).toString() ==
+			      QStringLiteral("B1"),
+		      "ytpl-id");
+		CHECK(sn.value(QStringLiteral("title")).toString() ==
+			      QStringLiteral("New"),
+		      "ytpl-title");
+		CHECK(sn.value(QStringLiteral("description")).toString() ==
+			      QStringLiteral("NewD"),
+		      "ytpl-desc");
+		CHECK(sn.value(QStringLiteral("categoryId")).toString() ==
+			      QStringLiteral("22"),
+		      "ytpl-preserve-cat");
+		CHECK(sn.value(QStringLiteral("scheduledStartTime"))
+			      .toString() ==
+		      QStringLiteral("2026-09-09T00:00:00Z"),
+		      "ytpl-preserve-start");
+		CHECK(!o.contains(QStringLiteral("contentDetails")),
+		      "ytpl-no-contentdetails");
+	}
+
 	// T-032: bounded backoff policy (no loops by construction).
 	CHECK(kBackoffMaxRetries == 2, "backoff-max");
 	CHECK(backoffDelayMs(0) == 0, "backoff-0");
 	CHECK(backoffDelayMs(1) == 2000, "backoff-1");
 	CHECK(backoffDelayMs(2) == 4000, "backoff-2");
+	CHECK(backoffDelayMs(3) == 6000, "backoff-3");
+	CHECK(backoffDelayMs(-1) == 0, "backoff-neg");
 
 	// T-032: revoke endpoints mirror the P3-validated runners.
 	CHECK(QString::fromLatin1(
@@ -120,6 +234,27 @@ int main(int argc, char **argv)
 		      revokeEndpoint(Platform::Kick).url) ==
 		      QStringLiteral("https://id.kick.com/oauth/revoke"),
 	      "revoke-kick");
+	// T-033 (P6): revoke wire shape mirrors the P3 runners (F-030).
+	// Twitch carries the token in the query (no form field, no browser
+	// UA); YouTube posts a form field; Kick posts a form field with a
+	// browser UA (F-022).
+	CHECK(QString::fromLatin1(
+		      revokeEndpoint(Platform::Twitch).tokenField) ==
+		      QStringLiteral(""),
+	      "revoke-tw-nofield");
+	CHECK(!revokeEndpoint(Platform::Twitch).browserUa,
+	      "revoke-tw-noua");
+	CHECK(QString::fromLatin1(
+		      revokeEndpoint(Platform::YouTube).tokenField) ==
+		      QStringLiteral("token"),
+	      "revoke-yt-field");
+	CHECK(!revokeEndpoint(Platform::YouTube).browserUa,
+	      "revoke-yt-noua");
+	CHECK(QString::fromLatin1(
+		      revokeEndpoint(Platform::Kick).tokenField) ==
+		      QStringLiteral("token"),
+	      "revoke-kick-field");
+	CHECK(revokeEndpoint(Platform::Kick).browserUa, "revoke-kick-ua");
 
 #ifdef Q_OS_WIN
 	// T-032: DPAPI store round-trip with fake values; the file must
