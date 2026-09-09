@@ -125,6 +125,64 @@ class InMemoryInstallationStore(InstallationStore):
                              revoked=True), secret)
 
 
+class InMemoryOAuthTransactionStore:
+    """Development/tests: verifiers en memoria clara, un solo uso con TTL.
+    Producción: mismo port contra store cifrado (pendiente)."""
+
+    DEVELOPMENT_ONLY = True
+
+    def __init__(self, clock=None) -> None:
+        import time as _time
+        self._clock = clock or _time.time
+        self._data: dict[str, dict] = {}
+
+    def save(self, transaction: dict) -> None:
+        self._data[transaction["id"]] = dict(transaction)
+
+    def load(self, transaction_id: str) -> dict | None:
+        found = self._data.get(transaction_id)
+        return dict(found) if found is not None else None
+
+    def consume(self, transaction_id: str) -> dict | None:
+        found = self._data.get(transaction_id)
+        if found is None or found.get("consumed"):
+            return None
+        if self._clock() >= found.get("expires_at", 0):
+            self._data.pop(transaction_id, None)
+            return None
+        found["consumed"] = True
+        return dict(found)
+
+    def find_by_state(self, state: str) -> dict | None:
+        if not state:
+            return None
+        for entry in self._data.values():
+            if (entry.get("state") == state and not entry.get("consumed")
+                    and self._clock() < entry.get("expires_at", 0)):
+                return dict(entry)
+        return None
+
+
+class InMemoryConnectionStore:
+    """Development/tests: tokens en memoria clara. Producción: DB + cifrado
+    en reposo (pendiente, ver ARCHITECTURE-BACKEND §7/§10)."""
+
+    DEVELOPMENT_ONLY = True
+
+    def __init__(self) -> None:
+        self._data: dict[tuple[str, str], dict] = {}
+
+    def save(self, installation_id: str, provider: str, entry: dict) -> None:
+        self._data[(installation_id, provider)] = dict(entry)
+
+    def load(self, installation_id: str, provider: str) -> dict | None:
+        found = self._data.get((installation_id, provider))
+        return dict(found) if found is not None else None
+
+    def delete(self, installation_id: str, provider: str) -> None:
+        self._data.pop((installation_id, provider), None)
+
+
 # --- Redacción para logs/respuestas (guardrail, no única defensa) ---
 _SECRET_KEYS = ("secret", "token", "code", "verifier", "authorization",
                 "cookie", "set-cookie", "api_key", "apikey", "password")

@@ -142,3 +142,13 @@ Bootstrap anónimo rate-limitado → secreto por instalación (DPAPI `backendIns
 revocación por sesión o instalación. Endpoints: `POST /auth/bootstrap|/session|/refresh|/revoke|/installation/revoke`.
 Cliente Qt async en `src/backend_auth.*` (sin UI; wiring en T-048). Keypair asimétrico
 descartado (HMAC-SHA256 stdlib, propiedades equivalentes). Públicas: `/health|/ready|/version`.
+
+## 14. YouTube Adapter (T-045 PASS, ADR-011)
+
+`POST /connect/youtube` (sesión T-044) → transacción `{state, PKCE, TTL 600 s}` →
+`{transaction_id, authorization_url}` → browser → `GET /connect/youtube/callback`
+(validación state/expiración/binding, single-use) → exchange con secret →
+`TokenStore` → identidad `channels.mine` → `Connection`. `GET .../status`,
+`POST .../disconnect` (borrado + revoke best-effort). Refresh single-flight,
+margen 120 s. Al plugin: `{provider, status, account{id, displayName}}` —
+nunca tokens/secret/verifier. Live PASS contra Google 2026-09-09.
