@@ -72,4 +72,21 @@ Outcome classifyStatus(int code);
 // User-facing message. Never leaks JSON, headers, tokens or URLs (§16).
 QString userMessage(Outcome o, Platform p);
 
+// T-032: bounded retry policy for 429/5xx on Apply (§28). At most
+// kBackoffMaxRetries resends per platform with backoffDelayMs spacing;
+// never a loop. Refresh-once (§25) is preserved across resends.
+extern const int kBackoffMaxRetries; // 2
+extern const int kBackoffBaseMs;     // 2000
+int backoffDelayMs(int attempt);     // 1-based: 2000, 4000, ...; <=0 -> 0
+
+// T-032: provider revoke endpoints (P3-validated wire format, F-018/024).
+// Twitch: POST url?client_id=..&token=.. with empty form body.
+// YouTube/Kick: POST form with the token field below (Kick: browser UA).
+struct RevokeEndpoint {
+	const char *url;
+	const char *tokenField; // "" for Twitch (token goes in query)
+	bool browserUa;
+};
+RevokeEndpoint revokeEndpoint(Platform p);
+
 } // namespace meta

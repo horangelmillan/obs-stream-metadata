@@ -9,6 +9,22 @@
 
 Toda afirmación "funciona" requiere evidencia (comando + salida). "Probablemente funciona" no es válido.
 
+## P5 parcial (T-032, 2026-09-09, rama `feat/t-032-hardening`)
+
+```text
+CONFIGURE: PASS (preset windows-x64 incremental, Qt6 Network vía obs-deps, crypt32 SDK)
+BUILD:     PASS (plugin .dll + metadata-selfcheck.exe + provider-poc, RelWithDebInfo, 0 errores)
+SELFCHECK: PASS 35/35 (metadata: 19 heredados + backoff-*/revoke-*/store-* T-032) + 28/28 (provider-poc, regresión intacta)
+           DPAPI round-trip real en máquina dev: save→load iguales, fichero sin valores en claro, clear borra
+SECRET:    PASS (gate P4 + scan de valores en src/tools/docs, incl. ficheros nuevos; logs solo longitudes/códigos)
+CI:        pendiente (PR por abrir)
+LIVE:      PENDIENTE OPERADOR (OBS en uso durante la sesión: sin smoke del DLL) —
+           reinicio con cuentas (DPAPI restore), revoke en web → 401 → refresh/reconexión (§39.5-9),
+           429/5xx con Retrying… acotado, matriz T1–T20 sin regresión, `tls backend ready: yes`,
+           cero secretos en %APPDATA%\obs-studio\logs
+FINAL: P5 PARTIAL — no avanzar a P6 hasta el live del operador (P6/T-033 lo ejecuta).
+```
+
 ## P4 validada (T-031 PASS, 2026-09-08/09, rama `feat/t-031-mvp-integration`)
 
 ```text

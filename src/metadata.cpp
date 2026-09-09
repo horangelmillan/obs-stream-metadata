@@ -111,6 +111,30 @@ Outcome classifyStatus(int code)
 	return Outcome::NetworkError;
 }
 
+const int kBackoffMaxRetries = 2;
+const int kBackoffBaseMs = 2000;
+
+int backoffDelayMs(int attempt)
+{
+	if (attempt <= 0)
+		return 0;
+	return kBackoffBaseMs * attempt;
+}
+
+RevokeEndpoint revokeEndpoint(Platform p)
+{
+	switch (p) {
+	case Platform::Twitch:
+		return {"https://id.twitch.tv/oauth2/revoke", "", false};
+	case Platform::YouTube:
+		return {"https://oauth2.googleapis.com/revoke", "token",
+			false};
+	case Platform::Kick:
+		return {"https://id.kick.com/oauth/revoke", "token", true};
+	}
+	return {"", "", false};
+}
+
 QString userMessage(Outcome o, Platform p)
 {
 	switch (o) {
