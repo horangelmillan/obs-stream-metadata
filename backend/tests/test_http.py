@@ -1,0 +1,104 @@
+"""Tests HTTP en vivo: health/ready/version, errores JSON, auth gate, requestId."""
+import json
+import threading
+import unittest
+import urllib.request
+import urllib.error
+
+from backend.app import create_app
+from backend.config import Settings
+from backend.http_server import serve
+from backend.stores import InMemorySessionStore
+
+
+def _get(base, path, headers=None):
+    req = urllib.request.Request(base + path, method="GET", headers=headers or {})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status, dict(r.headers), r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, dict(e.headers), e.read()
+
+
+class HttpTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        settings = Settings(host="127.0.0.1", port=0)
+        cls.app = create_app(settings=settings)
+        cls.server = serve(cls.app)
+        cls.port = cls.server.server_address[1]
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+        cls.base = f"http://127.0.0.1:{cls.port}"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def test_health(self):
+        status, headers, body = _get(self.base, "/health")
+        self.assertEqual(status, 200)
+        payload = json.loads(body)
+        self.assertEqual(payload["status"], "ok")
+        self.assertIn("version", payload)
+        self.assertTrue(headers.get("X-Request-Id"))
+
+    def test_version(self):
+        status, _, body = _get(self.base, "/version")
+        self.assertEqual(status, 200)
+        payload = json.loads(body)
+        self.assertEqual(payload["api"], "v1")
+
+    def test_ready_ok_and_not_ready(self):
+        status, _, body = _get(self.base, "/ready")
+        self.assertEqual(status, 200)
+        self.assertTrue(json.loads(body)["ready"])
+        app = create_app(settings=Settings(host="127.0.0.1", port=0),
+                         ready_check=lambda: (False, "db-down"))
+        server = serve(app)
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            status, _, body = _get(f"http://127.0.0.1:{port}", "/ready")
+            self.assertEqual(status, 503)
+            self.assertFalse(json.loads(body)["ready"])
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_unknown_path_is_safe_401(self):
+        """El gate va primero: ruta desconocida no pública → 401 sin fugas."""
+        status, _, body = _get(self.base, "/nope")
+        self.assertEqual(status, 401)
+        payload = json.loads(body)
+        self.assertEqual(payload["error"]["code"], "authentication_error")
+        self.assertTrue(payload["error"]["requestId"])
+
+    def test_non_public_requires_session(self):
+        status, _, body = _get(self.base, "/connect/youtube")
+        self.assertEqual(status, 401)
+        self.assertEqual(json.loads(body)["error"]["code"], "authentication_error")
+
+    def test_session_allows_reserved_paths_shape(self):
+        """El gate existe: con sesión válida no hay 401 (aunque la ruta no exista aún)."""
+        sessions = InMemorySessionStore()
+        sessions.save_session("tok-1", {"installation": "i1"})
+        app = create_app(settings=Settings(host="127.0.0.1", port=0),
+                         sessions=sessions)
+        server = serve(app)
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            status, _, _ = _get(f"http://127.0.0.1:{port}", "/connect/youtube",
+                                {"Authorization": "Bearer tok-1"})
+            self.assertNotEqual(status, 401)
+        finally:
+            server.shutdown()
+            server.server_close()
+
+
+if __name__ == "__main__":
+    unittest.main()
