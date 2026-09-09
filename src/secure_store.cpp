@@ -107,8 +107,7 @@ QJsonObject recordToJson(const Record &r)
 }
 
 bool recordFromJson(const QJsonObject &o, Record &r)
-{
-	if (o.isEmpty() || !o.value(QStringLiteral("connected")).toBool())
+{	if (o.isEmpty() || !o.value(QStringLiteral("connected")).toBool())
 		return false;
 	r.display = o.value(QStringLiteral("display")).toString();
 	r.broadcaster =
@@ -131,6 +130,32 @@ bool recordFromJson(const QJsonObject &o, Record &r)
 #endif
 }
 
+// T-044: installation identity record. Same DPAPI envelope as provider
+// records, but success requires clientId (installation_id), not access.
+bool installFromJson(const QJsonObject &o, Record &r)
+{
+	if (o.isEmpty() || !o.value(QStringLiteral("connected")).toBool())
+		return false;
+#ifdef Q_OS_WIN
+	const QByteArray blob = QByteArray::fromBase64(
+		o.value(QStringLiteral("blob")).toString().toLatin1());
+	const QByteArray plain = unprotect(blob);
+	if (plain == QByteArray("__dpapi_fail__") || plain.isEmpty())
+		return false;
+	const QJsonObject s =
+		QJsonDocument::fromJson(plain).object();
+	if (s.isEmpty())
+		return false;
+	r = sensitiveFromJson(r, s);
+	r.connected = true;
+	return !r.clientId.isEmpty() && !r.secret.isEmpty();
+#else
+	Q_UNUSED(o);
+	Q_UNUSED(r);
+	return false;
+#endif
+}
+
 } // namespace
 
 Store::Store(const QString &filePath) : filePath_(filePath) {}
@@ -141,10 +166,11 @@ bool Store::save(const Data &d)
 	if (filePath_.isEmpty())
 		return false;
 	QDir().mkpath(QFileInfo(filePath_).absolutePath());
-	const Record *recs[3] = {&d.twitch, &d.youtube, &d.kick};
-	const char *keys[3] = {"twitch", "youtube", "kick"};
+	const Record *recs[4] = {&d.twitch, &d.youtube, &d.kick,
+				 &d.backendInstall};
+	const char *keys[4] = {"twitch", "youtube", "kick", "backend"};
 	QJsonObject root;
-	for (int i = 0; i < 3; ++i) {
+	for (int i = 0; i < 4; ++i) {
 		if (!recs[i]->connected)
 			continue;
 		const QJsonObject o = recordToJson(*recs[i]);
@@ -185,7 +211,14 @@ bool Store::load(Data &d)
 			      d.youtube);
 	any |= recordFromJson(root.value(QStringLiteral("kick")).toObject(),
 			      d.kick);
-	if (!any)
+	// Missing "backend" key in pre-T-044 files: installFromJson on an
+	// empty object returns false, existing behavior unchanged. The
+	// installation identity is preserved even when no provider is
+	// connected (any stays provider-only by design).
+	const bool backendOk = installFromJson(
+		root.value(QStringLiteral("backend")).toObject(),
+		d.backendInstall);
+	if (!any && !backendOk)
 		d = Data();
 	return any;
 #else

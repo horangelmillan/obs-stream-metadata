@@ -134,3 +134,11 @@ Fundación stdlib-only en `backend/`: `kernel.py`, `ports.py`, `errors.py`, `con
 (`GET /health|/ready|/version`), `adapters/{youtube,kick,twitch}.py` (estructura sin red),
 27 tests (`backend/tests/`) + smoke real. Sin llamadas a proveedores ni OAuth productivo.
 Stack producción (runtime/DB) no fijado: la fundación no lo condiciona.
+
+## 13. Auth Plugin↔Backend (T-044 PASS, ADR-010)
+
+Bootstrap anónimo rate-limitado → secreto por instalación (DPAPI `backendInstall`)
+→ sesiones opacas 30 min (memoria) → refresh con firma HMAC + nonce un solo uso →
+revocación por sesión o instalación. Endpoints: `POST /auth/bootstrap|/session|/refresh|/revoke|/installation/revoke`.
+Cliente Qt async en `src/backend_auth.*` (sin UI; wiring en T-048). Keypair asimétrico
+descartado (HMAC-SHA256 stdlib, propiedades equivalentes). Públicas: `/health|/ready|/version`.
