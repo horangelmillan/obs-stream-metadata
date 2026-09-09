@@ -17,6 +17,19 @@ Estados: pendiente / en-progreso / bloqueada / hecha / deuda / investigación / 
 | T-032 | hecha | 5 | Hardening: storage seguro OS, revoke en Disconnect, backoff 429/5xx, fin de env-vars, distribución secrets F-017/F-019 | sobrevive reinicio sin plaintext; revocación verificada por proveedor; 429 sin reintento agresivo; cero secretos en repo/logs; matriz T1–T20 sin regresión | AGENTS §16-18, §26-29, ADR-008, F-029–F-032 |
 | T-033 | en-progreso | 6 | Testing integración + negativos AGENTS §39-40 | gate §50 en verde | AGENTS §39-40, §50 |
 | T-034 | futuro | 7 | Packaging/release instalador plugin | flujo §36 funciona | template wiki Distribute |
+| T-035 | hecha | 6 | Prueba empírica YouTube secretless (Desktop + PKCE + loopback + `youtube.force-ssl`, sin secret) | FAIL: `400 invalid_request: client_secret is missing` con auth real; secret exigido en esta configuración | F-034 → F-038 |
+| T-036 | hecha | 6 | Prueba empírica Kick secretless (auth + PKCE + localhost, sin secret) + control con secret | FAIL secretless (`400` vacío) + control `200` con secret; secreto aislado como causa | F-036 → F-039 |
+| T-037 | hecha | 6 | Investigación distribución Client ID Google (política open-source/release privada/backend) | Sin permiso oficial para secreto en binario público; release-privada no resuelve extracción; backend como vía conforme | F-035 → F-040 |
+| T-038 | hecha | 6 | Decisión arquitectura final OAuth distribuido | ADR-009 MODIFY + `ARCHITECTURE-BACKEND.md` | F-033–F-041 |
+| T-039 | hecha | 6 | ADR-009 arquitectura OAuth final | `docs/DECISIONS/ADR-009-centralized-backend-architecture.md` aprobado en T-038 | T-038 |
 | T-040 | hecha | 0 | Normalizar `core.autocrlf` y convención `master` vs `main` | ADR + config | — |
+| T-041 | pendiente | 6 | Migración UX fuera de BYO-app (`Connect` sin exponer app credentials) | UX §36-38 sin IDs/secrets visibles | T-038, T-039 |
+| T-042 | pendiente | 7 | Arquitectura backend Kick si se confirma necesaria (auth plugin→backend, anti-abuso, rate-limit, logs, rotación, privacidad, coste; NO diseñar/implementar ahora) | alcance conceptual aprobado | F-036 |
+| T-043 | hecha | 7 | Backend foundation (servicio HTTPS + DB mínima + secret manager + dominio/TLS) | fundación stdlib `backend/` en verde: 27 tests, health/ready/version, kernel/ports/adapters aislados, sin secretos | ADR-009 |
+| T-044 | pendiente | 7 | Auth plugin↔backend (identidad instalación + sesiones cortas + rate-limit, sin secreto permanente) | abuso mitigado sin secreto embebido | ADR-009 |
+| T-045 | pendiente | 7 | Adapter OAuth YouTube en backend (exchange/refresh/revoke + verificación Google) | Connect YouTube sin secret en cliente | ADR-009 |
+| T-046 | pendiente | 7 | Adapter OAuth Kick en backend (exchange/refresh/revoke) | Connect Kick sin secret en cliente | ADR-009 |
+| T-047 | pendiente | 7 | Twitch directo endurecido (Client ID distribuido + DCF, sin backend) | Connect Twitch sin cambios UX | F-015, F-033 |
+| T-048 | pendiente | 6 | Migración UX fuera de BYO-app (campos ID/Secret a modo operador oculto) | camino feliz `Connect` sin credenciales visibles | T-041, ADR-009 |
 
 Regla: cada PR referencia su T-### y actualiza esta tabla + STATE.
