@@ -112,3 +112,36 @@ Alta una sola vez por plataforma, con tus propias apps:
 Instalación del staging y reglas de CWD/cierre elegante: idénticas a
 T-031 (arriba). Si OBS está en uso, instala en un staging nuevo; el
 DLL en uso está bloqueado.
+
+## T-033 — matriz viva §39-40 del operador (P6, pendiente)
+
+Alta de credenciales y despliegue: idénticos a T-032 (arriba). Los
+negativos bloqueados por validación local ya están cubiertos offline
+(`metadata-selfcheck.exe`: título vacío/141/101, descripción 5001,
+mapa §28 completo, mensajes sin secretos, payload YouTube `id+snippet`
+sin `contentDetails`, backoff 2/4/6 s, revoke por proveedor). Lo que
+sigue exige cuentas reales y lo ejecuta el operador; no se declara
+verde desde esta sesión:
+
+**Positivos §39 (verificar en la web de cada plataforma):**
+Twitch 1-9 (conectar → identidad → título → read-back web →
+reinicio → persistencia DPAPI → título de nuevo → revocar en la web
+→ 401 con `Reconnect`); YouTube 1-10 (conectar → permiso live →
+listar → seleccionar → título+descripción → read-back Studio →
+reinicio → repetir → probar en `upcoming/ready` y en `live`);
+Kick 1-9 igual que Twitch, confirmando `204` y verificando el título
+**en directo** (en offline el 204 aplica pero no es legible, F-023).
+
+**Negativos vivos §40 (un fallo no bloquea al resto de plataformas):**
+Twitch con scope sin `channel:manage:broadcast` (403 `permissions`);
+YouTube con broadcast inexistente (404 `no valid broadcast`), cuenta
+sin live streaming habilitado y token sin permisos (403/401);
+Kick con scope sin `channel:write` (403) y token expirado (401 →
+refresh único → `Reconnect`); 429/5xx en Apply (`Retrying…` máx 2,
+jamás en bucle). Sin polling (cuota YouTube §11.9): listar broadcasts
+solo al pulsar Refresh, actualizar solo al pulsar Apply.
+
+Reglas de seguridad (F-018, F-024): jamás tokens/codes/verifiers en
+chat, capturas, repo, logs ni PR; tras cada sesión viva, comprobar
+que `%APPDATA%\obs-studio\logs` no contiene secretos (solo longitudes
+y códigos HTTP).

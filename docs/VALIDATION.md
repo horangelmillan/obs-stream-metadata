@@ -9,6 +9,23 @@
 
 Toda afirmación "funciona" requiere evidencia (comando + salida). "Probablemente funciona" no es válido.
 
+## P6 parcial (T-033, 2026-09-09, rama `feat/t-033-integration-testing`)
+
+```text
+CONFIGURE: PASS (preset windows-x64 incremental, Qt6 Network vía obs-deps, crypt32 SDK)
+BUILD:     PASS (plugin .dll + metadata-selfcheck.exe + provider-poc, RelWithDebInfo, 0 errores)
+SELFCHECK: PASS 68/68 (metadata: 35 heredados T-031/T-032 + 33 nuevos §40 T-033:
+            youtube-empty/100, ytdesc-5000, mixed-141, mapa §28 200/400/403/
+            404/409/500/503/0/999, message-safe-all + 6 mensajes específicos,
+            ytpl id/title/desc/preserve/no-contentdetails, backoff-3/neg,
+            revoke shape tw/yt/kick) + 28/28 (provider-poc, regresión intacta)
+SECRET:    PASS (gate P4 + scan de valores en src/tools/docs, incl. ficheros nuevos; logs solo longitudes/códigos)
+CI:        pendiente (PR por abrir)
+LIVE:      PENDIENTE OPERADOR (§39-40 con cuentas reales: procedimiento en
+            TROUBLESHOOTING T-033; gate §50 no se declara verde sin él)
+FINAL: P6 PARTIAL — no avanzar a P7 hasta el live del operador.
+```
+
 ## P5 parcial (T-032, 2026-09-09, rama `feat/t-032-hardening`)
 
 ```text
