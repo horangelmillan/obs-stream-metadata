@@ -61,7 +61,16 @@ y cierra con PR (CI verde + aprobación).
 - **Validación:** verificación en web de cada plataforma; tokens de prueba nunca en repo/logs.
 - **Resultado T-030 (2026-09-08):** P3 PASS — triple LIVE PASS con read-back (Twitch device flow; YouTube Desktop+PKCE, `mine` solo, PUT `id+snippet`; Kick PKCE+localhost, 204, read-back en directo por doble vía). Findings F-019–F-024. Descripción YouTube queda para P4 (solo se validó título, sin regresión).
 
-## P4 — Unified Dock (UI mínima real)
+## P4 — Unified Dock (UI mínima real) — ✅ PASS (T-031, 2026-09-09)
+
+Implementado en `feat/t-031-mvp-integration` y validado en vivo (matriz §19 verde, T1–T20):
+`src/metadata.*` (modelo + validación restrictiva + payloads + mensajes §16),
+`src/metadata_dock.*` (checkboxes, título, descripción solo-YouTube,
+selector de broadcast, Connect/Disconnect por proveedor, Apply secuencial
+async con resultado independiente, refresh-una-vez ante 401), tokens solo
+en memoria (limitación documentada, P5 decide storage), gate CI P1→P4.
+Evidencia: build 0 errores, selfchecks 19/19 + 28/28, secret-scan limpio,
+OBS 32.2.2 ×ciclos limpios + fixes F-026/F-027/F-028. T-031 cerrada con PASS.
 
 - **Objetivo:** el dock usable del MVP (`AGENTS.md` §37): cuentas vinculadas, título, descripción, selector de broadcast YouTube, aplicar por plataforma, resultado independiente por plataforma (sin todo-o-nada, §19).
 - **Alcance:** formulario Qt; matriz de capacidades visible (Twitch/Kick: descripción no disponible, §3); estado conectado/como-quién (§38); conectar/desconectar por proveedor (§29).
@@ -73,11 +82,16 @@ y cierra con PR (CI verde + aprobación).
 ## P5 — Hardening
 
 - **Objetivo:** que el MVP sea fiable y seguro, no solo funcional.
-- **Alcance:** persistencia de tokens que sobrevive reinicios con almacenamiento OS-apropiado (nunca plaintext en JSON, §9/§16); refresh + detección 401→reconexión; mapeo de errores §28 (400/401/403/404/409/429/5xx + `204` como éxito); red fuera del hilo UI; logs útiles sin secretos (§27); validaciones locales §20.
+- **Entrada (estado T-031, no rehacer):** async QNAM, refresh-único ante 401, mapeo §28 en UI, validaciones §20 y logs sin secretos ya existen y están en verde. P5 añade lo ausente:
+  1. persistencia de tokens que sobrevive reinicios con almacenamiento OS-apropiado en Windows (nunca plaintext; hoy: memoria-solo);
+  2. revoke real en Disconnect (hoy: limpieza local, SECURITY.md);
+  3. backoff limitado 429/5xx (hoy: mensaje sin reintento);
+  4. fin de credenciales por env vars (input local o app registrada por el usuario);
+  5. decisión de distribución de secrets YouTube Desktop/Kick (F-017/F-019, posible ADR-008).
 - **No-objetivos:** nuevas funcionalidades.
-- **Dependencias:** P4. **Riesgos:** mecanismo de storage seguro en Windows por investigar en su momento.
-- **Entrada:** dock unificado funciona. **Salida:** reinicio/revocación/rate-limit se comportan según §28-29.
-- **Validación:** pruebas de expiración/revocación por proveedor (pasos §39.5-9).
+- **Dependencias:** P4 PASS. **Riesgos:** mecanismo de storage seguro en Windows por investigar (DPAPI); secret embebido prohibido.
+- **Salida:** reinicio/revocación/rate-limit se comportan según §28-29.
+- **Validación:** expiración/revocación por proveedor (§39.5-9) + matriz T1–T20 sin regresión.
 
 ## P6 — Integration Testing
 

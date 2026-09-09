@@ -45,7 +45,8 @@ Despliegue dev (sin admin; F-010 — `%APPDATA%\obs-studio\plugins` NO se escane
 
 ```powershell
 # <staging>\obs-stream-metadata\bin\64bit\*.dll -> $env:OBS_PLUGINS_PATH
-# <staging>\obs-stream-metadata\data\ -> $env:OBS_PLUGINS_DATA_PATH\obs-stream-metadata\
+# DATA_PATH es la BASE: OBS antepone /%module% (F-027). Copiar una vez:
+# Copy-Item -Recurse '<staging>\obs-stream-metadata\data\*' '<base>\obs-stream-metadata\'
 $env:OBS_PLUGINS_PATH = '<dir-con-dll>'; $env:OBS_PLUGINS_DATA_PATH = '<base-data>'
 Start-Process 'C:\Program Files\obs-studio\bin\64bit\obs64.exe' -WorkingDirectory 'C:\Program Files\obs-studio\bin\64bit'
 ```
@@ -55,3 +56,34 @@ Reglas (F-009, F-011):
 - **`-WorkingDirectory` obligatorio** = `bin\64bit` del OBS instalado; sin esto el arranque aborta con `Failed to find locale/en-US.ini`.
 - **Cerrar siempre elegante** (`CloseMainWindow` + esperar salida); jamás `Stop-Process -Force` (deja `run_*` en `%APPDATA%\obs-studio\.sentinel` y el siguiente arranque pide safe-mode). Si ocurre: borrar `run_*` obsoletos y relanzar.
 - Carga verificada en: módulos del proceso (`obs-stream-metadata.dll`) + log `%APPDATA%\obs-studio\logs` (`plugin loaded successfully` / `plugin unloaded`).
+
+## T-031 — validación viva del dock MVP (operador, con sus propias apps)
+
+Requisito: una app registrada por el operador en cada plataforma
+(Twitch: consola dev; Google: Cloud Console cliente Desktop + YouTube
+Data API habilitada; Kick: portal dev con redirect
+`http://localhost:3000/cb`). Los valores viven SOLO en env vars locales
+de la sesión de OBS — jamás en repo, chat o capturas (F-018, F-024):
+
+```powershell
+$env:STREAM_META_TWITCH_CLIENT_ID = '<id>'
+$env:STREAM_META_YOUTUBE_CLIENT_ID = '<id>'
+$env:STREAM_META_YOUTUBE_CLIENT_SECRET = '<secret>'
+$env:STREAM_META_KICK_CLIENT_ID = '<id>'
+$env:STREAM_META_KICK_CLIENT_SECRET = '<secret>'
+$env:OBS_PLUGINS_PATH = '<staging>\obs-stream-metadata\bin\64bit'
+# DATA_PATH es la BASE: OBS antepone /%module% (OBSBasic.cpp:136-139, F-027),
+# asi que el contenido de <staging>\obs-stream-metadata\data\ debe copiarse a
+# <base>\obs-stream-metadata\ (una vez por staging):
+# Copy-Item -Recurse '<staging>\obs-stream-metadata\data\*' '<base>\obs-stream-metadata\'
+$env:OBS_PLUGINS_DATA_PATH = '<base>'
+Start-Process 'C:\Program Files\obs-studio\bin\64bit\obs64.exe' -WorkingDirectory 'C:\Program Files\obs-studio\bin\64bit'
+```
+
+En el dock: Connect por plataforma (Twitch: device flow con user_code;
+YouTube/Kick: navegador + callback local) → título de prueba →
+Refresh broadcasts (YouTube) → Apply → verificar en la web de cada
+plataforma. Kick: verificar **en directo** (en offline el 204 aplica
+pero no es legible, F-023). Negativos: título 101 con YouTube
+seleccionado (bloquea antes de red), token revocado (401 → refresh o
+reconexión), plataforma sin conectar (error individual, el resto sigue).

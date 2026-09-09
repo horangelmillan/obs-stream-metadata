@@ -32,13 +32,15 @@ jobs:
           test -f docs/SECURITY.md
           test -f docs/TROUBLESHOOTING.md
 
-      - name: P1 skeleton gate (no provider code yet)
+      - name: P4 product gate (provider code lives in src/)
         run: |
           test -f buildspec.json
           test -f CMakeLists.txt
           test -f src/plugin-main.c
-          if grep -rEI "twitch|youtube|kick|oauth|refresh_token|client_secret" src/ cmake/ CMakeLists.txt CMakePresets.json buildspec.json ; then echo "provider/functional code not allowed in P1"; exit 1; fi
-          echo "p1 skeleton gate ok"
+          test -f src/metadata.h
+          test -f src/metadata_dock.h
+          if grep -rEI '(client_secret|refresh_token|access_token)[[:space:]]*=[[:space:]]*["A-Za-z0-9_.-]{8,}' src/ cmake/ CMakeLists.txt CMakePresets.json buildspec.json ; then echo "secret value in product code"; exit 1; fi
+          echo "p4 product gate ok"
 
       # Escanea valores con pinta de secreto (asignaciones, prefijos conocidos,
       # claves PEM), no menciones documentales de nombres como `access_token`.

@@ -22,8 +22,8 @@ if(ENABLE_FRONTEND_API)
 endif()
 
 if(ENABLE_QT)
-  find_package(Qt6 COMPONENTS Widgets Core)
-  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::Core Qt6::Widgets)
+  find_package(Qt6 COMPONENTS Widgets Core Network)
+  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::Core Qt6::Widgets Qt6::Network)
   target_compile_options(
     ${CMAKE_PROJECT_NAME}
     PRIVATE $<$<C_COMPILER_ID:Clang,AppleClang>:-Wno-quoted-include-in-framework-header -Wno-comma>
@@ -34,10 +34,36 @@ if(ENABLE_QT)
   )
 endif()
 
-target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/plugin-main.c src/dock-poc.cpp)
+target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/plugin-main.c src/dock-poc.cpp src/metadata.cpp
+                                                     src/metadata_dock.cpp)
 
 if(ENABLE_QT)
   add_subdirectory(poc/t030)
+
+  # T-031 product selfcheck (QtCore only, on demand).
+  add_executable(metadata-selfcheck EXCLUDE_FROM_ALL src/metadata_selfcheck.cpp src/metadata.cpp)
+  target_link_libraries(metadata-selfcheck PRIVATE Qt6::Core)
+  target_include_directories(metadata-selfcheck PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+endif()
+
+if(WIN32 AND ENABLE_QT)
+  # OBS's own Qt runtime ships no TLS backend plugin: HTTPS from the dock
+  # fails without it (F-027). Bundle Schannel's backend from our pinned
+  # obs-deps Qt next to our data dir; the dock adds it via addLibraryPath.
+  get_target_property(_qt_core_loc Qt6::Core IMPORTED_LOCATION_RELEASE)
+  if(NOT _qt_core_loc)
+    get_target_property(_qt_core_loc Qt6::Core IMPORTED_LOCATION)
+  endif()
+  if(_qt_core_loc)
+    get_filename_component(_qt_bin "${_qt_core_loc}" DIRECTORY)
+    set(_qt_tls_dll "${_qt_bin}/../plugins/tls/qschannelbackend.dll")
+    if(EXISTS "${_qt_tls_dll}")
+      install(FILES "${_qt_tls_dll}" DESTINATION "${CMAKE_PROJECT_NAME}/data/tls")
+      message(STATUS "Bundling Qt TLS backend: ${_qt_tls_dll}")
+    else()
+      message(WARNING "Qt TLS backend not found at ${_qt_tls_dll}, HTTPS will fail at runtime")
+    endif()
+  endif()
 endif()
 
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})
