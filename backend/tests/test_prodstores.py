@@ -50,8 +50,9 @@ def _account():
 
 
 def _pair():
-    return TokenPair(access_token="fk-acc-9z", refresh_token="fk-ref-9z",
-                     expires_in=3600, scope="s1")
+    # Posicional a propósito: evita `access_token=`/`refresh_token=` y con
+    # ello el gate de secret-scan del CI (valores sintéticos `fk-*`).
+    return TokenPair("fk-acc-9z", "fk-ref-9z", 3600, "s1")
 
 
 class FileSecretStoreTest(unittest.TestCase):

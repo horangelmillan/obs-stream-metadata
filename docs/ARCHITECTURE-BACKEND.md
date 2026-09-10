@@ -225,6 +225,11 @@ transactions/adapters/stores` KEEP AS BASE (Managed); stores memoria/Env =
 PROTOTYPE (prod: secret-manager + DB cifrada, T-054); `AllowAllRateLimiter`
 sustituido en T-044 (FixedWindow; distribuido = INCOMPLETE); nada a DEPRECATE.
 
+> Nota 2026-09-10 (T-054, sin reescribir la auditoría): la dirección
+> "secret-manager + DB cifrada" se concretó como SQLite stdlib 0600 +
+> secretos por fichero + TLS builtin opcional (ver §19 y ADR-013); el
+> gate `AllowAll` en producción se añadió en T-054.
+
 ### Correspondencia modal (T-049, sin código aquí)
 
 `meta::ConnectionMode` vive solo en C++ (`metadata.h`). Este backend no lo
