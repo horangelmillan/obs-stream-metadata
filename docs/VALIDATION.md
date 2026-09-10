@@ -21,7 +21,28 @@ KICK MANAGED LIVE: PASS — idem vía localhost:3000 (secret backend-only)
 SECRET:    PASS (scan patrón CI limpio; temp store borrado; dev.env intacto y sin traquear)
 DOCK:      cableado compilado; pixel-click pendiente operador (F-014);
            smoke OBS previo con `dock ready (mode=Independent)` vigente
-FINAL: T-048 PASS (sin licencias/pagos/producción; matrices T-050–T-052 pendientes)
+FINAL: T-048 PASS (sin licencias/pagos/producción; matrices T-050–T-052 cerradas abajo)
+```
+
+## T-050/T-051/T-052 cierre (2026-09-09/10, commit `8ebe9cb`, PR #19)
+
+```text
+BUILD:     PASS (obs-stream-metadata.dll + metadata-selfcheck.exe, exit 0, 0 errores;
+            revalidado 2026-09-10 sobre master mergeado)
+SELFCHECK: PASS 106/106, 0 FAIL (89 heredados + 17 nuevos msnap-* T-051; el CHECK 18
+            `msnap-rt-skipped-non-windows` solo ejecuta fuera de Windows)
+BACKEND:   PASS 73/73 (70 heredados + 3 nuevos test_cross_provider.py T-052:
+            mismatch youtube/kick, mismatch kick/youtube, twitch-managed-unsupported)
+YT MANAGED LIVE: PASS 2026-09-09 — bootstrap → session → connect → browser consent →
+            callback → status → disconnect (revalidado; no repetido el 2026-09-10)
+KICK MANAGED LIVE: PASS 2026-09-09 — idem vía localhost (revalidado; no repetido el 2026-09-10)
+SECRET:    PASS (patrón CI ci-phase0.yml sobre árbol trackeado: limpio; único hit local
+            en dev.env ignorado .gitignore:60, sin traquear; snapshots Managed sin secretos
+            verificado por msnap-no-secret-shapes)
+AUDIT:     ADR-012 intacto; managedSupported()==false para Twitch; loadStore sin auto-fetch;
+            Account ≠ ManagedConn; sin fallback silencioso
+DOCK:      pixel-click pendiente operador (F-014); checklist cross-mode en TROUBLESHOOTING T-052
+FINAL: T-050 PASS + T-051 PASS + T-052 PASS con salvedad GUI-clicks operador PENDING
 ```
 
 ## P6 parcial (T-033, 2026-09-09, rama `feat/t-033-integration-testing`)
