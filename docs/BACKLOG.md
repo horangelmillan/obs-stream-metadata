@@ -39,6 +39,7 @@ Estados: pendiente / en-progreso / bloqueada / hecha / deuda / investigación / 
 | T-054 | hecha | 7 | [Infrastructure] Endurecimiento producción backend (SQLite 0600 + secretos por fichero + TLS builtin + gates + DEPLOYMENT.md + ADR-013) | production-capable con salvedad (no deployed); 104 backend + 115 selfcheck en verde; prod-smoke local OK | ADR-012, ADR-013 |
 | T-055 | hecha | 7 | [Infrastructure] PostgreSQL portable + Cloud Run/Neon (DATABASE_URL genérica, migrations, pgstores, pool, Dockerfile, ADR-014) | 116 backend (12 PG reales) + 115 selfcheck en verde; despliegue pendiente operador | ADR-012, ADR-014 |
 | T-057 | futuro | 7 | [Commercial] Diseño suscripción/licencias (OPEN: proveedor pagos, planes, expiración, grace, límites) | decisión documentada, sin implementar pagos | ADR-012 |
-| T-056 | pendiente | 7 | [Security] Privacy policy + inventario de datos Managed (retención, revoke, eliminación, logs, incidentes) | documento previo a producción | ADR-012 |
+| T-058 | pendiente | 7 | [Security] Privacy policy + inventario de datos Managed (retención, revoke, eliminación, logs, incidentes) | documento previo a producción | ADR-012 |
+| T-056 | hecha | 7 | [Infrastructure] Bind production 0.0.0.0 (Cloud Run) + estado de despliegue | host por entorno + override explícito + 5 tests; 121 backend en verde; despliegue pendiente de reintento | ADR-012 |
 
 Regla: cada PR referencia su T-### y actualiza esta tabla + STATE.
