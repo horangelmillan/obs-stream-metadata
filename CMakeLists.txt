@@ -7,6 +7,16 @@ project(${_name} VERSION ${_version})
 option(ENABLE_FRONTEND_API "Use obs-frontend-api for UI functionality" OFF)
 option(ENABLE_QT "Use Qt functionality" OFF)
 
+# T-047: distributed Twitch Client ID (public per Twitch docs; DCF needs
+# no secret). Empty default = today's behavior (user pastes BYO ID).
+# Release builds set it; the VALUE never belongs in the repo. Only
+# [A-Za-z0-9] accepted (fail-fast against injection via build flags).
+set(OBS_TWITCH_CLIENT_ID "" CACHE STRING
+    "Distributed Twitch Client ID for Independent DCF (public, no secret)")
+if(OBS_TWITCH_CLIENT_ID AND NOT OBS_TWITCH_CLIENT_ID MATCHES "^[A-Za-z0-9]+$")
+  message(FATAL_ERROR "OBS_TWITCH_CLIENT_ID must be alphanumeric or empty")
+endif()
+
 include(compilerconfig)
 include(defaults)
 include(helpers)
@@ -32,6 +42,11 @@ if(ENABLE_QT)
     ${CMAKE_PROJECT_NAME}
     PRIVATE $<$<C_COMPILER_ID:Clang,AppleClang>:-Wno-quoted-include-in-framework-header -Wno-comma>
   )
+  # T-047: distributed ID visible to metadata.cpp (empty string when unset).
+  target_compile_definitions(
+    ${CMAKE_PROJECT_NAME}
+    PRIVATE OBS_TWITCH_CLIENT_ID="${OBS_TWITCH_CLIENT_ID}"
+  )
   set_target_properties(
     ${CMAKE_PROJECT_NAME}
     PROPERTIES AUTOMOC ON AUTOUIC ON AUTORCC ON
@@ -50,6 +65,10 @@ if(ENABLE_QT)
   add_executable(metadata-selfcheck EXCLUDE_FROM_ALL src/metadata_selfcheck.cpp src/metadata.cpp
                                                      src/secure_store.cpp)
   target_link_libraries(metadata-selfcheck PRIVATE Qt6::Core)
+  # T-047: deterministic fake distributed ID for twitchClientId tests
+  # (never a real credential; the plugin default stays empty).
+  target_compile_definitions(metadata-selfcheck PRIVATE
+    OBS_TWITCH_CLIENT_ID="fk-dist-tw-id-9z")
   if(WIN32)
     target_link_libraries(metadata-selfcheck PRIVATE crypt32)
   endif()

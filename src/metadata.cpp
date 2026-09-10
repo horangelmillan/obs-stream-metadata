@@ -208,4 +208,37 @@ QString userMessage(Outcome o, Platform p)
 	return QStringLiteral("%1: unexpected error.").arg(platformName(p));
 }
 
+// T-047: distributed Client ID. OBS_TWITCH_CLIENT_ID comes from the
+// build (CMake OBS_TWITCH_CLIENT_ID, default empty); the value is
+// public per Twitch docs (DCF needs no secret), never logged.
+QString twitchClientId(const QString &fieldValue)
+{
+	const QString field = fieldValue.trimmed();
+	if (!field.isEmpty())
+		return field;
+#ifdef OBS_TWITCH_CLIENT_ID
+	return QString::fromLatin1(OBS_TWITCH_CLIENT_ID);
+#else
+	return QString();
+#endif
+}
+
+// T-047: mirrors the Op::TwPoll branches exactly (pending/slow_down
+// consume one attempt; anything else terminates). pollsLeft is the
+// count remaining AFTER this response.
+TwPollAction classifyTwPoll(int http, bool netFail, const QString &message,
+			    int pollsLeft)
+{
+	if (!netFail && http == 200)
+		return TwPollAction::Consume;
+	if (message.contains(QStringLiteral("authorization_pending")) &&
+	    pollsLeft > 0)
+		return TwPollAction::KeepPolling;
+	if (message.contains(QStringLiteral("slow_down")) && pollsLeft > 0)
+		return TwPollAction::SlowDown;
+	if (message.contains(QStringLiteral("access_denied")))
+		return TwPollAction::FailDenied;
+	return TwPollAction::FailExpired;
+}
+
 } // namespace meta

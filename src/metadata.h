@@ -99,6 +99,26 @@ extern const int kBackoffMaxRetries; // 2
 extern const int kBackoffBaseMs;     // 2000
 int backoffDelayMs(int attempt);     // 1-based: 2000, 4000, ...; <=0 -> 0
 
+// T-047: distributed Twitch Client ID (public, DCF without secret).
+// Resolution: explicit field value (trimmed, BYO/dev override) wins;
+// otherwise the build-time distributed ID (possibly empty -> caller
+// errors exactly as before). Never a secret: no secret field is read.
+QString twitchClientId(const QString &fieldValue);
+
+// T-047: pure DCF poll decision (Twitch device flow, no I/O).
+// pollsLeft = remaining attempts AFTER this response (caller decrements).
+// success/pending/slow_down/denied/expired per Twitch protocol; never a
+// busy-loop (caller re-arms a single-shot timer only on polling actions).
+enum class TwPollAction {
+	Consume,     // HTTP 200: read tokens
+	KeepPolling, // authorization_pending + pollsLeft > 0
+	SlowDown,    // slow_down + pollsLeft > 0 (caller adds +5s)
+	FailDenied,  // access_denied
+	FailExpired, // expired/denied-other/exhausted/no-polls-left
+};
+TwPollAction classifyTwPoll(int http, bool netFail, const QString &message,
+			    int pollsLeft);
+
 // T-032: provider revoke endpoints (P3-validated wire format, F-018/024).
 // Twitch: POST url?client_id=..&token=.. with empty form body.
 // YouTube/Kick: POST form with the token field below (Kick: browser UA).
