@@ -306,6 +306,46 @@ int main(int argc, char **argv)
 	CHECK(true, "store-skipped-non-windows");
 #endif
 
+	// T-049: ConnectionMode domain concept (no UI, no persistence yet).
+	CHECK(QString::fromLatin1(connectionModeName(
+					 ConnectionMode::Independent)) ==
+		      QStringLiteral("Independent"),
+	      "mode-name-independent");
+	CHECK(QString::fromLatin1(connectionModeName(
+					 ConnectionMode::Managed)) ==
+		      QStringLiteral("Managed"),
+	      "mode-name-managed");
+	CHECK(defaultConnectionMode() == ConnectionMode::Independent,
+	      "mode-default-independent");
+	CHECK(parseConnectionMode(QStringLiteral("independent")) ==
+		      ConnectionMode::Independent,
+	      "mode-parse-independent");
+	CHECK(parseConnectionMode(QStringLiteral("managed")) ==
+		      ConnectionMode::Managed,
+	      "mode-parse-managed");
+	CHECK(!parseConnectionMode(QStringLiteral("BYO")).has_value() &&
+		      !parseConnectionMode(QStringLiteral("Independent"))
+			       .has_value() &&
+		      !parseConnectionMode(QString()).has_value(),
+	      "mode-parse-strict");
+	{
+		// Every (Platform, ConnectionMode) pair is representable;
+		// support per pair is decided by T-041/T-048, not here.
+		const Platform platforms[] = {Platform::Twitch,
+					      Platform::YouTube, Platform::Kick};
+		const ConnectionMode modes[] = {ConnectionMode::Independent,
+						ConnectionMode::Managed};
+		int pairs = 0;
+		for (Platform p : platforms) {
+			for (ConnectionMode m : modes) {
+				if (platformName(p)[0] != '?' &&
+				    connectionModeName(m)[0] != '?')
+					++pairs;
+			}
+		}
+		CHECK(pairs == 6, "mode-provider-pairs");
+	}
+
 	std::printf("SELFCHECK OK\n");
 	return 0;
 }

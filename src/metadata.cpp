@@ -27,6 +27,33 @@ const char *platformName(Platform p)
 	return "?";
 }
 
+// T-049: mode names are distinct by construction; default is Independent
+// (all existing behavior and persisted config predate modes).
+const char *connectionModeName(ConnectionMode m)
+{
+	switch (m) {
+	case ConnectionMode::Independent:
+		return "Independent";
+	case ConnectionMode::Managed:
+		return "Managed";
+	}
+	return "?";
+}
+
+ConnectionMode defaultConnectionMode()
+{
+	return ConnectionMode::Independent;
+}
+
+std::optional<ConnectionMode> parseConnectionMode(const QString &s)
+{
+	if (s == QStringLiteral("independent"))
+		return ConnectionMode::Independent;
+	if (s == QStringLiteral("managed"))
+		return ConnectionMode::Managed;
+	return std::nullopt;
+}
+
 bool supportsDescription(Platform p)
 {
 	return p == Platform::YouTube;
