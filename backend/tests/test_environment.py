@@ -13,7 +13,8 @@ from backend.app import create_app
 from backend.config import Settings, load_settings
 from backend.environment import (DEVELOPMENT, PRODUCTION, EnvironmentError,
                                  assert_production_ready, normalize)
-from backend.stores import EnvSecretStore, InMemorySessionStore
+from backend.stores import (AllowAllRateLimiter, EnvSecretStore,
+                            FixedWindowRateLimiter, InMemorySessionStore)
 
 
 class _ProdSecrets:
@@ -54,7 +55,8 @@ def _prod_settings(**over):
 
 def _prod_wiring(**over):
     kw = dict(secrets=_ProdSecrets(), sessions=_ProdSessions(),
-              installations=_ProdInstallations(), providers={})
+              installations=_ProdInstallations(), providers={},
+              limiter=FixedWindowRateLimiter(600, 60))
     kw.update(over)
     return kw
 
@@ -114,6 +116,17 @@ class ProductionGatesTest(unittest.TestCase):
             create_app(settings=_prod_settings(
                            public_base_url="http://127.0.0.1:8080"),
                        **_prod_wiring())
+
+    def test_prod_rejects_allow_all_limiter(self):
+        kw = _prod_wiring(limiter=AllowAllRateLimiter())
+        with self.assertRaises(EnvironmentError):
+            create_app(settings=_prod_settings(), **kw)
+
+    def test_dev_keeps_allow_all_limiter(self):
+        app = create_app(settings=Settings(host="127.0.0.1", port=0),
+                         providers={},
+                         limiter=AllowAllRateLimiter())
+        self.assertEqual(app.settings.env, DEVELOPMENT)
 
     def test_prod_accepts_https_with_prod_stores(self):
         app = create_app(settings=_prod_settings(), **_prod_wiring())

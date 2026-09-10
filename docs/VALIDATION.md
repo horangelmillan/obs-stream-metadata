@@ -63,6 +63,28 @@ LIVE:      no repetido (sin credenciales nuevas en esta sesión; YT/Kick
 FINAL: T-053 PASS
 ```
 
+## T-054 producción-capable (2026-09-10, ADR-013)
+
+```text
+BUILD:     PASS (sin cambios C++; dll + selfcheck + managed-link-test
+            vigentes de T-053, exit 0)
+SELFCHECK: PASS 115/115, 0 FAIL (sin cambios; regresión intacta)
+BACKEND:   PASS 104/104 (88 heredados + 16 nuevos: 14 test_prodstores.py +
+            2 gates AllowAll en test_environment.py; fakes sintéticos)
+SECRET:    PASS (patrón CI ci-phase0.yml sobre árbol trackeado: limpio;
+            dev.env local ignorado, sin traquear)
+PROD-SMOKE: PASS local (settings production + FileSecretStore + SQLite +
+            limiter explícito → serve → /version {"env":"production"} +
+            /ready true + meta.db creado; script temporal, fuera del repo)
+TLS:       config validada (a medias/ausente = fail-fast); handshake real
+            con certificado pendiente del operador (DEPLOYMENT.md checklist)
+AUDIT:     ADR-012 intacto; T-050/T-051/T-052/T-053 intactas (88→104 sin
+            borrar tests; test_environment actualizado por gate más
+            estricto, no por regresión);Managed sigue backend-only
+CI:        nuevo job backend-tests (stdlib, 3.13, sin credenciales)
+FINAL: T-054 PASS CON SALVEDAD (production-capable; no production-deployed)
+```
+
 ## P6 parcial (T-033, 2026-09-09, rama `feat/t-033-integration-testing`)
 
 ```text

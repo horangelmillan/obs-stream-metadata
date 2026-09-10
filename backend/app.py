@@ -33,6 +33,7 @@ def _localhost_base(public_base_url: str) -> str:
 def create_app(secrets=None, sessions=None, limiter=None,
                ready_check=None, settings=None, providers=None,
                installations=None, auth_service=None,
+               transactions=None, connections=None, tokens=None,
                enable_youtube: bool = False,
                enable_kick: bool = False) -> BackendApp:
     settings = settings or load_settings()
@@ -47,9 +48,9 @@ def create_app(secrets=None, sessions=None, limiter=None,
     if providers is None:
         providers = {}
         redirects = {}
-        transactions = InMemoryOAuthTransactionStore()
-        connections = InMemoryConnectionStore()
-        tokens = InMemoryTokenStore()
+        transactions = transactions or InMemoryOAuthTransactionStore()
+        connections = connections or InMemoryConnectionStore()
+        tokens = tokens or InMemoryTokenStore()
         gated["transactions"] = transactions
         gated["connections"] = connections
         gated["tokens"] = tokens
@@ -70,27 +71,78 @@ def create_app(secrets=None, sessions=None, limiter=None,
         redirects = {name: "" for name in providers}
     # T-053: entorno explícito. Producción con piezas de grado-dev o con
     # redirects no-HTTPS falla aquí, nunca en silencio ni con fallback.
+    # T-054: el gate incluye el limiter global (AllowAll prohibido en prod).
+    limiter = limiter or AllowAllRateLimiter()
     assert_production_ready(env=settings.env,
                             public_base_url=settings.public_base_url,
-                            stores=gated)
+                            stores=gated, limiter=limiter)
     auth_service = auth_service or AuthService(installations, sessions)
     return BackendApp(settings=settings,
                       sessions=sessions,
-                      limiter=limiter or AllowAllRateLimiter(),
+                      limiter=limiter,
                       ready_check=ready_check, auth_service=auth_service,
                       providers=providers,
                       provider_redirects=redirects)
 
 
+def _production_wiring(settings):
+    """Construye stores productivos (T-054). Fail-fast si falta configuración.
+
+    Sin adivinanzas: data_dir + secret_dir son obligatorios; el SQLite vive
+    en data_dir/meta.db (0600) y los secretos se leen de secret_dir (un
+    fichero por secreto). El limiter global usa límites explícitos.
+    """
+    from backend.prodstores import (FileSecretStore, ProdstoresError,
+                                    SqliteConnectionStore,
+                                    SqliteInstallationStore,
+                                    SqliteOAuthTransactionStore,
+                                    SqliteSessionStore, SqliteTokenStore)
+    from backend.stores import FixedWindowRateLimiter
+    missing = [name for name, value in
+               (("STREAM_META_BACKEND_DATA_DIR", settings.data_dir),
+                ("STREAM_META_BACKEND_SECRET_DIR", settings.secret_dir))
+               if not value]
+    if missing:
+        raise ProdstoresError(
+            f"production requires: {', '.join(missing)}")
+    db = settings.data_dir.rstrip("/\\") + "/meta.db"
+    return {
+        "secrets": FileSecretStore(settings.secret_dir),
+        "sessions": SqliteSessionStore(db),
+        "installations": SqliteInstallationStore(db),
+        "transactions": SqliteOAuthTransactionStore(db),
+        "connections": SqliteConnectionStore(db),
+        "tokens": SqliteTokenStore(db),
+        "limiter": FixedWindowRateLimiter(settings.global_limit,
+                                          settings.global_window_s),
+    }
+
+
 def main() -> None:
     import os as _os
+    from backend.environment import PRODUCTION
+    settings = load_settings()
     # DEV-only: lista separada por comas para levantar providers en local
     # (p. ej. "youtube,kick"). Producción lo decide el despliegue (T-054).
     wanted = {p.strip().lower()
               for p in _os.environ.get("STREAM_META_BACKEND_PROVIDERS", "")
               .split(",") if p.strip()}
-    app = create_app(enable_youtube="youtube" in wanted,
-                     enable_kick="kick" in wanted)
+    if settings.env == PRODUCTION:
+        wiring = _production_wiring(settings)
+        app = create_app(settings=settings,
+                         secrets=wiring["secrets"],
+                         sessions=wiring["sessions"],
+                         installations=wiring["installations"],
+                         transactions=wiring["transactions"],
+                         connections=wiring["connections"],
+                         tokens=wiring["tokens"],
+                         limiter=wiring["limiter"],
+                         enable_youtube="youtube" in wanted,
+                         enable_kick="kick" in wanted)
+    else:
+        app = create_app(settings=settings,
+                         enable_youtube="youtube" in wanted,
+                         enable_kick="kick" in wanted)
     log = get_logger("main", app.settings.log_level)
     server = serve(app)
     log.info("listening host=%s port=%s env=%s",

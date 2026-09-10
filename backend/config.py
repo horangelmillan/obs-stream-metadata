@@ -20,6 +20,15 @@ class Settings:
     public_base_url: str = "http://127.0.0.1:8080"
     request_timeout_s: int = 15
     body_limit_bytes: int = 65536
+    # T-054: despliegue productivo. Vacíos = no configurados (dev no los
+    # necesita; production los exige vía main()). Rutas a ficheros, nunca
+    # secretos inline.
+    data_dir: str = ""
+    secret_dir: str = ""
+    tls_certfile: str = ""
+    tls_keyfile: str = ""
+    global_limit: int = 600
+    global_window_s: int = 60
 
 
 def load_settings(env: dict[str, str] | None = None) -> Settings:
@@ -36,4 +45,11 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
                                 f"http://127.0.0.1:{port}"),
         request_timeout_s=int(src.get("STREAM_META_BACKEND_TIMEOUT_S", "15")),
         body_limit_bytes=int(src.get("STREAM_META_BACKEND_BODY_LIMIT", "65536")),
+        data_dir=src.get("STREAM_META_BACKEND_DATA_DIR", ""),
+        secret_dir=src.get("STREAM_META_BACKEND_SECRET_DIR", ""),
+        tls_certfile=src.get("STREAM_META_BACKEND_TLS_CERTFILE", ""),
+        tls_keyfile=src.get("STREAM_META_BACKEND_TLS_KEYFILE", ""),
+        global_limit=int(src.get("STREAM_META_BACKEND_GLOBAL_LIMIT", "600")),
+        global_window_s=int(src.get("STREAM_META_BACKEND_GLOBAL_WINDOW_S",
+                                    "60")),
     )

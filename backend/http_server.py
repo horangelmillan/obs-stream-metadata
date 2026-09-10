@@ -315,4 +315,26 @@ def serve(app: BackendApp) -> ThreadingHTTPServer:
     server = ThreadingHTTPServer((app.settings.host, app.settings.port), _Handler)
     server.app = app
     server.daemon_threads = True
+    # T-054: TLS builtin opcional (stdlib ssl). Sin cert/key → HTTP plano
+    # (dev local). Con ambos → HTTPS; ficheros ausentes = fail-fast aquí,
+    # nunca handshake a medias. Topología esperada en prod: TLS directo o
+    # terminación en reverse-proxy (ver docs/DEPLOYMENT.md y ADR-013).
+    cert, key = app.settings.tls_certfile, app.settings.tls_keyfile
+    if cert or key:
+        import os as _os
+        import ssl as _ssl
+        from backend.prodstores import ProdstoresError
+        if not (cert and key):
+            raise ProdstoresError(
+                "tls requires both certfile and keyfile")
+        missing = [label for label, path in (("certfile", cert),
+                                             ("keyfile", key))
+                   if not _os.path.isfile(path)]
+        if missing:
+            raise ProdstoresError(
+                f"tls files missing: {', '.join(missing)}")
+        context = _ssl.SSLContext(_ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = _ssl.TLSVersion.TLSv1_2
+        context.load_cert_chain(cert, key)
+        server.socket = context.wrap_socket(server.socket, server_side=True)
     return server

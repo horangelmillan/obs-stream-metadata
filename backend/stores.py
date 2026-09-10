@@ -72,7 +72,13 @@ class InMemorySessionStore(SessionStore):
 
 
 class AllowAllRateLimiter(RateLimiter):
-    """Sin política real. Punto de integración para T-044+ (ver §20 del encargo)."""
+    """Sin política real. Punto de integración para T-044+ (ver §20 del encargo).
+
+    T-054: prohibido como puerta global en producción (gate en
+    environment.assert_production_ready vía ALLOW_ALL).
+    """
+
+    ALLOW_ALL = True
 
     def allow(self, key: str) -> bool:
         return True

@@ -49,3 +49,15 @@ jobs:
           PAT="(gh[pousr]_[A-Za-z0-9]{16,}|sk-[A-Za-z0-9]{8,}|AIza[A-Za-z0-9_-]{10,}|BEGIN [A-Z ]*PRIVATE KEY|(client_secret|refresh_token|access_token)[[:space:]]*=[[:space:]]*[\"A-Za-z0-9_.-]{8,})"
           if grep -rEI "$PAT" --exclude-dir=.git . ; then echo "possible secret value in tree"; exit 1; fi
           echo "secret scan ok"
+
+  # T-054: la batería backend (stdlib-only) corre en CI. Sin credenciales,
+  # sin red, sin providers reales: solo garantías locales + fail-fasts.
+  backend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Backend test suite
+        run: python -m unittest discover -s backend/tests

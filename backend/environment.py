@@ -43,13 +43,17 @@ def normalize(raw: str | None, *, default: str = DEVELOPMENT) -> str:
 
 
 def assert_production_ready(*, env: str, public_base_url: str,
-                            stores: dict[str, object]) -> None:
-    """Gates de producción (T-053). No-op en development.
+                            stores: dict[str, object],
+                            limiter: object = None) -> None:
+    """Gates de producción (T-053/T-054). No-op en development.
 
     - Rechaza stores DEVELOPMENT_ONLY (secretos/sesiones/conexiones de
       grado-dev no pueden custodiar identidad productiva).
     - Rechaza `public_base_url` no-HTTPS (los redirects OAuth de
       producción no pueden construirse sobre HTTP).
+    - Rechaza limiter permisivo total (T-054: AllowAllRateLimiter no
+      puede ser la puerta global productiva; el despliegue fija límites
+      explícitos).
     """
     if env != PRODUCTION:
         return
@@ -63,3 +67,7 @@ def assert_production_ready(*, env: str, public_base_url: str,
             raise EnvironmentError(
                 f"production refuses DEVELOPMENT_ONLY store for {role}: "
                 f"{type(store).__name__}")
+    if limiter is not None and getattr(limiter, "ALLOW_ALL", False):
+        raise EnvironmentError(
+            "production refuses allow-all global limiter: "
+            "configure explicit limits")
