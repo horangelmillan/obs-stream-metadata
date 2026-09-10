@@ -402,10 +402,43 @@ void MetadataDock::onConnectManaged(meta::Platform p)
 			finishManagedError(p, managedAuthError(p, r, 0));
 			return;
 		}
-		managedAuth_->apiPost(QStringLiteral("/connect/%1").arg(
-						      providerSlug(p)),
-				      QJsonObject(),
-				      [this, p](const backend_auth::Client::ApiReply &rep) {
+		// T-051 reconstruction: if the backend still holds this
+		// installation's connection (e.g. after OBS restart), reuse it
+		// without a new browser flow. Anything else falls through.
+		managedAuth_->apiGet(QStringLiteral("/connect/%1/status").arg(
+					     providerSlug(p)),
+				     [this, p](const backend_auth::Client::ApiReply &rep) {
+					     if (rep.result ==
+						     backend_auth::Result::Ok) {
+						     const QJsonObject o = rep.body;
+						     if (o.value(QStringLiteral("status"))
+								     .toString() ==
+							 QStringLiteral("connected")) {
+							     const QJsonObject acc =
+								     o.value(QStringLiteral(
+									     "account"))
+									     .toObject();
+							     finishManagedConnected(
+								     p, acc.value(QStringLiteral(
+											"id"))
+										.toString(),
+								     acc.value(QStringLiteral(
+											"displayName"))
+										.toString());
+							     return;
+						     }
+					     }
+					     startManagedBrowserFlow(p);
+				     });
+	});
+}
+
+void MetadataDock::startManagedBrowserFlow(meta::Platform p)
+{
+	managedAuth_->apiPost(QStringLiteral("/connect/%1").arg(
+					      providerSlug(p)),
+			      QJsonObject(),
+			      [this, p](const backend_auth::Client::ApiReply &rep) {
 					      if (rep.result !=
 						      backend_auth::Result::Ok) {
 						      finishManagedError(
@@ -426,11 +459,10 @@ void MetadataDock::onConnectManaged(meta::Platform p)
 					      openBrowser(url);
 					      setStatus(p, tr("Waiting for browser "
 							      "authorization…"));
-					      managedPollFor_ = p;
-					      managedPollsLeft_ = 120; // 5 s x 10 min
-					      managedPollTimer_->start(5000);
-				      });
-	});
+				      managedPollFor_ = p;
+				      managedPollsLeft_ = 120; // 5 s x 10 min
+				      managedPollTimer_->start(5000);
+			      });
 }
 
 void MetadataDock::onManagedPollTimeout()
@@ -466,7 +498,9 @@ void MetadataDock::onManagedPollTimeout()
 								     "account"))
 							     .toObject();
 					     finishManagedConnected(
-						     p, acc.value(QStringLiteral(
+						     p, acc.value(QStringLiteral("id"))
+								.toString(),
+						     acc.value(QStringLiteral(
 									    "displayName"))
 								.toString());
 				     }
@@ -475,14 +509,17 @@ void MetadataDock::onManagedPollTimeout()
 }
 
 void MetadataDock::finishManagedConnected(meta::Platform p,
+					  const QString &userId,
 					  const QString &display)
 {
 	ManagedConn &m = managedAccount(p);
 	m.connected = true;
+	m.userId = userId;
 	m.display = display;
 	setStatus(p, tr("Connected as %1").arg(display));
 	setResult(p, true, tr("connected"));
 	obs_log(LOG_INFO, "managed connected: %s", meta::platformName(p));
+	saveStore(); // persist the snapshot (identity labels only, T-051)
 }
 
 void MetadataDock::finishManagedError(meta::Platform p, const QString &msg)
@@ -541,9 +578,11 @@ void MetadataDock::onDisconnectManaged(meta::Platform p)
 	// resurrect the local state.
 	ManagedConn &m = managedAccount(p);
 	m.connected = false;
+	m.userId.clear();
 	m.display.clear();
 	setStatus(p, tr("Not connected"));
 	setResult(p, true, tr("disconnected"));
+	saveStore(); // drop the snapshot; Independent records untouched
 	managedAuth_->ensureSession([this, p](backend_auth::Result r) {
 		if (r != backend_auth::Result::Ok)
 			return; // local state already cleared
@@ -768,12 +807,28 @@ void MetadataDock::saveStore()
 	fill(tw_, d.twitch);
 	fill(yt_, d.youtube);
 	fill(kk_, d.kick);
+	// T-051: Managed snapshots (identity labels only; the structs
+	// cannot hold secrets by construction). Omitted when disconnected.
+	auto fillManaged = [](const ManagedConn &m,
+			      secure::ManagedSnapshot &s) {
+		s.connected = m.connected && !m.display.isEmpty();
+		if (!s.connected) {
+			s.userId.clear();
+			s.display.clear();
+			return;
+		}
+		s.userId = m.userId;
+		s.display = m.display;
+	};
+	fillManaged(mYt_, d.managedYoutube);
+	fillManaged(mKk_, d.managedKick);
 	// T-041: the mode is always persisted explicitly (idempotent
 	// migration: first save after upgrade writes it). Legacy clear
-	// behavior stays unless Managed was explicitly selected.
+	// behavior stays unless Managed was explicitly selected or a
+	// Managed snapshot exists.
 	d.connectionMode = QString::fromLatin1(meta::connectionModeName(mode_))
 				   .toLower();
-	if (!d.anyConnected() && !isManaged()) {
+	if (!d.anyConnected() && !d.anyManaged() && !isManaged()) {
 		store_->clear();
 		return;
 	}
@@ -810,6 +865,22 @@ void MetadataDock::loadStore()
 	restore(tw_, d.twitch);
 	restore(yt_, d.youtube);
 	restore(kk_, d.kick);
+	// T-051: Managed snapshots restore memory-only state (identity
+	// labels, no secrets). Revalidation happens on user action via
+	// /status (onConnectManaged); nothing is auto-fetched at startup.
+	auto restoreManaged = [](ManagedConn &m,
+				 const secure::ManagedSnapshot &s) {
+		m.connected = false;
+		m.userId.clear();
+		m.display.clear();
+		if (!s.connected)
+			return;
+		m.connected = true;
+		m.userId = s.userId;
+		m.display = s.display;
+	};
+	restoreManaged(mYt_, d.managedYoutube);
+	restoreManaged(mKk_, d.managedKick);
 	if (tw_.connected)
 		twIdEdit_->setText(tw_.clientId);
 	if (yt_.connected) {

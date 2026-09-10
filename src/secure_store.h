@@ -22,6 +22,15 @@ obs_module_config_path) and passes it in.
 
 namespace secure {
 
+// T-051: Managed connection snapshot. Plaintext identity labels ONLY
+// (mirrors what backend /status returns); structurally incapable of
+// holding secrets (no blob, no DPAPI involved).
+struct ManagedSnapshot {
+	bool connected = false;
+	QString userId;
+	QString display;
+};
+
 struct Record {
 	QString display;     // non-sensitive label ("Connected as")
 	QString broadcaster; // non-sensitive Twitch user_id (may be empty)
@@ -44,10 +53,17 @@ struct Data {
 	// "managed", see meta::parseConnectionMode). Plaintext: not a secret,
 	// only a context. Empty = legacy file without mode.
 	QString connectionMode;
+	// T-051: Managed snapshots (plaintext identity labels, see below).
+	ManagedSnapshot managedYoutube;
+	ManagedSnapshot managedKick;
 	bool anyConnected() const
 	{
 		return twitch.connected || youtube.connected ||
 		       kick.connected;
+	}
+	bool anyManaged() const
+	{
+		return managedYoutube.connected || managedKick.connected;
 	}
 };
 

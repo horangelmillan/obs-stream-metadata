@@ -239,3 +239,18 @@ por proveedor, `Connected as`, selector broadcast YT, Apply secuencial,
 resultados independientes. Común siempre: metadata/Apply/estados/errores.
 Varía: selector de modalidad (NEW) + campos contextuales (Twitch: solo ID;
 YT/Kick: ID+secret) + wiring Managed (T-048). Sin duplicar la UI.
+
+## 18. Matriz Provider × Mode (T-050, vigente 2026-09-09)
+
+Estados: implementado = código existe; validado = evidencia viva citada;
+pendiente = representable sin implementación; no hay casos "no soportado".
+
+| Provider | Independent | Managed | Evidencia |
+|---|---|---|---|
+| Twitch | implementado + validado (DCF directo, DPAPI, T-031 live) | pendiente: sin servicio backend; dock informa "direct only", cero red | T-031; `managedSupported()==false` |
+| YouTube | implementado + validado (OAuth directo, T-031 live) | implementado + validado (T-045 + T-048; live 2026-09-09 revalidado) | T-031; T-045; live este turno |
+| Kick | implementado + validado (OAuth directo, T-031 live) | implementado + validado (T-046 + T-048; live 2026-09-09 revalidado) | T-031; T-036; T-046; live este turno |
+
+Modelo/UI/routing/OAuth/storage/backend por celda: Independent = directo +
+DPAPI + navegador; Managed (YT/Kick) = `backend_auth` + ConnectService +
+SecretStore/TokenStore backend. Esta tabla es LA matriz vigente; no duplicarla.

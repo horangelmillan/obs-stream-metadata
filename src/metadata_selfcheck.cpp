@@ -423,6 +423,126 @@ int main(int argc, char **argv)
 		CHECK(pairs == 6, "mode-provider-pairs");
 	}
 
+	// T-051: Managed snapshots (plaintext identity only, no DPAPI).
+	// Key-less files need no crypto: empty records short-circuit.
+	{
+		QTemporaryDir tmp;
+		CHECK(tmp.isValid(), "msnap-tmpdir");
+		const QString path =
+			tmp.filePath(QStringLiteral("accounts.json"));
+		secure::Store store(path);
+		secure::Data d;
+		QFile f(path);
+		// Legacy file without managed keys -> snapshots disconnected,
+		// Independent intact.
+		CHECK(f.open(QIODevice::WriteOnly | QIODevice::Truncate),
+		      "msnap-write");
+		f.write(QByteArrayLiteral(
+			"{\"connection_mode\":\"managed\"}"));
+		f.close();
+		CHECK(!store.load(d) && !d.anyManaged() &&
+			      !d.managedYoutube.connected &&
+			      !d.managedKick.connected &&
+			      d.connectionMode ==
+				      QStringLiteral("managed"),
+		      "msnap-legacy-clean");
+		// Malformed managed objects -> disconnected, never half-open.
+		CHECK(f.open(QIODevice::WriteOnly | QIODevice::Truncate),
+		      "msnap-write");
+		f.write(QByteArrayLiteral(
+			"{\"managed_youtube\":{\"connected\":true},"
+			"\"managed_kick\":{\"connected\":\"yes\","
+			"\"user_id\":42,\"display\":[]}}"));
+		f.close();
+		CHECK(!store.load(d) && !d.anyManaged(),
+		      "msnap-malformed-safe");
+		// Snapshot objects carry no blob/secrets by construction.
+		CHECK(f.open(QIODevice::WriteOnly | QIODevice::Truncate),
+		      "msnap-write");
+		f.write(QByteArrayLiteral(
+			"{\"managed_youtube\":{\"connected\":true,"
+			"\"user_id\":\"UC9z\",\"display\":\"Canal 9z\"}}"));
+		f.close();
+		CHECK(!store.load(d) && d.managedYoutube.connected &&
+			      d.managedYoutube.userId ==
+				      QStringLiteral("UC9z") &&
+			      d.managedYoutube.display ==
+				      QStringLiteral("Canal 9z") &&
+			      !d.managedKick.connected,
+		      "msnap-restore");
+		CHECK(f.open(QIODevice::ReadOnly), "msnap-reread");
+		const QByteArray raw = f.readAll();
+		f.close();
+		CHECK(!raw.isEmpty() && !raw.contains("\"blob\"") && !raw.contains("access_token") &&
+			      !raw.contains("refresh_token") &&
+			      !raw.contains("client_secret"),
+		      "msnap-no-secret-shapes");
+	}
+#ifdef Q_OS_WIN
+	// T-051: round-trip with Independent accounts + backendInstall:
+	// nothing is lost, nothing crosses modes.
+	{
+		QTemporaryDir tmp;
+		CHECK(tmp.isValid(), "msnap-rt-tmpdir");
+		const QString path =
+			tmp.filePath(QStringLiteral("accounts.json"));
+		secure::Store store(path);
+		secure::Data d;
+		d.twitch.connected = true;
+		d.twitch.display = QStringLiteral("fake-login");
+		d.twitch.access = QStringLiteral("fk-tok-4cc3ss-9z");
+		d.twitch.clientId = QStringLiteral("fk-client-id-9z");
+		d.backendInstall.connected = true;
+		d.backendInstall.clientId = QStringLiteral("fk-install-9z");
+		d.backendInstall.secret = QStringLiteral("fk-isecret-9z");
+		d.connectionMode = QStringLiteral("managed");
+		d.managedYoutube.connected = true;
+		d.managedYoutube.userId = QStringLiteral("UC9z");
+		d.managedYoutube.display = QStringLiteral("Canal 9z");
+		CHECK(store.save(d), "msnap-rt-save");
+		secure::Data back;
+		CHECK(store.load(back) && back.twitch.connected &&
+			      back.twitch.access ==
+				      QStringLiteral("fk-tok-4cc3ss-9z") &&
+			      back.backendInstall.connected &&
+			      back.backendInstall.secret ==
+				      QStringLiteral("fk-isecret-9z") &&
+			      back.connectionMode ==
+				      QStringLiteral("managed") &&
+			      back.managedYoutube.connected &&
+			      back.managedYoutube.userId ==
+				      QStringLiteral("UC9z") &&
+			      back.managedYoutube.display ==
+				      QStringLiteral("Canal 9z") &&
+			      !back.managedKick.connected &&
+			      !back.youtube.connected && !back.kick.connected,
+		      "msnap-rt-roundtrip");
+		// Idempotence: load -> save -> load is a fixed point.
+		secure::Data again;
+		CHECK(store.load(again), "msnap-rt-reload");
+		CHECK(store.save(again), "msnap-rt-resave");
+		secure::Data third;
+		CHECK(store.load(third) && third.twitch.connected &&
+			      third.backendInstall.connected &&
+			      third.managedYoutube.connected &&
+			      third.connectionMode ==
+				      QStringLiteral("managed"),
+		      "msnap-rt-idempotent");
+		// Raw file: labels visible, secrets only inside DPAPI blobs.
+		QFile raw(path);
+		CHECK(raw.open(QIODevice::ReadOnly), "msnap-rt-raw");
+		const QByteArray bytes = raw.readAll();
+		raw.close();
+		CHECK(bytes.contains("Canal 9z") &&
+			      bytes.contains("\"managed_youtube\"") &&
+			      !bytes.contains("fk-tok-4cc3ss-9z") &&
+			      !bytes.contains("fk-isecret-9z"),
+		      "msnap-rt-plaintext-shape");
+	}
+#else
+	CHECK(true, "msnap-rt-skipped-non-windows");
+#endif
+
 	std::printf("SELFCHECK OK\n");
 	return 0;
 }

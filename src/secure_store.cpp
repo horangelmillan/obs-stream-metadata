@@ -174,6 +174,34 @@ bool installFromJson(const QJsonObject &o, Record &r)
 #endif
 }
 
+// T-051: Managed snapshot serialization. Plaintext by design (identity
+// labels only, same class as display/broadcaster). Strict shape: anything
+// malformed (wrong types, missing fields) means disconnected, never a
+// half-restored connection. No DPAPI involved on any platform.
+QJsonObject managedToJson(const ManagedSnapshot &m)
+{
+	QJsonObject o;
+	o[QStringLiteral("connected")] = m.connected;
+	o[QStringLiteral("user_id")] = m.userId;
+	o[QStringLiteral("display")] = m.display;
+	return o;
+}
+
+bool managedFromJson(const QJsonObject &o, ManagedSnapshot &m)
+{
+	m = ManagedSnapshot();
+	if (o.isEmpty() || !o.value(QStringLiteral("connected")).isBool() ||
+	    !o.value(QStringLiteral("connected")).toBool())
+		return false;
+	if (!o.value(QStringLiteral("user_id")).isString() ||
+	    !o.value(QStringLiteral("display")).isString())
+		return false;
+	m.connected = true;
+	m.userId = o.value(QStringLiteral("user_id")).toString();
+	m.display = o.value(QStringLiteral("display")).toString();
+	return !m.userId.isEmpty() && !m.display.isEmpty();
+}
+
 } // namespace
 
 Store::Store(const QString &filePath) : filePath_(filePath) {}
@@ -203,6 +231,15 @@ bool Store::save(const Data &d)
 					       meta::defaultConnectionMode())
 				     : d.connectionMode;
 	root[QString::fromLatin1(kConnectionMode)] = mode;
+	// T-051: managed snapshots are plaintext identity labels (no blob,
+	// no DPAPI). Omitted when disconnected so the file carries no stale
+	// or half-restored connections.
+	if (d.managedYoutube.connected)
+		root[QStringLiteral("managed_youtube")] =
+			managedToJson(d.managedYoutube);
+	if (d.managedKick.connected)
+		root[QStringLiteral("managed_kick")] =
+			managedToJson(d.managedKick);
 	QSaveFile f(filePath_);
 	if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
 		return false;
@@ -250,7 +287,15 @@ bool Store::load(Data &d)
 	// never to Managed. Parsed after the reset below so it survives it.
 	const meta::ConnectionMode mode = modeFromString(
 		root.value(QString::fromLatin1(kConnectionMode)).toString());
-	if (!any && !backendOk)
+	// T-051: pre-T-051 files simply lack these keys (-> disconnected).
+	// Parsed before the reset so snapshots survive it, like backendInstall.
+	const bool ytManaged = managedFromJson(
+		root.value(QStringLiteral("managed_youtube")).toObject(),
+		d.managedYoutube);
+	const bool kkManaged = managedFromJson(
+		root.value(QStringLiteral("managed_kick")).toObject(),
+		d.managedKick);
+	if (!any && !backendOk && !ytManaged && !kkManaged)
 		d = Data();
 	d.connectionMode = modeToString(mode);
 	return any;

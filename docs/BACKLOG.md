@@ -32,9 +32,9 @@ Estados: pendiente / en-progreso / bloqueada / hecha / deuda / investigación / 
 | T-047 | pendiente | 7 | Twitch directo endurecido (Client ID distribuido + DCF, sin backend) | Connect Twitch sin cambios UX | F-015, F-033 |
 | T-048 | hecha | 6 | [Managed] UX modo Administrado: wiring `backend_auth.*` + connect-vía-backend + status | Managed YT/Kick live PASS C++→backend→provider + 70 tests | ADR-012 |
 | T-049 | hecha | 6 | [Common] Modelo modal: `meta::ConnectionMode` + default Independent + strings canónicos + 7 checks (sin UI/wiring/persistencia) | selfcheck 75/75 + backend 69/69 + build/scan en verde | ADR-012 |
-| T-050 | pendiente | 6 | [Independent] Validación Independent (matriz por proveedor: credenciales, persistencia, OAuth, refresh, revoke, Apply, errores) | matriz Independent en verde | ADR-012 |
-| T-051 | pendiente | 7 | [Managed] Validación Managed contra backend (bootstrap, sesión, OAuth, callback, refresh, revoke, Apply, expiración, backend offline) | matriz Managed en verde | ADR-012 |
-| T-052 | pendiente | 6 | [Validation] Tests cross-mode (cambio de modalidad sin pérdida/mezcla, credenciales y tokens aislados) | matriz cross-mode en verde | ADR-012 |
+| T-050 | hecha | 6 | Matriz Provider × Mode central (ARCHITECTURE-BACKEND §18, vigente) | 6 celdas con estado real; Twitch Managed = pendiente, sin falso soporte | ADR-012 |
+| T-051 | hecha | 7 | Persistencia ManagedConn (snapshots `managed_youtube/kick` en claro + reconstrucción vía `/status`) | roundtrip/migración/idempotencia + backendInstall intacto + 18 selfchecks | ADR-012 |
+| T-052 | hecha | 6 | Batería cross-mode (aislamiento provider/modo/secretos/sesión/persistencia + checklist operador) | 3 tests backend + 18 selfchecks + lives YT/Kick PASS; GUI-clicks operador PENDING | ADR-012 |
 | T-053 | pendiente | 7 | [Infrastructure] Separación identidad DEV/PROD (apps, secretos, cuentas) | DEV y PROD sin cruces | ADR-012 |
 | T-054 | pendiente | 7 | [Infrastructure] Endurecimiento producción backend (secret manager, DB cifrada, TLS, monitoreo, backups; Railway solo dev) | checklist producción, sin marcar prod PASS antes de tiempo | ADR-012 |
 | T-055 | pendiente | 7 | [Commercial] Diseño suscripción/licencias (OPEN: proveedor pagos, planes, expiración, grace, límites) | decisión documentada, sin implementar pagos | ADR-012 |
