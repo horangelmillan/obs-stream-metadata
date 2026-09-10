@@ -89,3 +89,33 @@ if(WIN32 AND ENABLE_QT)
 endif()
 
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})
+
+# T-057: OBS-root-relative packaging layout for the NSIS installer.
+# Separate COMPONENT (obs-package) so the template dev flow (bin/64bit +
+# OBS_PLUGINS_PATH) stays untouched:
+#   cmake --install <build> --config <cfg> --prefix <staging> --component obs-package
+# produces:
+#   <staging>/obs-stream-metadata/obs-plugins/64bit/obs-stream-metadata.dll
+#   <staging>/obs-stream-metadata/data/obs-plugins/obs-stream-metadata/locale/en-US.ini
+#   <staging>/obs-stream-metadata/data/obs-plugins/obs-stream-metadata/tls/qschannelbackend.dll
+# Only these three files; no PDBs, no dev tools, no secrets.
+if(WIN32 AND ENABLE_QT)
+  install(TARGETS ${CMAKE_PROJECT_NAME}
+    RUNTIME DESTINATION "obs-stream-metadata/obs-plugins/64bit"
+    LIBRARY DESTINATION "obs-stream-metadata/obs-plugins/64bit"
+    COMPONENT obs-package)
+  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/data/locale/en-US.ini"
+    DESTINATION "obs-stream-metadata/data/obs-plugins/obs-stream-metadata/locale"
+    COMPONENT obs-package)
+  if(_qt_tls_dll AND EXISTS "${_qt_tls_dll}")
+    install(FILES "${_qt_tls_dll}"
+      DESTINATION "obs-stream-metadata/data/obs-plugins/obs-stream-metadata/tls"
+      COMPONENT obs-package)
+  endif()
+  # T-057: generate the NSIS script with the buildspec version so the
+  # installer filename/registry never drift from the project version.
+  set(PLUGIN_NAME "${CMAKE_PROJECT_NAME}")
+  set(PLUGIN_VERSION "${_version}")
+  configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/windows-installer.nsi.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/windows-installer.nsi" @ONLY)
+endif()
