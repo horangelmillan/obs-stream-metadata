@@ -44,5 +44,6 @@ Estados: pendiente / en-progreso / bloqueada / hecha / deuda / investigación / 
 | T-058 | hecha | 7 | [Infrastructure] Múltiples directorios de secretos (CompositeSecretStore + SECRET_DIRS, Cloud Run 1-secreto-por-directorio) | 8 tests nuevos; 134 backend en verde; compat single-DIR intacta | ADR-012, ADR-014 |
 | T-058 | pendiente | 7 | [Security] Privacy policy + inventario de datos Managed (retención, revoke, eliminación, logs, incidentes) | documento previo a producción | ADR-012 |
 | T-056 | hecha | 7 | [Infrastructure] Bind production 0.0.0.0 (Cloud Run) + estado de despliegue | host por entorno + override explícito + 5 tests; 121 backend en verde; despliegue pendiente de reintento | ADR-012 |
+| T-061 | pendiente | 7 | [Installer] Windows NSIS .exe + install real en OBS (encargo nombrado T-057; ID T-061 por colisión con T-057 existente) | en progreso en rama release/t057-windows-installer | — |
 
 Regla: cada PR referencia su T-### y actualiza esta tabla + STATE.
