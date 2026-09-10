@@ -1,4 +1,8 @@
 # Backend runtime deps (T-055). Pinneadas: reproducibilidad del deployment.
-# psycopg-binary evita compilar libpq (ruedas para linux/win). El resto
-# del backend sigue stdlib-only.
+# Dos paquetes (upstream los distribuye separados desde 3.x y
+# psycopg-binary NO arrastra a psycopg como dependencia):
+#   psycopg          = driver puro Python
+#   psycopg-binary   = libpq empaquetada (evita compilar; ruedas linux/win)
+# El resto del backend sigue stdlib-only.
+psycopg==3.3.5
 psycopg-binary==3.3.5
