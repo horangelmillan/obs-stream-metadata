@@ -142,6 +142,21 @@ DEPLOY:    rev-00002 FALLIDA documentada (SECRET_DIR ausente); contrato de
 FINAL: T-057 PASS (análisis+contrato+cambio mínimo+docs)
 ```
 
+## T-058 múltiples directorios de secretos (2026-09-10)
+
+```text
+CAMBIO:   CompositeSecretStore (orden determinista, vacío=fail-fast) +
+            STREAM_META_BACKEND_SECRET_DIRS (os.pathsep; ambos
+            DIR+DIRS = fail-fast; solo DIR = compat T-057 intacta).
+BACKEND:   PASS 134/134 local (126 heredados + 8 nuevos: composite,
+            split, wiring multi-dir, ambigüedad, nombres faltantes;
+            PG apagado → 7 skips por diseño)
+SECRET:    PASS motor CI (GNU grep, patrón exacto del workflow: limpio;
+            .NET/PowerShell da falsos positivos sobre `*_token=` en SQL
+            y ejemplos — documentado, no accionable)
+FINAL: T-058 PASS (sin despliegue; rev Cloud Run pendiente de reintento)
+```
+
 ## P6 parcial (T-033, 2026-09-09, rama `feat/t-033-integration-testing`)
 
 ```text

@@ -294,10 +294,11 @@ class SqliteTokenStore(SqliteStore, TokenStore):
 class FileSecretStore(SecretStore):
     """Productivo: un fichero por secreto (nombre = nombre del secreto).
 
-    Compatible con mounts de secretos (Docker/K8s/systemd LoadCredential)
-    y con despliegues que escriben ficheros 0600. Fail-fast si el
-    directorio no existe; fichero ausente = secreto ausente (None), como
-    EnvSecretStore. Sin DEVELOPMENT_ONLY: apto para production.
+    Compatible con mounts de secretos (Docker/K8s/systemd LoadCredential,
+    Cloud Run secret volumes) y con despliegues que escriben ficheros
+    0600. Fail-fast si el directorio no existe; fichero ausente = secreto
+    ausente (None), como EnvSecretStore. Sin DEVELOPMENT_ONLY: apto para
+    production.
     """
 
     def __init__(self, directory: str) -> None:
@@ -316,3 +317,34 @@ class FileSecretStore(SecretStore):
         except OSError:
             return None
         return value or None
+
+
+def split_secret_dirs(raw: str) -> list[str]:
+    """Parte DIRS por os.pathsep, limpia y descarta vacíos (orden estable)."""
+    return [part.strip() for part in (raw or "").split(os.pathsep)
+            if part.strip()]
+
+
+class CompositeSecretStore(SecretStore):
+    """T-058: agrega N FileSecretStore en orden determinista.
+
+    Motivo: Cloud Run permite un secreto por directorio; producción
+    consume N mounts sin cambiar el contrato file-based. `get()` devuelve
+    el primer valor existente según el orden dado; ausente en todos =
+    None (semántica SecretStore). Vacío = fail-fast (misconfiguración).
+    Sin DEVELOPMENT_ONLY: apto para production. Jamás loguea valores
+    (esta clase no loguea nada).
+    """
+
+    def __init__(self, stores) -> None:
+        stores = tuple(stores)
+        if not stores:
+            raise ProdstoresError("composite secret store needs ≥1 store")
+        self._stores = stores
+
+    def get(self, name: str) -> str | None:
+        for store in self._stores:
+            value = store.get(name)
+            if value:
+                return value
+        return None
