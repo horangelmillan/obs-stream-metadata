@@ -98,6 +98,8 @@ class KickProvider(OAuthProvider):
     provider = Provider.KICK
     SCOPES = ("channel:write", "channel:read")
     capability = CAPABILITIES[Provider.KICK]
+    # T-057: ver YouTubeProvider.required_secret_names.
+    required_secret_names = ("KICK_CLIENT_ID", "KICK_CLIENT_SECRET")
 
     def __init__(self, secrets: SecretStore, redirect_uri: str,
                  transport=None) -> None:

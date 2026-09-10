@@ -112,11 +112,31 @@ def _production_wiring(settings):
     if not settings.database_url:
         raise ProdstoresError(
             "production requires STREAM_META_BACKEND_DATABASE_URL")
+    secrets = FileSecretStore(settings.secret_dir)
+    # T-057: los secretos de providers habilitados deben existir ANTES de
+    # escuchar (nombres en el error, nunca valores): evita descubrir un
+    # mount incompleto en el primer OAuth real.
+    import os as _os
+    wanted = {p.strip().lower()
+              for p in _os.environ.get("STREAM_META_BACKEND_PROVIDERS", "")
+              .split(",") if p.strip()}
+    required: dict[str, tuple[str, ...]] = {
+        "youtube": YouTubeProvider.required_secret_names,
+        "kick": KickProvider.required_secret_names,
+    }
+    missing = [f"{provider}/{name}"
+               for provider in sorted(wanted)
+               if provider in required
+               for name in required[provider]
+               if not secrets.get(name)]
+    if missing:
+        raise ProdstoresError(
+            "production provider secrets missing: " + ", ".join(missing))
     pool = PgPool(settings.database_url, max_size=settings.db_pool_max,
                   acquire_timeout_s=settings.db_pool_timeout_s)
     run_migrations(pool, _migrations_dir())
     return {
-        "secrets": FileSecretStore(settings.secret_dir),
+        "secrets": secrets,
         "sessions": PgSessionStore(pool),
         "installations": PgInstallationStore(pool),
         "transactions": PgOAuthTransactionStore(pool),

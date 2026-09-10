@@ -220,6 +220,70 @@ class ProductionWiringTest(unittest.TestCase):
     # PostgreSQL real; aquí no hay servidor.
 
 
+class ProviderSecretsBootCheckTest(unittest.TestCase):
+    """T-057: secretos de providers habilitados verificados al arrancar
+    (nombres en el error, nunca valores). Sin PostgreSQL: pool y
+    migrations con dobles (el check ocurre antes de cualquier red)."""
+
+    def _settings(self, sec):
+        return Settings(host="127.0.0.1", port=0, env=PRODUCTION,
+                        public_base_url="https://backend.example.com",
+                        secret_dir=sec,
+                        database_url="postgresql://u@host/db")
+
+    def _wiring(self, providers, files):
+        import tempfile
+        from unittest import mock
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, tmp, True)
+        sec = tmp
+        for name in files:
+            with open(os.path.join(sec, name), "w") as handle:
+                handle.write("fk-9z")
+        settings = self._settings(sec)
+        with mock.patch.dict(os.environ,
+                             {"STREAM_META_BACKEND_PROVIDERS": providers}):
+            with mock.patch("backend.db.PgPool") as pool_cls, \
+                 mock.patch("backend.db.run_migrations") as migrate:
+                return _production_wiring(settings), pool_cls, migrate
+
+    def test_all_present_builds(self):
+        wiring, pool_cls, migrate = self._wiring(
+            "youtube,kick", ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET",
+                             "KICK_CLIENT_ID", "KICK_CLIENT_SECRET"))
+        self.assertTrue(pool_cls.called)
+        self.assertTrue(migrate.called)
+        self.assertIn("secrets", wiring)
+
+    def test_missing_names_listed_without_values(self):
+        with self.assertRaises(ProdstoresError) as ctx:
+            self._wiring("youtube", ("GOOGLE_CLIENT_ID",))
+        message = str(ctx.exception)
+        self.assertIn("youtube/GOOGLE_CLIENT_SECRET", message)
+        self.assertNotIn("fk-9z", message)
+
+    def test_disabled_provider_not_checked(self):
+        # Kick habilitado pero sin ficheros; youtube deshabilitado con
+        # ficheros ausentes también: solo kick puede fallar.
+        with self.assertRaises(ProdstoresError) as ctx:
+            self._wiring("kick", ())
+        message = str(ctx.exception)
+        self.assertIn("kick/KICK_CLIENT_ID", message)
+        self.assertNotIn("youtube", message)
+
+    def test_no_providers_no_check(self):
+        wiring, _, _ = self._wiring("", ())
+        self.assertIn("secrets", wiring)
+
+    def test_adapter_declares_names(self):
+        from backend.adapters.kick import KickProvider
+        from backend.adapters.youtube import YouTubeProvider
+        self.assertEqual(YouTubeProvider.required_secret_names,
+                         ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"))
+        self.assertEqual(KickProvider.required_secret_names,
+                         ("KICK_CLIENT_ID", "KICK_CLIENT_SECRET"))
+
+
 class ServeTlsTest(unittest.TestCase):
     def test_half_tls_config_fails_fast(self):
         settings = Settings(host="127.0.0.1", port=0,
