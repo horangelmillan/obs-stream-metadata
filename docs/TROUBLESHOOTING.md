@@ -59,6 +59,10 @@ Reglas (F-009, F-011):
 
 ## T-031 — validación viva del dock MVP (operador, con sus propias apps)
 
+> Nota ADR-012: este procedimiento es hoy la base de validación del modo
+> Independiente (apps propias del usuario). El modo Administrado usa backend
+> y no pide estas credenciales.
+
 Requisito: una app registrada por el operador en cada plataforma
 (Twitch: consola dev; Google: Cloud Console cliente Desktop + YouTube
 Data API habilitada; Kick: portal dev con redirect
@@ -89,6 +93,9 @@ seleccionado (bloquea antes de red), token revocado (401 → refresh o
 reconexión), plataforma sin conectar (error individual, el resto sigue).
 
 ## T-032 — alta de credenciales BYO-app + persistencia DPAPI (2026-09-09)
+
+> Nota ADR-012: BYO-app = modalidad Independiente del producto (no solo
+> operador/debug). La sección T-033 siguiente sigue el mismo modelo.
 
 Las env vars `STREAM_META_*` ya no se leen (código `env()` eliminado).
 Alta una sola vez por plataforma, con tus propias apps:

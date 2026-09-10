@@ -39,4 +39,5 @@ Ver `docs/STATE.md` (fuente de verdad).
 - **Phase 0 cerrada:** harness agente (docs, CI, Git) sin código funcional.
 - **Fases P0–P7 definidas** (`docs/PHASES.md`, ADR-006), orden risk-first.
 - **Toolchain instalado y validado (T-012):** VS2022 17.14 + MSVC 19.44 + ATL + SDK 10.0.22621 + CMake 3.31.6 + Git 2.49.0; target OBS 32.2.2 + Qt 6.11.1; sin Qt manual (ADR-005).
-- **Próximo paso:** P5 — Hardening (T-032): storage seguro OS, revoke, backoff, distribución de secrets.
+- **Próximo paso:** ver `docs/STATE.md` (la antigua línea P5 quedó superada por T-032 y la dirección dos-modalidades).
+- **Dirección de producto (ADR-012):** un solo plugin con modo Independiente (gratis, BYO-app) y modo Administrado (suscripción, backend); referencia: `obs-stream-metadata-arquitectura-dos-modalidades.md`.

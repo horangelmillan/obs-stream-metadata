@@ -14,6 +14,7 @@ P4 Unified Dock ........... UI mínima real título/descripción + apply
 P5 Hardening .............. storage seguro, refresh, threading, errores, logs
 P6 Integration Testing .... casos AGENTS.md §39-40 + gate §50
 P7 Packaging & Release .... instalador/estructura plugin + release
+P8 Transición modal ....... dos modalidades sobre P0–P7 (ADR-012, T-049+)
 ```
 
 Regla: no detallar la fase N+1 hasta cerrar la fase N (solo se adelanta lo
@@ -110,3 +111,9 @@ OBS 32.2.2 ×ciclos limpios + fixes F-026/F-027/F-028. T-031 cerrada con PASS.
 - **No-objetivos:** marketplace/autos ni features.
 - **Dependencias:** P6 (gate §50 en verde).
 - **Entrada:** MVP terminado según §50. **Salida:** `Instalar → OBS → Docks → Stream Metadata → conectar → aplicar` (§36).
+
+## P8 — Transición modal (ADR-012, T-049+)
+
+- **Objetivo:** un solo plugin con modos Independiente y Administrado sobre todo lo validado en P0–P7, sin reescribir.
+- **Orden:** abstracción modal (T-049) → UI modal (T-041) → wiring Managed (T-048) → validación Independent (T-050) → Managed (T-051) → cross-mode (T-052) → DEV/PROD (T-053) → producción (T-054) → licencias (T-055, OPEN) → privacidad (T-056) → packaging.
+- **No-objetivos:** reescribir OAuth/metadata, dos plugins, pagos antes de arquitectura, infra grande antes de necesitarla.
