@@ -124,6 +124,24 @@ DEPLOY:   reintento PENDIENTE (startup, /health, /ready, /version, PG,
 FINAL: T-056 PASS (código+tests+docs; despliegue pendiente de reintento)
 ```
 
+## T-057 Secret Manager ↔ FileSecretStore (2026-09-10)
+
+```text
+ANÁLISIS:  FileSecretStore ya esperaba mounts (docstring T-054); Cloud Run
+            --set-secrets volúmenes satisfacen el contrato sin cambiarlo.
+            Sin workaround /tmp; sin eliminar exigencia SECRET_DIR.
+CAMBIO:    required_secret_names por adapter + verificación al arrancar en
+            prod (nombres faltantes en el error, nunca valores).
+BACKEND:   PASS 126/126 local (121 heredados + 5 nuevos
+            ProviderSecretsBootCheckTest, con dobles; PG server apagado →
+            7 skips por diseño, validados con servidor en T-055/56)
+SECRET:    PASS (patrón CI; sin valores reales en código/tests/docs)
+DEPLOY:    rev-00002 FALLIDA documentada (SECRET_DIR ausente); contrato de
+            montaje + SECRET_DIR + enablement documentados; reintento y
+            OAuth remoto PENDIENTES
+FINAL: T-057 PASS (análisis+contrato+cambio mínimo+docs)
+```
+
 ## P6 parcial (T-033, 2026-09-09, rama `feat/t-033-integration-testing`)
 
 ```text

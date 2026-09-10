@@ -89,6 +89,10 @@ class YouTubeProvider(OAuthProvider):
     provider = Provider.YOUTUBE
     SCOPES = ("https://www.googleapis.com/auth/youtube.force-ssl",)
     capability = CAPABILITIES[Provider.YOUTUBE]
+    # T-057: nombres de secreto requeridos (solo nombres, nunca valores).
+    # El wiring productivo los verifica al arrancar (fail-fast) contra el
+    # SecretStore elegido por despliegue (ficheros, env, vault).
+    required_secret_names = ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET")
 
     def __init__(self, secrets: SecretStore, redirect_uri: str,
                  transport=None) -> None:

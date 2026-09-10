@@ -4,7 +4,7 @@ Contrato entre código y operador. Sin valores reales (los aporta el
 operador). Principio: **Neon es el proveedor inicial; PostgreSQL es el
 contrato** (§3 T-055). Nada aquí depende de APIs de Neon.
 
-## Estado de despliegue (T-056, 2026-09-10)
+## Estado de despliegue (T-056, 2026-09-10; rev-00002 en T-057)
 
 Clasificación por registro (IMPLEMENTADO / CONFIGURADO / VERIFICADO /
 PENDIENTE / FALLIDO). Nada de esta sección afirma "production deployed".
@@ -33,6 +33,11 @@ PENDIENTE / FALLIDO). Nada de esta sección afirma "production deployed".
 - FALLIDO: primer despliegue Cloud Run — el contenedor no escuchó en
   `PORT=8080`. Causa: `serve()` hacía bind en `host` heredado
   (`127.0.0.1`); Cloud Run exige `0.0.0.0`. Corrección T-056 (arriba).
+- FALLIDO: revisión `obs-stream-metadata-service-00002-446` — el host
+  ya no fue la causa; el wiring productivo exigió
+  `STREAM_META_BACKEND_SECRET_DIR` (`ProdstoresError`, fail-fast
+  correcto, no workaround). Contrato resuelto en T-057 (sección
+  Secret Manager ↔ FileSecretStore): montar volúmenes + `SECRET_DIR`.
 - PENDIENTE: repetir despliegue y verificar startup, `/health`,
   `/ready`, `/version`, conectividad PostgreSQL, wiring productivo,
   inyección del secreto, `PUBLIC_URL` y providers de producción.
@@ -80,6 +85,39 @@ backend; con Cloud Run + HTTPS público, terminación en la plataforma.
   redactada `postgresql://usuario:***@host/db` (redacción verificada).
 - OAuth apps PROD (operador): proyecto Google PROD + app Kick PROD
   separados de DEV; redirects = `$PUBLIC_URL/connect/*/callback`.
+
+## Secret Manager ↔ FileSecretStore (T-057)
+
+Contrato verificado: Cloud Run expone secretos como **volúmenes
+(tmpfs, stateless-safe)** y `FileSecretStore` los consume como
+**ficheros** — mismo mecanismo, cero cambios de código para el mount.
+`DATABASE_URL` continúa como variable de entorno (binding ya operativo).
+
+Configuración exacta del operador (nombres ilustrativos; los secretos
+viven en Secret Manager, nunca aquí):
+
+```text
+--set-secrets=/run/secrets/stream-meta/GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:1
+--set-secrets=/run/secrets/stream-meta/GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:1
+--set-secrets=/run/secrets/stream-meta/KICK_CLIENT_ID=KICK_CLIENT_ID:1
+--set-secrets=/run/secrets/stream-meta/KICK_CLIENT_SECRET=KICK_CLIENT_SECRET:1
+--set-env-vars=STREAM_META_BACKEND_SECRET_DIR=/run/secrets/stream-meta
+--set-env-vars=STREAM_META_BACKEND_DATABASE_URL=(binding existente v1)
+--set-env-vars=STREAM_META_BACKEND_PROVIDERS=youtube,kick  (al habilitar)
+```
+
+Reglas:
+
+- Un fichero por secreto; el nombre del fichero ES el nombre que lee
+  el adapter (`required_secret_names` en cada provider).
+- Al arrancar en prod, el wiring verifica los secretos de los providers
+  habilitados y falla con los NOMBRES faltantes (nunca valores) antes
+  de escuchar — un mount incompleto no se descubre en el primer OAuth.
+- Habilitar YouTube/Kick = montar sus 2 ficheros + listar el provider
+  en `STREAM_META_BACKEND_PROVIDERS`. Sin mount, el provider no arranca.
+- Estado actual: `DATABASE_URL` enlazado (v1); ficheros de providers
+  PENDIENTES hasta habilitar OAuth productivo; `PUBLIC_URL` pendiente
+  de la URL real del servicio.
 
 ## Arranque / salud / parada (Cloud Run)
 
