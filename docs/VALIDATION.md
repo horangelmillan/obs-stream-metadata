@@ -157,6 +157,26 @@ SECRET:    PASS motor CI (GNU grep, patrón exacto del workflow: limpio;
 FINAL: T-058 PASS (sin despliegue; rev Cloud Run pendiente de reintento)
 ```
 
+## YouTube OAuth E2E en producción (2026-09-10, rev-00006-xqr)
+
+```text
+MODO:      Managed (el backend productivo solo habla Managed)
+REV:       obs-stream-metadata-service-00006-xqr (imagen T-058 ad754012),
+            100% tráfico, env=production
+START:     PASS (bootstrap 201 → session 200 TTL 1800 → start 200)
+AUTH URL:  PASS (accounts.google.com, redirect exacto, state, PKCE S256,
+            scope youtube.force-ssl, sin secretos)
+CONSENT:   PASS (operador, cuenta SonokiGame UCXw8bp4xOpig8Y85hNDlrcA)
+CALLBACK:  PASS 200 {provider: youtube, status: connected}
+STATE:     PASS (single-use + TTL por diseño; sin mismatch/replay)
+EXCHANGE:  PASS (implícito en connected; client_secret solo backend)
+PERSIST:   PASS (conexión en PostgreSQL/Neon; status posterior la confirma)
+STATUS:    PASS 200 {provider: youtube, status: connected} sin tokens
+HEALTH:    200 durante toda la prueba; /version production
+SECRETOS:  NO expuestos (respuestas, logs, repo, temporales eliminados)
+FINAL: YouTube OAuth E2E en producción — PASS
+```
+
 ## P6 parcial (T-033, 2026-09-09, rama `feat/t-033-integration-testing`)
 
 ```text
