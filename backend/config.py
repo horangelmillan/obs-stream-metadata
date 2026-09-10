@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from backend.environment import PRODUCTION
 from backend.environment import normalize as normalize_env
 
 
@@ -42,12 +43,16 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
     # T-055: Cloud Run inyecta PORT; STREAM_META_BACKEND_PORT manda si existe.
     port = int(src.get("STREAM_META_BACKEND_PORT",
                        src.get("PORT", "8080")))
+    # T-053: entorno explícito; valor desconocido = fail-fast aquí,
+    # ya no decorativo. Ausente = development (dirección segura).
+    env_name = normalize_env(src.get("STREAM_META_BACKEND_ENV"))
+    # T-056: Cloud Run necesita 0.0.0.0; dev conserva loopback.
+    # STREAM_META_BACKEND_HOST explícito siempre gana.
+    default_host = "0.0.0.0" if env_name == PRODUCTION else "127.0.0.1"
     return Settings(
-        host=src.get("STREAM_META_BACKEND_HOST", "127.0.0.1"),
+        host=src.get("STREAM_META_BACKEND_HOST", default_host),
         port=port,
-        # T-053: entorno explícito; valor desconocido = fail-fast aquí,
-        # ya no decorativo. Ausente = development (dirección segura).
-        env=normalize_env(src.get("STREAM_META_BACKEND_ENV")),
+        env=env_name,
         log_level=src.get("STREAM_META_BACKEND_LOG_LEVEL", "INFO"),
         public_base_url=src.get("STREAM_META_BACKEND_PUBLIC_URL",
                                 f"http://127.0.0.1:{port}"),

@@ -4,6 +4,42 @@ Contrato entre código y operador. Sin valores reales (los aporta el
 operador). Principio: **Neon es el proveedor inicial; PostgreSQL es el
 contrato** (§3 T-055). Nada aquí depende de APIs de Neon.
 
+## Estado de despliegue (T-056, 2026-09-10)
+
+Clasificación por registro (IMPLEMENTADO / CONFIGURADO / VERIFICADO /
+PENDIENTE / FALLIDO). Nada de esta sección afirma "production deployed".
+
+- IMPLEMENTADO: backend portable PG + migrations + Dockerfile + gates
+  prod + binding instalación↔backend (T-053/T-054/T-055 mergeadas).
+- IMPLEMENTADO (T-056): bind por entorno — dev `127.0.0.1`, prod
+  `0.0.0.0` por defecto, `STREAM_META_BACKEND_HOST` como override.
+- CONFIGURADO (GCP, operador): proyecto `obs-stream-metadata`
+  (n.º 364043334054, billing Free Trial ~USD 300/90 días hasta aprox.
+  10 Dec 2026, sin activación automática); región Cloud Run y Artifact
+  Registry `us-east5`; servicio previsto `obs-stream-metadata-service`;
+  runtime service account `obs-stream-metadata-backend` (sin roles
+  innecesarios, Secret Accessor solo sobre DATABASE_URL, sin Default
+  Compute SA); Neon `AWS US East 2 (Ohio)`, branch `production`, DB
+  `neondb`, rol `neondb_owner`, pooling ON; DATABASE_URL en Secret
+  Manager (versión 1, NO copiarla aquí); scaling min 0 / max 1, 512 MiB,
+  1 CPU, timeout 300 s, 2ª generación, request-based billing; acceso
+  público a nivel de servicio (la frontera auth es `backend_auth`);
+  sin Cloud SQL, sin VPC, cifrado gestionado por Google, sin Binary
+  Authorization.
+- CONFIGURADO: imagen `us-east5-docker.pkg.dev/obs-stream-metadata/
+  obs-stream-metadata/obs-stream-metadata-service:latest` — build PASS,
+  push PASS, digest
+  `sha256:259661484502da7e858a6faedd74acb31e2bb8e4e71ade600afb1d7f7d7d5e9a`.
+- FALLIDO: primer despliegue Cloud Run — el contenedor no escuchó en
+  `PORT=8080`. Causa: `serve()` hacía bind en `host` heredado
+  (`127.0.0.1`); Cloud Run exige `0.0.0.0`. Corrección T-056 (arriba).
+- PENDIENTE: repetir despliegue y verificar startup, `/health`,
+  `/ready`, `/version`, conectividad PostgreSQL, wiring productivo,
+  inyección del secreto, `PUBLIC_URL` y providers de producción.
+- PENDIENTE: `STREAM_META_BACKEND_PUBLIC_URL=https://<cloud-run-url>`
+  (la URL real se conoce tras un despliegue exitoso; NO inventarla;
+  prod exige `https://` por gate T-053).
+
 ## Topología
 
 ```text

@@ -92,6 +92,37 @@ class LoadSettingsEnvTest(unittest.TestCase):
             load_settings({"STREAM_META_BACKEND_ENV": "staging"})
 
 
+class BindHostTest(unittest.TestCase):
+    """T-056: bind por entorno (Cloud Run necesita 0.0.0.0 en prod)."""
+
+    def test_dev_defaults_loopback(self):
+        settings = load_settings({})
+        self.assertEqual(settings.env, DEVELOPMENT)
+        self.assertEqual(settings.host, "127.0.0.1")
+
+    def test_prod_defaults_all_interfaces(self):
+        settings = load_settings({"STREAM_META_BACKEND_ENV": "production"})
+        self.assertEqual(settings.host, "0.0.0.0")
+
+    def test_explicit_host_wins_in_prod(self):
+        settings = load_settings({"STREAM_META_BACKEND_ENV": "production",
+                                  "STREAM_META_BACKEND_HOST": "custom-host"})
+        self.assertEqual(settings.host, "custom-host")
+
+    def test_explicit_host_wins_in_dev(self):
+        settings = load_settings({"STREAM_META_BACKEND_HOST": "0.0.0.0"})
+        self.assertEqual(settings.host, "0.0.0.0")
+
+    def test_port_contract_unchanged(self):
+        base = {"STREAM_META_BACKEND_ENV": "production"}
+        self.assertEqual(load_settings(base).port, 8080)
+        self.assertEqual(
+            load_settings(dict(base, PORT="9090")).port, 9090)
+        self.assertEqual(
+            load_settings(dict(base, PORT="9090",
+                               STREAM_META_BACKEND_PORT="9091")).port, 9091)
+
+
 class ProductionGatesTest(unittest.TestCase):
     def test_dev_keeps_current_flow(self):
         app = create_app(settings=Settings(host="127.0.0.1", port=0),

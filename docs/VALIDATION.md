@@ -110,6 +110,20 @@ FINAL: T-055 PASS CON SALVEDAD (despliegue Cloud Run+Neon pendiente
             del operador; ver DEPLOYMENT.md checklist)
 ```
 
+## T-056 bind production 0.0.0.0 (2026-09-10)
+
+```text
+CAMBIO:   load_settings() — dev default 127.0.0.1, prod default 0.0.0.0,
+            STREAM_META_BACKEND_HOST explícito siempre gana; PORT intacto.
+            Causa: primer despliegue Cloud Run FALLÓ (bind loopback).
+BACKEND:  PASS 121/121, 0 skips con PG local (104+12 heredados T-055 +
+            5 nuevos BindHostTest); 115 selfcheck intactos (sin cambios C++)
+SECRET:   PASS (patrón CI; dev.env local ignorado, sin traquear)
+DEPLOY:   reintento PENDIENTE (startup, /health, /ready, /version, PG,
+            secreto, PUBLIC_URL, providers prod por verificar)
+FINAL: T-056 PASS (código+tests+docs; despliegue pendiente de reintento)
+```
+
 ## P6 parcial (T-033, 2026-09-09, rama `feat/t-033-integration-testing`)
 
 ```text
