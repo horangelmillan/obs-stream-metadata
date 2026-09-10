@@ -13,9 +13,29 @@ Wire formats mirror the P3-validated ones (F-020, F-021, F-023).
 
 #include <QString>
 
+#include <optional>
+
 namespace meta {
 
 enum class Platform { Twitch, YouTube, Kick };
+
+// T-049: connection mode (ADR-012). Explicit domain concept, not a bool or
+// UI string: Independent = user-supplied App Identity (direct/BYO-app),
+// Managed = service-supplied App Identity (backend). Orthogonal to Platform:
+// every (Platform, ConnectionMode) pair is representable; support per pair
+// is decided by T-041/T-048, never by this enum. Holds no secrets.
+enum class ConnectionMode { Independent, Managed };
+
+const char *connectionModeName(ConnectionMode m); // "Independent"/"Managed"
+
+// Default compatible with all pre-T-049 behavior and persisted config:
+// what exists today IS Independent (direct/BYO-app). Legacy data without a
+// mode maps to Independent; never to Managed (ADR-012 §10).
+ConnectionMode defaultConnectionMode();
+
+// Canonical wire strings for future persistence (T-041). Strict lowercase;
+// anything else -> nullopt. Reserved now so the format cannot drift later.
+std::optional<ConnectionMode> parseConnectionMode(const QString &s);
 
 // Documented limits (§20). Kick documents no public stream_title limit:
 // only non-empty is checked locally, the server decides (204 vs 400).

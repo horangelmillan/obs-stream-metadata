@@ -225,6 +225,13 @@ transactions/adapters/stores` KEEP AS BASE (Managed); stores memoria/Env =
 PROTOTYPE (prod: secret-manager + DB cifrada, T-054); `AllowAllRateLimiter`
 sustituido en T-044 (FixedWindow; distribuido = INCOMPLETE); nada a DEPRECATE.
 
+### Correspondencia modal (T-049, sin código aquí)
+
+`meta::ConnectionMode` vive solo en C++ (`metadata.h`). Este backend no lo
+duplica: su `Connection` existe únicamente en contexto Managed, e Independent
+jamás lo toca. T-041 persistirá el modo en cliente; el backend no necesita
+cambios para ello.
+
 ### UX actual vs modal (§11)
 
 Dock hoy: 5 campos universales (tw/yt/kk ID + yt/kk secret), Connect/Disconnect

@@ -31,7 +31,7 @@ Estados: pendiente / en-progreso / bloqueada / hecha / deuda / investigación / 
 | T-046 | hecha | 7 | Adapter OAuth Kick en backend (exchange/refresh/revoke) | ConnectService genérico + live PASS (connect/callback/exchange/identidad/disconnect) + 69 tests | ADR-009 |
 | T-047 | pendiente | 7 | Twitch directo endurecido (Client ID distribuido + DCF, sin backend) | Connect Twitch sin cambios UX | F-015, F-033 |
 | T-048 | pendiente | 6 | [Managed] UX modo Administrado: wiring `backend_auth.*` + connect-vía-backend + status (reenmarque: antes “migración fuera de BYO-app”) | camino Administrado `Connect` sin credenciales visibles; Independiente intacto | ADR-012 |
-| T-049 | pendiente | 6 | [Common] Modelo modal en plugin: `ConnectionMode` + `ProviderConnection` + no-mezcla entre modalidades | estados + confirmación al cambiar + separación credenciales/tokens | ADR-012 |
+| T-049 | hecha | 6 | [Common] Modelo modal: `meta::ConnectionMode` + default Independent + strings canónicos + 7 checks (sin UI/wiring/persistencia) | selfcheck 75/75 + backend 69/69 + build/scan en verde | ADR-012 |
 | T-050 | pendiente | 6 | [Independent] Validación Independent (matriz por proveedor: credenciales, persistencia, OAuth, refresh, revoke, Apply, errores) | matriz Independent en verde | ADR-012 |
 | T-051 | pendiente | 7 | [Managed] Validación Managed contra backend (bootstrap, sesión, OAuth, callback, refresh, revoke, Apply, expiración, backend offline) | matriz Managed en verde | ADR-012 |
 | T-052 | pendiente | 6 | [Validation] Tests cross-mode (cambio de modalidad sin pérdida/mezcla, credenciales y tokens aislados) | matriz cross-mode en verde | ADR-012 |
