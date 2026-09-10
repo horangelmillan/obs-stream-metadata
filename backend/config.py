@@ -26,6 +26,11 @@ class Settings:
     # secretos inline.
     data_dir: str = ""
     secret_dir: str = ""
+    # T-058: plural para múltiples mounts (Cloud Run: un secreto por
+    # directorio). Separador = os.pathsep (`:` Linux, `;` Windows).
+    # Regla explícita: DIRS y DIR a la vez = fail-fast (ambiguo);
+    # solo DIRS = lista; solo DIR = compat single.
+    secret_dirs: str = ""
     tls_certfile: str = ""
     tls_keyfile: str = ""
     global_limit: int = 600
@@ -60,6 +65,7 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         body_limit_bytes=int(src.get("STREAM_META_BACKEND_BODY_LIMIT", "65536")),
         data_dir=src.get("STREAM_META_BACKEND_DATA_DIR", ""),
         secret_dir=src.get("STREAM_META_BACKEND_SECRET_DIR", ""),
+        secret_dirs=src.get("STREAM_META_BACKEND_SECRET_DIRS", ""),
         tls_certfile=src.get("STREAM_META_BACKEND_TLS_CERTFILE", ""),
         tls_keyfile=src.get("STREAM_META_BACKEND_TLS_KEYFILE", ""),
         global_limit=int(src.get("STREAM_META_BACKEND_GLOBAL_LIMIT", "600")),

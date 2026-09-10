@@ -104,15 +104,25 @@ def _production_wiring(settings):
     from backend.pgstores import (PgConnectionStore, PgInstallationStore,
                                   PgOAuthTransactionStore, PgSessionStore,
                                   PgTokenStore)
-    from backend.prodstores import FileSecretStore, ProdstoresError
+    from backend.prodstores import (CompositeSecretStore, FileSecretStore,
+                                    ProdstoresError, split_secret_dirs)
     from backend.stores import FixedWindowRateLimiter
-    if not settings.secret_dir:
+    # T-058: uno o varios directorios (Cloud Run: un secreto por mount).
+    # Ambos a la vez = ambiguo = fail-fast; ninguno = fail-fast.
+    dirs = split_secret_dirs(settings.secret_dirs)
+    if dirs and settings.secret_dir:
         raise ProdstoresError(
-            "production requires STREAM_META_BACKEND_SECRET_DIR")
+            "ambiguous secret config: set SECRET_DIRS or SECRET_DIR, "
+            "not both")
+    if not dirs:
+        if not settings.secret_dir:
+            raise ProdstoresError(
+                "production requires STREAM_META_BACKEND_SECRET_DIR")
+        dirs = [settings.secret_dir]
+    secrets = CompositeSecretStore(FileSecretStore(path) for path in dirs)
     if not settings.database_url:
         raise ProdstoresError(
             "production requires STREAM_META_BACKEND_DATABASE_URL")
-    secrets = FileSecretStore(settings.secret_dir)
     # T-057: los secretos de providers habilitados deben existir ANTES de
     # escuchar (nombres en el error, nunca valores): evita descubrir un
     # mount incompleto en el primer OAuth real.

@@ -86,12 +86,17 @@ backend; con Cloud Run + HTTPS público, terminación en la plataforma.
 - OAuth apps PROD (operador): proyecto Google PROD + app Kick PROD
   separados de DEV; redirects = `$PUBLIC_URL/connect/*/callback`.
 
-## Secret Manager ↔ FileSecretStore (T-057)
+## Secret Manager ↔ FileSecretStore (T-057, precisado en T-058)
 
 Contrato verificado: Cloud Run expone secretos como **volúmenes
 (tmpfs, stateless-safe)** y `FileSecretStore` los consume como
 **ficheros** — mismo mecanismo, cero cambios de código para el mount.
 `DATABASE_URL` continúa como variable de entorno (binding ya operativo).
+
+> Precisión T-058: el ejemplo original montaba varios secretos bajo un
+> mismo directorio; Cloud Run lo rechaza (un secreto por directorio).
+> La configuración vigente es la de "Múltiples directorios" (abajo).
+> Se conserva este bloque por historia, no como instrucción.
 
 Configuración exacta del operador (nombres ilustrativos; los secretos
 viven en Secret Manager, nunca aquí):
@@ -118,6 +123,30 @@ Reglas:
 - Estado actual: `DATABASE_URL` enlazado (v1); ficheros de providers
   PENDIENTES hasta habilitar OAuth productivo; `PUBLIC_URL` pendiente
   de la URL real del servicio.
+
+## Múltiples directorios (T-058)
+
+Cloud Run admite **un secreto por directorio**: cada secreto se monta
+en su propio directorio y el backend los agrega con
+`CompositeSecretStore` (orden determinista, primer valor existente
+gana; vacío = fail-fast). Configuración exacta del operador:
+
+```text
+--set-secrets=/run/secrets/google-client-id/GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:1
+--set-secrets=/run/secrets/google-client-secret/GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:1
+--set-secrets=/run/secrets/kick-client-id/KICK_CLIENT_ID=KICK_CLIENT_ID:1
+--set-secrets=/run/secrets/kick-client-secret/KICK_CLIENT_SECRET=KICK_CLIENT_SECRET:1
+--set-env-vars=STREAM_META_BACKEND_SECRET_DIRS=/run/secrets/google-client-id:/run/secrets/google-client-secret:/run/secrets/kick-client-id:/run/secrets/kick-client-secret
+```
+
+Reglas:
+
+- Separador `os.pathsep` (`:` en Linux/Cloud Run, `;` en Windows dev).
+- `SECRET_DIRS` y `SECRET_DIR` a la vez = fail-fast (ambiguo); solo
+  `SECRET_DIR` = compatibilidad single-directory (comportamiento T-057
+  intacto).
+- Los nombres de fichero siguen siendo los que exige cada adapter; el
+  directorio es solo el mount.
 
 ## Arranque / salud / parada (Cloud Run)
 
