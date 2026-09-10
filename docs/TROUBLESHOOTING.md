@@ -95,7 +95,9 @@ reconexión), plataforma sin conectar (error individual, el resto sigue).
 ## T-032 — alta de credenciales BYO-app + persistencia DPAPI (2026-09-09)
 
 > Nota ADR-012: BYO-app = modalidad Independiente del producto (no solo
-> operador/debug). La sección T-033 siguiente sigue el mismo modelo.
+> operador/debug). Desde T-041 el dock tiene selector Independent/Managed y
+> persiste `connection_mode` en `accounts.json` (Independent por defecto para
+> ficheros antiguos). La sección T-033 siguiente sigue el mismo modelo.
 
 Las env vars `STREAM_META_*` ya no se leen (código `env()` eliminado).
 Alta una sola vez por plataforma, con tus propias apps:
@@ -152,3 +154,25 @@ Reglas de seguridad (F-018, F-024): jamás tokens/codes/verifiers en
 chat, capturas, repo, logs ni PR; tras cada sesión viva, comprobar
 que `%APPDATA%\obs-studio\logs` no contiene secretos (solo longitudes
 y códigos HTTP).
+
+## T-048 — procedimiento Managed dev (2026-09-09)
+
+Backend local + `managed-link-test.exe` (nunca en installer):
+
+```powershell
+# Terminal 1 — backend con credenciales dev SOLO en entorno (jamás en repo):
+$env:STREAM_META_BACKEND_SECRET_GOOGLE_CLIENT_ID = '<id>'   # o KICK_*
+$env:STREAM_META_BACKEND_SECRET_GOOGLE_CLIENT_SECRET = '<secret>'
+$env:STREAM_META_BACKEND_PROVIDERS = 'youtube'  # o 'kick'; DEV-only
+$env:STREAM_META_BACKEND_PORT = '9004'          # según redirect registrado
+python -m backend.app
+# Terminal 2 — cliente C++ real (Qt bin en PATH):
+.\build_x64\RelWithDebInfo\managed-link-test.exe --base-url http://127.0.0.1:9004 `
+  --provider youtube --store $env:TEMP\t048.json --timeout-s 300
+# Abrir la URL impresa, consentir, verificar CONNECTED + DISCONNECT. El exe
+# borra el store temporal al salir. Puertos: YT 9004 (127.0.0.1), Kick 3000
+# (localhost); una instancia backend por puerto.
+```
+
+El dock usa `STREAM_META_BACKEND_URL` (DEV-only) o el default
+`http://127.0.0.1:8080`; en producción será URL configurada (T-054).

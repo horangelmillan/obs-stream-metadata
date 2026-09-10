@@ -23,14 +23,14 @@ Estados: pendiente / en-progreso / bloqueada / hecha / deuda / investigación / 
 | T-038 | hecha | 6 | Decisión arquitectura final OAuth distribuido | ADR-009 MODIFY + `ARCHITECTURE-BACKEND.md` | F-033–F-041 |
 | T-039 | hecha | 6 | ADR-009 arquitectura OAuth final | `docs/DECISIONS/ADR-009-centralized-backend-architecture.md` aprobado en T-038 | T-038 |
 | T-040 | hecha | 0 | Normalizar `core.autocrlf` y convención `master` vs `main` | ADR + config | — |
-| T-041 | pendiente | 6 | [Independent] UX modal: selector Independiente/Administrado + configuración contextual (reenmarque: antes “migración fuera de BYO-app”) | selector + campos solo donde el proveedor los exija | ADR-012 |
+| T-041 | hecha | 6 | [Independent] UX modal: selector Independent/Managed + persistencia/migración modo (sin wiring Managed) | selector + `connection_mode` + legacy→Independent idempotente + 89 selfchecks | ADR-012 |
 | T-042 | pendiente | 7 | [Infra] Arquitectura backend Kick — SUPERSEDED en la práctica por T-046 (adapter + live PASS); se conserva por historia, cierre formal pendiente | alcance conceptual aprobado | F-036 |
 | T-043 | hecha | 7 | Backend foundation (servicio HTTPS + DB mínima + secret manager + dominio/TLS) | fundación stdlib `backend/` en verde: 27 tests, health/ready/version, kernel/ports/adapters aislados, sin secretos | ADR-009 |
 | T-044 | hecha | 7 | Auth plugin↔backend (identidad instalación + sesiones cortas + rate-limit, sin secreto permanente) | ADR-010 + `/auth/*` + cliente Qt async + 43 tests + build/DLL/selfcheck en verde | ADR-009, ADR-010 |
 | T-045 | hecha | 7 | Adapter OAuth YouTube en backend (exchange/refresh/revoke + verificación Google) | ADR-011 + live PASS (connect/callback/exchange/identidad/disconnect) + 57 tests | ADR-009, ADR-011 |
 | T-046 | hecha | 7 | Adapter OAuth Kick en backend (exchange/refresh/revoke) | ConnectService genérico + live PASS (connect/callback/exchange/identidad/disconnect) + 69 tests | ADR-009 |
 | T-047 | pendiente | 7 | Twitch directo endurecido (Client ID distribuido + DCF, sin backend) | Connect Twitch sin cambios UX | F-015, F-033 |
-| T-048 | pendiente | 6 | [Managed] UX modo Administrado: wiring `backend_auth.*` + connect-vía-backend + status (reenmarque: antes “migración fuera de BYO-app”) | camino Administrado `Connect` sin credenciales visibles; Independiente intacto | ADR-012 |
+| T-048 | hecha | 6 | [Managed] UX modo Administrado: wiring `backend_auth.*` + connect-vía-backend + status | Managed YT/Kick live PASS C++→backend→provider + 70 tests | ADR-012 |
 | T-049 | hecha | 6 | [Common] Modelo modal: `meta::ConnectionMode` + default Independent + strings canónicos + 7 checks (sin UI/wiring/persistencia) | selfcheck 75/75 + backend 69/69 + build/scan en verde | ADR-012 |
 | T-050 | pendiente | 6 | [Independent] Validación Independent (matriz por proveedor: credenciales, persistencia, OAuth, refresh, revoke, Apply, errores) | matriz Independent en verde | ADR-012 |
 | T-051 | pendiente | 7 | [Managed] Validación Managed contra backend (bootstrap, sesión, OAuth, callback, refresh, revoke, Apply, expiración, backend offline) | matriz Managed en verde | ADR-012 |

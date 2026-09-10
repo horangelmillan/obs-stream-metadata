@@ -19,6 +19,7 @@ Apply retries 429/5xx at most twice with backoff (no loops).
 
 #pragma once
 
+#include "backend_auth.h"
 #include "metadata.h"
 #include "secure_store.h"
 #include <QWidget>
@@ -32,6 +33,7 @@ class QNetworkReply;
 class QPlainTextEdit;
 class QPushButton;
 class QTcpServer;
+class QTimer;
 
 namespace meta {
 }
@@ -41,6 +43,11 @@ class MetadataDock : public QWidget {
 public:
 	explicit MetadataDock(QWidget *parent = nullptr);
 	~MetadataDock() override;
+
+	struct ManagedConn {
+		bool connected = false;
+		QString display;
+	};
 
 private slots:
 	void onApply();
@@ -55,6 +62,23 @@ private slots:
 	void onTwitchPollTimeout();
 	void onBackoffTimeout();
 	void onCallbackConnection();
+
+	void onModeChanged(int index);
+	bool isManaged() const;
+	void refreshModeUi();
+	meta::ConnectionMode modeFromCombo() const;
+	// T-048: Managed wiring (backend). Independent handlers untouched.
+	void onConnectManaged(meta::Platform p);
+	void onDisconnectManaged(meta::Platform p);
+	void onManagedPollTimeout();
+	void finishManagedConnected(meta::Platform p, const QString &display);
+	void finishManagedError(meta::Platform p, const QString &msg);
+	void repaintModeStatuses();
+	ManagedConn &managedAccount(meta::Platform p);
+	void initManaged();
+	QString managedAuthError(meta::Platform p, backend_auth::Result r, int);
+	QString managedApiError(meta::Platform p,
+				const backend_auth::Client::ApiReply &rep);
 
 private:
 	// One request at a time; replies carry their Op in a property.
@@ -160,6 +184,25 @@ private:
 	QLabel *kkResult_ = nullptr;
 	QLabel *generalMsg_ = nullptr;
 	QNetworkAccessManager *net_ = nullptr;
+	// T-041: connection mode (ADR-012). Global for the dock: a single
+	// plugin installation uses one App-Identity source. Defaults to
+	// Independent (all pre-T-041 behavior). T-048 wires Managed via
+	// backend_auth (YouTube/Kick); Twitch stays direct-only.
+	meta::ConnectionMode mode_ = meta::defaultConnectionMode();
+	QComboBox *modeCombo_ = nullptr;
+	QLabel *credTitle_ = nullptr;
+	QLabel *credNote_ = nullptr;
+	QLabel *managedNote_ = nullptr;
+	// T-048: Managed auth client (backend sessions) + per-provider
+	// Managed state. Memory only: display names are re-queried, never
+	// persisted; provider tokens never reach this process.
+	backend_auth::Client *managedAuth_ = nullptr;
+	QString managedBaseUrl_;
+	ManagedConn mYt_;
+	ManagedConn mKk_;
+	QTimer *managedPollTimer_ = nullptr;
+	meta::Platform managedPollFor_ = meta::Platform::YouTube;
+	int managedPollsLeft_ = 0;
 
 	void setStatus(meta::Platform p, const QString &text);
 	void setResult(meta::Platform p, bool ok, const QString &text);

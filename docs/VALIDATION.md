@@ -9,6 +9,21 @@
 
 Toda afirmación "funciona" requiere evidencia (comando + salida). "Probablemente funciona" no es válido.
 
+## T-048 Managed wiring (2026-09-09, `managed-link-test.exe`, cliente C++ real)
+
+```text
+BUILD:     PASS (obs-stream-metadata.dll + metadata-selfcheck.exe + managed-link-test.exe, 0 errores)
+SELFCHECK: PASS 89/89 · BACKEND: PASS 70/70 (incl. regresión alias /connect/youtube)
+YT MANAGED LIVE: PASS — bootstrap → session (HMAC C++↔Python) → /connect/youtube →
+                 browser + consent → callback → status connected →
+                 disconnect → disconnected (secret/tokens jamás en plugin/logs)
+KICK MANAGED LIVE: PASS — idem vía localhost:3000 (secret backend-only)
+SECRET:    PASS (scan patrón CI limpio; temp store borrado; dev.env intacto y sin traquear)
+DOCK:      cableado compilado; pixel-click pendiente operador (F-014);
+           smoke OBS previo con `dock ready (mode=Independent)` vigente
+FINAL: T-048 PASS (sin licencias/pagos/producción; matrices T-050–T-052 pendientes)
+```
+
 ## P6 parcial (T-033, 2026-09-09, rama `feat/t-033-integration-testing`)
 
 ```text

@@ -16,6 +16,8 @@ obs_module_config_path) and passes it in.
 
 #pragma once
 
+#include "metadata.h"
+
 #include <QString>
 
 namespace secure {
@@ -38,6 +40,10 @@ struct Data {
 	// secret = installation_secret (both DPAPI blobs); access stays empty.
 	// Never a provider credential; never shown in UI.
 	Record backendInstall;
+	// T-041: connection mode, canonical wire string ("independent" /
+	// "managed", see meta::parseConnectionMode). Plaintext: not a secret,
+	// only a context. Empty = legacy file without mode.
+	QString connectionMode;
 	bool anyConnected() const
 	{
 		return twitch.connected || youtube.connected ||

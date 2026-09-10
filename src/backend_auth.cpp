@@ -282,4 +282,91 @@ void Client::revokeInstallation(std::function<void(Result)> cb)
 	     [cb](Result r, const QJsonObject &) { cb(r); });
 }
 
+void Client::apiSend(const QString &verb, const QString &path,
+		     const QJsonObject &body,
+		     std::function<void(const ApiReply &)> cb)
+{
+	ensureSession([this, verb, path, body, cb](Result r) {
+		if (r != Result::Ok || sessionToken_.isEmpty()) {
+			cb(ApiReply{r, 0, {}});
+			return;
+		}
+		if (baseUrl_.isEmpty() || !nam_) {
+			cb(ApiReply{Result::InvalidResponse, 0, {}});
+			return;
+		}
+		QNetworkRequest req(QUrl(baseUrl_ + path));
+		req.setHeader(QNetworkRequest::ContentTypeHeader,
+			      QVariant(QStringLiteral("application/json")));
+		req.setRawHeader("Authorization",
+				 ("Bearer " + sessionToken_).toLatin1());
+		QNetworkReply *reply = (verb == QStringLiteral("POST"))
+					       ? nam_->post(req,
+							    QJsonDocument(body).toJson(
+								    QJsonDocument::
+									    Compact))
+					       : nam_->get(req);
+		QTimer *timer = new QTimer(reply);
+		timer->setSingleShot(true);
+		timer->setInterval(kTimeoutMs);
+		connect(timer, &QTimer::timeout, reply,
+			[reply]() { reply->abort(); });
+		timer->start();
+		connect(reply, &QNetworkReply::finished, this,
+			[this, reply, timer, cb]() {
+				timer->stop();
+				timer->deleteLater();
+				const int http = reply->attribute(
+					QNetworkRequest::HttpStatusCodeAttribute)
+							 .toInt();
+				const QByteArray raw = reply->readAll();
+				const QNetworkReply::NetworkError netErr =
+					reply->error();
+				reply->deleteLater();
+				const bool failed =
+					netErr != QNetworkReply::NoError;
+				if (!failed && http == 401) {
+					// Sesión revocada en servidor:
+					// olvidarla para forzar re-autenticar.
+					sessionToken_.clear();
+				}
+				Result res = Result::Ok;
+				QJsonObject o;
+				if (netErr == QNetworkReply::TimeoutError ||
+				    netErr ==
+					    QNetworkReply::OperationCanceledError) {
+					res = Result::NetworkError;
+				} else if (failed) {
+					res = (http == 429)
+						      ? Result::RateLimited
+						      : Result::NetworkError;
+				} else {
+					o = QJsonDocument::fromJson(raw)
+						    .object();
+					if (http == 401)
+						res = Result::Unauthorized;
+					else if (http == 429)
+						res = Result::RateLimited;
+					else if (http < 200 || http >= 300)
+						res = (http >= 500)
+							      ? Result::ServerError
+							      : Result::InvalidResponse;
+				}
+				cb(ApiReply{res, http, o});
+			});
+	});
+}
+
+void Client::apiGet(const QString &path,
+		    std::function<void(const ApiReply &)> cb)
+{
+	apiSend(QStringLiteral("GET"), path, QJsonObject(), cb);
+}
+
+void Client::apiPost(const QString &path, const QJsonObject &body,
+		     std::function<void(const ApiReply &)> cb)
+{
+	apiSend(QStringLiteral("POST"), path, body, cb);
+}
+
 } // namespace backend_auth

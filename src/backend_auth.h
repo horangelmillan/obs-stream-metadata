@@ -67,11 +67,28 @@ public:
 	QString sessionToken() const { return sessionToken_; }
 	bool hasValidSession() const;
 
+	// T-048: llamada autenticada contra el backend (asegura sesión
+	// primero). Nunca expone el token: viaja solo como header Bearer.
+	// Respuesta: resultado + HTTP + cuerpo (cuerpo sin secretos por
+	// contrato; el llamador solo lee campos de UX/estado).
+	struct ApiReply {
+		Result result;
+		int http = 0;
+		QJsonObject body;
+	};
+	void apiGet(const QString &path,
+		    std::function<void(const ApiReply &)> cb);
+	void apiPost(const QString &path, const QJsonObject &body,
+		     std::function<void(const ApiReply &)> cb);
+
 private:
 	QJsonObject signedBody(const QString &installationId,
 			       const QString &secret) const;
 	void post(const QString &path, const QJsonObject &body,
 		  std::function<void(Result, const QJsonObject &)> cb);
+	void apiSend(const QString &verb, const QString &path,
+		     const QJsonObject &body,
+		     std::function<void(const ApiReply &)> cb);
 	bool persistInstallation(const QString &id, const QString &secret);
 	bool loadInstallation(QString &id, QString &secret);
 	bool storeSession(const QJsonObject &o);
