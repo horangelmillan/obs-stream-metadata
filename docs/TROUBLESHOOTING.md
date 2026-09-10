@@ -176,3 +176,14 @@ python -m backend.app
 
 El dock usa `STREAM_META_BACKEND_URL` (DEV-only) o el default
 `http://127.0.0.1:8080`; en producción será URL configurada (T-054).
+
+## T-052 — checklist operador cross-mode GUI (PENDING, requiere clicks)
+
+Automatizado ya cubre stores/backend; esto exige el dock real en OBS:
+
+1. Independent: conectar Twitch/YouTube/Kick BYO-app → Apply OK → reiniciar OBS → `Connected as` intacto.
+2. Cambiar a Managed (sin borrar nada): verificar que NO se copian credenciales (inspeccionar `accounts.json`: solo `connection_mode` cambia; blobs DPAPI intactos).
+3. Managed: Connect YouTube/Kick → consentimiento → `Connected as` → reiniciar OBS → snapshot restaurado → Connect de nuevo reconecta sin navegador si el backend conserva la conexión.
+4. Managed → Independent: cuentas Independent intactas, sin tokens backend en disco.
+5. Disconnect en cada modo; revocar en la web del proveedor; reconectar.
+6. Tras cada paso: `%APPDATA%\obs-studio\logs` sin secretos (longitudes/códigos como máximo).

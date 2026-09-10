@@ -46,7 +46,8 @@ public:
 
 	struct ManagedConn {
 		bool connected = false;
-		QString display;
+		QString userId;  // provider user/channel id (non-secret label)
+		QString display; // "Connected as" label (non-secret)
 	};
 
 private slots:
@@ -70,8 +71,10 @@ private slots:
 	// T-048: Managed wiring (backend). Independent handlers untouched.
 	void onConnectManaged(meta::Platform p);
 	void onDisconnectManaged(meta::Platform p);
+	void startManagedBrowserFlow(meta::Platform p);
 	void onManagedPollTimeout();
-	void finishManagedConnected(meta::Platform p, const QString &display);
+	void finishManagedConnected(meta::Platform p, const QString &userId,
+				    const QString &display);
 	void finishManagedError(meta::Platform p, const QString &msg);
 	void repaintModeStatuses();
 	ManagedConn &managedAccount(meta::Platform p);
