@@ -16,7 +16,9 @@ class FakeSecrets:
         if self._missing:
             return None
         return {"GOOGLE_CLIENT_ID": "test-client-id",
-                "GOOGLE_CLIENT_SECRET": "test-secret"}.get(name)
+                "GOOGLE_CLIENT_SECRET": "test-secret",
+                "KICK_CLIENT_ID": "test-kick-id",
+                "KICK_CLIENT_SECRET": "test-kick-secret"}.get(name)
 
 
 def _session(provider: Provider) -> OAuthSession:
@@ -26,26 +28,27 @@ def _session(provider: Provider) -> OAuthSession:
 class AdaptersTest(unittest.TestCase):
     def setUp(self):
         self.yt = YouTubeProvider(FakeSecrets(), "http://127.0.0.1:9004/cb")
+        self.kk = KickProvider(FakeSecrets(), "http://localhost:3000/cb")
 
     def test_scopes_minimal(self):
         self.assertEqual(self.yt.SCOPES,
                          ("https://www.googleapis.com/auth/youtube.force-ssl",))
-        self.assertIn("channel:write", KickProvider().SCOPES)
+        self.assertEqual(self.kk.SCOPES, ("channel:write", "channel:read"))
         self.assertEqual(TwitchProvider().SCOPES, ("channel:manage:broadcast",))
 
     def test_capabilities_match_kernel_matrix(self):
         self.assertTrue(self.yt.capability.stream_description)
-        self.assertFalse(KickProvider().capability.stream_description)
+        self.assertFalse(self.kk.capability.stream_description)
         self.assertFalse(TwitchProvider().capability.stream_description)
 
     def test_not_implemented_raises_internal_without_leak(self):
         with self.assertRaises(AppError) as ctx:
             self.yt.exchange_code(_session(Provider.YOUTUBE), "code")
         self.assertEqual(ctx.exception.code, ErrorCode.INTERNAL)
-        for cls in (KickProvider, TwitchProvider):
-            with self.assertRaises(AppError) as ctx:
-                cls().exchange_code(_session(cls().provider), "code")
-            self.assertEqual(ctx.exception.code, ErrorCode.INTERNAL)
+        with self.assertRaises(AppError) as ctx:
+            TwitchProvider().exchange_code(
+                _session(Provider.TWITCH), "code")
+        self.assertEqual(ctx.exception.code, ErrorCode.INTERNAL)
 
     def test_missing_credentials_is_internal(self):
         with self.assertRaises(AppError) as ctx:

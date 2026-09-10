@@ -38,6 +38,10 @@ class OAuthProvider(ABC):
     @abstractmethod
     def revoke(self, token: str) -> None: ...
 
+    @abstractmethod
+    def fetch_identity(self, access_token: str) -> Account:
+        """Identidad mínima para `Connected as` (Account del kernel)."""
+
 
 class TokenStore(ABC):
     """Custodia de user-tokens (cifrado en reposo en producción; ver stores.py)."""

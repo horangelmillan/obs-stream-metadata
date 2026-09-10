@@ -165,6 +165,9 @@ class YouTubeProvider(OAuthProvider):
             raise AppError(ErrorCode.PROVIDER_UNAVAILABLE, "google:revoke")
 
     def channel_identity(self, access_token: str) -> Account:
+        return self.fetch_identity(access_token)
+
+    def fetch_identity(self, access_token: str) -> Account:
         status, payload = _get_json(
             CHANNELS_URL + "?" + urllib.parse.urlencode(
                 {"part": "snippet", "mine": "true"}),

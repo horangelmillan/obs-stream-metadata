@@ -28,3 +28,6 @@ class TwitchProvider(OAuthProvider):
 
     def revoke(self, token: str) -> None:
         raise AppError(ErrorCode.INTERNAL, "twitch stays direct from plugin (T-047)")
+
+    def fetch_identity(self, access_token: str) -> Account:
+        raise AppError(ErrorCode.INTERNAL, "twitch stays direct from plugin (T-047)")
