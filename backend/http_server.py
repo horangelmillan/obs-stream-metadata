@@ -84,7 +84,10 @@ class BackendApp:
                 "api": API_VERSION}
 
     def version(self) -> dict:
-        return {"name": BACKEND_NAME, "version": BACKEND_VERSION, "api": API_VERSION}
+        # T-053: `env` explícito para que el operador distinga
+        # development vs production. Sin secretos, sin tokens.
+        return {"name": BACKEND_NAME, "version": BACKEND_VERSION,
+                "api": API_VERSION, "env": self.settings.env}
 
     def ready(self) -> tuple[int, dict]:
         ok, detail = self._ready_check()

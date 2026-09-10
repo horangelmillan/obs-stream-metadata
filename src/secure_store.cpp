@@ -23,6 +23,9 @@ namespace {
 // T-041: root-level mode key. Plaintext (context, not a secret).
 const char *kConnectionMode = "connection_mode";
 
+// T-053: root-level backend URL key. Plaintext (endpoint, not a secret).
+const char *kBackendBaseUrl = "backend_base_url";
+
 // Canonical wire strings (T-049 helpers are the single source of truth).
 QString modeToString(meta::ConnectionMode m)
 {
@@ -204,6 +207,16 @@ bool managedFromJson(const QJsonObject &o, ManagedSnapshot &m)
 
 } // namespace
 
+// T-053: installation↔backend binding (see secure_store.h). External
+// linkage on purpose: backend_auth and the selfcheck exercise the exact
+// same predicate (no duplicated logic, no drift).
+bool installationUrlMatches(const QString &stored, const QString &current)
+{
+	// Explicit binding only: empty stored (legacy) never matches, and
+	// there is no normalization guessing or fallback to another backend.
+	return !stored.isEmpty() && !current.isEmpty() && stored == current;
+}
+
 Store::Store(const QString &filePath) : filePath_(filePath) {}
 
 bool Store::save(const Data &d)
@@ -240,6 +253,11 @@ bool Store::save(const Data &d)
 	if (d.managedKick.connected)
 		root[QStringLiteral("managed_kick")] =
 			managedToJson(d.managedKick);
+	// T-053: installation↔backend binding (plaintext endpoint). Written
+	// whenever known so a later backend switch is detectable; like the
+	// mode, it survives the load-time reset below.
+	if (!d.backendBaseUrl.isEmpty())
+		root[QString::fromLatin1(kBackendBaseUrl)] = d.backendBaseUrl;
 	QSaveFile f(filePath_);
 	if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
 		return false;
@@ -298,6 +316,10 @@ bool Store::load(Data &d)
 	if (!any && !backendOk && !ytManaged && !kkManaged)
 		d = Data();
 	d.connectionMode = modeToString(mode);
+	// T-053: binding parsed after the reset so it is always faithful to
+	// the file (missing key = legacy = empty = never matches).
+	d.backendBaseUrl =
+		root.value(QString::fromLatin1(kBackendBaseUrl)).toString();
 	return any;
 #else
 	d = Data();

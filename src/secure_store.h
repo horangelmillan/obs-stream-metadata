@@ -56,6 +56,11 @@ struct Data {
 	// T-051: Managed snapshots (plaintext identity labels, see below).
 	ManagedSnapshot managedYoutube;
 	ManagedSnapshot managedKick;
+	// T-053: backend this installation belongs to (explicit environment
+	// binding). Plaintext URL, not a secret; empty = legacy file without
+	// binding (treated as mismatch → re-bootstrap, never cross-backend
+	// reuse). Never a ConnectionMode; DEV/PROD live here, not in the mode.
+	QString backendBaseUrl;
 	bool anyConnected() const
 	{
 		return twitch.connected || youtube.connected ||
@@ -77,5 +82,11 @@ public:
 private:
 	QString filePath_;
 };
+
+// T-053: installation↔backend binding. Fail-closed: only a non-empty
+// stored URL exactly equal to the configured one matches. Legacy/empty
+// stored URLs never match (caller re-bootstraps against the right
+// backend instead of reusing a foreign installation secret).
+bool installationUrlMatches(const QString &stored, const QString &current);
 
 } // namespace secure

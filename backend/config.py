@@ -8,6 +8,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from backend.environment import normalize as normalize_env
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -26,7 +28,9 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
     return Settings(
         host=src.get("STREAM_META_BACKEND_HOST", "127.0.0.1"),
         port=port,
-        env=src.get("STREAM_META_BACKEND_ENV", "development"),
+        # T-053: entorno explícito; valor desconocido = fail-fast aquí,
+        # ya no decorativo. Ausente = development (dirección segura).
+        env=normalize_env(src.get("STREAM_META_BACKEND_ENV")),
         log_level=src.get("STREAM_META_BACKEND_LOG_LEVEL", "INFO"),
         public_base_url=src.get("STREAM_META_BACKEND_PUBLIC_URL",
                                 f"http://127.0.0.1:{port}"),

@@ -10,13 +10,15 @@ from __future__ import annotations
 
 from backend.adapters.kick import KickProvider
 from backend.adapters.youtube import YouTubeProvider
+from backend.auth import AuthService
 from backend.config import load_settings
+from backend.environment import assert_production_ready
 from backend.http_server import BackendApp, serve
 from backend.logging_setup import get_logger
 from backend.oauth import ConnectService
 from backend.stores import (AllowAllRateLimiter, EnvSecretStore, InMemoryConnectionStore,
-                            InMemoryOAuthTransactionStore, InMemorySessionStore,
-                            InMemoryTokenStore)
+                            InMemoryInstallationStore, InMemoryOAuthTransactionStore,
+                            InMemorySessionStore, InMemoryTokenStore)
 
 
 def _loopback_base(public_base_url: str) -> str:
@@ -30,16 +32,28 @@ def _localhost_base(public_base_url: str) -> str:
 
 def create_app(secrets=None, sessions=None, limiter=None,
                ready_check=None, settings=None, providers=None,
+               installations=None, auth_service=None,
                enable_youtube: bool = False,
                enable_kick: bool = False) -> BackendApp:
     settings = settings or load_settings()
     secrets = secrets or EnvSecretStore()
     sessions = sessions or InMemorySessionStore()
+    installations = installations or InMemoryInstallationStore()
+    gated: dict[str, object] = {
+        "secrets": secrets,
+        "sessions": sessions,
+        "installations": installations,
+    }
     if providers is None:
         providers = {}
         redirects = {}
-        shared = (InMemoryOAuthTransactionStore(), InMemoryConnectionStore(),
-                  InMemoryTokenStore())
+        transactions = InMemoryOAuthTransactionStore()
+        connections = InMemoryConnectionStore()
+        tokens = InMemoryTokenStore()
+        gated["transactions"] = transactions
+        gated["connections"] = connections
+        gated["tokens"] = tokens
+        shared = (transactions, connections, tokens)
         if enable_youtube:
             redirect = _loopback_base(settings.public_base_url) + \
                 "/connect/youtube/callback"
@@ -54,10 +68,17 @@ def create_app(secrets=None, sessions=None, limiter=None,
             redirects["kick"] = redirect
     else:
         redirects = {name: "" for name in providers}
+    # T-053: entorno explícito. Producción con piezas de grado-dev o con
+    # redirects no-HTTPS falla aquí, nunca en silencio ni con fallback.
+    assert_production_ready(env=settings.env,
+                            public_base_url=settings.public_base_url,
+                            stores=gated)
+    auth_service = auth_service or AuthService(installations, sessions)
     return BackendApp(settings=settings,
                       sessions=sessions,
                       limiter=limiter or AllowAllRateLimiter(),
-                      ready_check=ready_check, providers=providers,
+                      ready_check=ready_check, auth_service=auth_service,
+                      providers=providers,
                       provider_redirects=redirects)
 
 

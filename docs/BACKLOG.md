@@ -35,7 +35,7 @@ Estados: pendiente / en-progreso / bloqueada / hecha / deuda / investigación / 
 | T-050 | hecha | 6 | Matriz Provider × Mode central (ARCHITECTURE-BACKEND §18, vigente) | 6 celdas con estado real; Twitch Managed = pendiente, sin falso soporte | ADR-012 |
 | T-051 | hecha | 7 | Persistencia ManagedConn (snapshots `managed_youtube/kick` en claro + reconstrucción vía `/status`) | roundtrip/migración/idempotencia + backendInstall intacto + 18 CHECKs (17 ejecutados en Windows, 1 solo-no-Windows) | ADR-012 |
 | T-052 | hecha | 6 | Batería cross-mode (aislamiento provider/modo/secretos/sesión/persistencia + checklist operador) | 3 tests backend nuevos + reutiliza batería T-051 + lives YT/Kick PASS; GUI-clicks operador PENDING | ADR-012 |
-| T-053 | pendiente | 7 | [Infrastructure] Separación identidad DEV/PROD (apps, secretos, cuentas) | DEV y PROD sin cruces | ADR-012 |
+| T-053 | hecha | 7 | [Infrastructure] Separación identidad DEV/PROD (env explícito + gates prod + binding instalación↔backend) | env inválido fail-fast, prod rechaza DEVELOPMENT_ONLY + HTTP, `/version.env`, mismatch→re-bootstrap; 15 backend + 9 selfchecks nuevos | ADR-012 |
 | T-054 | pendiente | 7 | [Infrastructure] Endurecimiento producción backend (secret manager, DB cifrada, TLS, monitoreo, backups; Railway solo dev) | checklist producción, sin marcar prod PASS antes de tiempo | ADR-012 |
 | T-055 | pendiente | 7 | [Commercial] Diseño suscripción/licencias (OPEN: proveedor pagos, planes, expiración, grace, límites) | decisión documentada, sin implementar pagos | ADR-012 |
 | T-056 | pendiente | 7 | [Security] Privacy policy + inventario de datos Managed (retención, revoke, eliminación, logs, incidentes) | documento previo a producción | ADR-012 |

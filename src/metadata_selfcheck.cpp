@@ -539,9 +539,67 @@ int main(int argc, char **argv)
 			      !bytes.contains("fk-isecret-9z"),
 		      "msnap-rt-plaintext-shape");
 	}
+	// T-053: installation↔backend binding round-trip. The URL is a
+	// plaintext endpoint label (never a secret); the install secret
+	// stays DPAPI-bound and is only usable with the matching backend.
+	{
+		QTemporaryDir tmp;
+		CHECK(tmp.isValid(), "envbind-rt-tmpdir");
+		const QString path =
+			tmp.filePath(QStringLiteral("accounts.json"));
+		secure::Store store(path);
+		secure::Data d;
+		// load() reports provider-connection presence, so keep one
+		// connected record (as in the T-051 battery) alongside the install.
+		d.twitch.connected = true;
+		d.twitch.display = QStringLiteral("fake-login");
+		d.twitch.access = QStringLiteral("fk-tok-4cc3ss-9z");
+		d.twitch.clientId = QStringLiteral("fk-client-id-9z");
+		d.backendInstall.connected = true;
+		d.backendInstall.clientId = QStringLiteral("fk-install-9z");
+		d.backendInstall.secret = QStringLiteral("fk-isecret-9z");
+		d.backendBaseUrl =
+			QStringLiteral("http://127.0.0.1:8080");
+		CHECK(store.save(d), "envbind-rt-save");
+		secure::Data back;
+		CHECK(store.load(back) && back.backendInstall.connected &&
+			      back.backendInstall.secret ==
+				      QStringLiteral("fk-isecret-9z") &&
+			      back.backendBaseUrl ==
+				      QStringLiteral("http://127.0.0.1:8080"),
+		      "envbind-rt-roundtrip");
+		QFile raw(path);
+		CHECK(raw.open(QIODevice::ReadOnly), "envbind-rt-raw");
+		const QByteArray bytes = raw.readAll();
+		raw.close();
+		CHECK(bytes.contains("\"backend_base_url\"") &&
+			      bytes.contains("http://127.0.0.1:8080") &&
+			      !bytes.contains("fk-isecret-9z"),
+		      "envbind-rt-plaintext-shape");
+	}
 #else
 	CHECK(true, "msnap-rt-skipped-non-windows");
 #endif
+	// T-053: binding predicate (platform-independent, same predicate the
+	// client uses in loadInstallation: fail-closed, no fallback).
+	{
+		CHECK(secure::installationUrlMatches(
+			      QStringLiteral("http://127.0.0.1:8080"),
+			      QStringLiteral("http://127.0.0.1:8080")),
+		      "envbind-match-same");
+		CHECK(!secure::installationUrlMatches(
+			      QStringLiteral("http://127.0.0.1:8080"),
+			      QStringLiteral("https://backend.example.com")),
+		      "envbind-mismatch-cross");
+		CHECK(!secure::installationUrlMatches(QStringLiteral(""),
+						      QStringLiteral(
+							      "http://127.0.0.1:8080")),
+		      "envbind-legacy-empty");
+		CHECK(!secure::installationUrlMatches(
+			      QStringLiteral("http://127.0.0.1:8080"),
+			      QStringLiteral("")),
+		      "envbind-empty-current");
+	}
 
 	std::printf("SELFCHECK OK\n");
 	return 0;

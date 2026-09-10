@@ -150,6 +150,9 @@ bool Client::persistInstallation(const QString &id, const QString &secret)
 	d.backendInstall.clientId = id;
 	d.backendInstall.secret = secret;
 	d.backendInstall.connected = true;
+	// T-053: bind the installation to this backend. A later backend
+	// switch is detected on load (mismatch → re-bootstrap there).
+	d.backendBaseUrl = baseUrl_;
 	return store_->save(d);
 }
 
@@ -161,6 +164,12 @@ bool Client::loadInstallation(QString &id, QString &secret)
 	store_->load(d); // false = no usable file; d.backendInstall stays empty
 	if (!d.backendInstall.connected || d.backendInstall.clientId.isEmpty() ||
 	    d.backendInstall.secret.isEmpty())
+		return false;
+	// T-053 fail-closed: never hand a foreign backend's secret to the
+	// configured one. Mismatch (incl. legacy files without binding) reads
+	// as "no installation" so the caller re-bootstraps (dock: StorageError
+	// → bootstrap → retry, no cross-backend secret use, no fallback).
+	if (!secure::installationUrlMatches(d.backendBaseUrl, baseUrl_))
 		return false;
 	id = d.backendInstall.clientId;
 	secret = d.backendInstall.secret;

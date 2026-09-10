@@ -254,3 +254,24 @@ pendiente = representable sin implementación; no hay casos "no soportado".
 Modelo/UI/routing/OAuth/storage/backend por celda: Independent = directo +
 DPAPI + navegador; Managed (YT/Kick) = `backend_auth` + ConnectService +
 SecretStore/TokenStore backend. Esta tabla es LA matriz vigente; no duplicarla.
+
+## 19. Entorno explícito DEV/PROD (T-053, vigente 2026-09-10)
+
+`ConnectionMode != environment` (ADR-012): DEV/PROD es identidad del
+despliegue backend, no modalidad de conexión. No existe infraestructura
+productiva todavía; esta sección define la separación para que el futuro
+despliegue (T-054) no pueda cruzarse con desarrollo por accidente.
+
+- Backend: `STREAM_META_BACKEND_ENV` → `Settings.env` (`backend/config.py`
+  + `backend/environment.py`). Valor desconocido = fail-fast en arranque;
+  ausente = `development` (dirección segura). `production` exige stores sin
+  marca `DEVELOPMENT_ONLY` y `public_base_url` HTTPS (`create_app` gates);
+  mismatch = excepción, nunca fallback ni autocorrección. Binding
+  secreto↔entorno = el store elegido por despliegue (`EnvSecretStore` es
+  DEVELOPMENT_ONLY, inutilizable en producción); sin renombres de variables.
+- Observabilidad: `/version` expone `env` (sin secretos) para que el
+  operador verifique contra qué entorno habla.
+- Plugin: `secure::Data.backendBaseUrl` liga `backendInstall` al backend
+  que la emitió; `loadInstallation` fail-closed ante mismatch (→
+  `StorageError` → re-bootstrap automático existente, sin reutilizar el
+  secreto en otro backend, sin fallback).

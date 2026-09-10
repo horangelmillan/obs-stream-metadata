@@ -45,6 +45,24 @@ DOCK:      pixel-click pendiente operador (F-014); checklist cross-mode en TROUB
 FINAL: T-050 PASS + T-051 PASS + T-052 PASS con salvedad GUI-clicks operador PENDING
 ```
 
+## T-053 entorno explícito DEV/PROD (2026-09-10)
+
+```text
+BUILD:     PASS (obs-stream-metadata.dll + metadata-selfcheck.exe +
+            managed-link-test, exit 0, 0 errores)
+SELFCHECK: PASS 115/115, 0 FAIL (106 heredados + 9 nuevos envbind-*: match,
+            mismatch-cross, legacy-empty, empty-current, roundtrip + shape)
+BACKEND:   PASS 88/88 (73 heredados + 15 nuevos test_environment.py:
+            normalize/gates/version, sin secretos reales)
+SECRET:    PASS (patrón CI ci-phase0.yml sobre árbol trackeado: limpio;
+            dev.env local ignorado .gitignore:60, sin traquear)
+AUDIT:     ADR-012 intacto; ConnectionMode intacto (sin DevMode/ProdMode);
+            T-050/T-051/T-052 intactas; env explícito sin fallback
+LIVE:      no repetido (sin credenciales nuevas en esta sesión; YT/Kick
+            Managed PASS 2026-09-09 siguen vigentes)
+FINAL: T-053 PASS
+```
+
 ## P6 parcial (T-033, 2026-09-09, rama `feat/t-033-integration-testing`)
 
 ```text
