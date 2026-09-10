@@ -152,3 +152,83 @@ descartado (HMAC-SHA256 stdlib, propiedades equivalentes). Públicas: `/health|/
 `POST .../disconnect` (borrado + revoke best-effort). Refresh single-flight,
 margen 120 s. Al plugin: `{provider, status, account{id, displayName}}` —
 nunca tokens/secret/verifier. Live PASS contra Google 2026-09-09.
+
+## 15. Kick Adapter (T-046 PASS, sin ADR nuevo)
+
+Mismo patrón T-045 sobre `ConnectService` generalizado (multi-provider vía port
+`fetch_identity`; kernel intacto). Diferencias encapsuladas en el adapter:
+
+| Aspecto | YouTube | Kick |
+|---|---|---|
+| Authorization | `accounts.google.com/o/oauth2/v2/auth` | `id.kick.com/oauth/authorize` |
+| Client Secret | requerido (nuestra config, T-035) | requerido (T-036) |
+| PKCE | S256 + `access_type=offline` | S256 |
+| State | un solo uso, TTL 600 s | un solo uso, TTL 600 s |
+| Redirect | loopback `127.0.0.1`, flexible con path (Observado) | `localhost`, match exacto incl. path (F-017; URI nueva debió registrarse) |
+| Scopes | `youtube.force-ssl` | `channel:write channel:read` |
+| Token exchange | `oauth2.googleapis.com/token` | `id.kick.com/oauth/token` (+UA navegador, F-022) |
+| Refresh | conserva anterior si falta; `invalid_grant`→re-conectar | renueva ambos según docs; mismo fallback |
+| Revoke | form `{token}` | query `?token=&token_hint_type=` (oficial), best-effort |
+| Identity | `channels?part=snippet&mine=true` → id + title | `GET /public/v1/channels` → `broadcaster_user_id` + `slug` |
+| Errors | `invalid_grant`→rejected… (ADR-011) | `invalid_grant`→rejected; `1010`/403→unavailable; resto análogo |
+
+Rutas: `POST /connect/kick`, `GET .../callback`, `GET .../status`,
+`POST .../disconnect` (provider erróneo → `invalid_request`). Rate-limit T-044
+reutilizado. Live PASS contra Kick 2026-09-09 (connect→callback→exchange→
+identidad→disconnect+revoke).
+
+## 16. Dos modalidades (ADR-012, 2026-09-09)
+
+Este backend es la **infraestructura del modo Administrado**, no un requisito
+del producto: el modo Independiente opera directo contra las APIs con
+credenciales del usuario (DPAPI) y no necesita este backend. El contrato
+plugin↔backend (`/auth/*`, sesiones T-044, `/connect/*`) es estable y explícito
+para que el wiring Managed (T-048) no redefina seguridad. Ver matriz
+KEEP/MODIFY/DEPRECATE/NEW y plan en el informe de auditoría; referencia de
+producto: `obs-stream-metadata-arquitectura-dos-modalidades.md`.
+
+## 17. Apéndice de auditoría dos-modalidades (2026-09-09, sin código)
+
+### Reutilización verificada (§7 dirección; todo localizado, nada duplicado)
+
+`metadata.*`, Device Flow Twitch (`metadata_dock.cpp:579-582,1048`),
+OAuth YouTube/Kick directo + PKCE/state/callbacks (`:708-801`),
+QNAM async (`:204-205`, `backend_auth.*`), refresh/revoke/backoff,
+error mapping, DPAPI/`secure_store.*`/`accounts.json` (`:409`),
+`backend_auth.*` (sin cablear), kernel/ports/sessions/bootstrap/transactions,
+adapters + TokenStore/ConnectionStore, selfchecks 68/68, runners `tools/` +
+lives T-045/T-046.
+
+### Proveedores: técnica vs política vs modalidad (§8)
+
+| Aspecto | Twitch | YouTube | Kick |
+|---|---|---|---|
+| Capacidad | título PATCH | título+desc `liveBroadcasts` | título PATCH 204 |
+| Credenciales | Client ID público, sin secret (DCF) | ID+secret (T-035) | ID+secret (T-036) |
+| Distribución secret | N/A | prohibida en binario público (T-037) | secreto real servidor |
+| Redirect | N/A (device) | loopback flexible con path (Observado) | `localhost`, match exacto (F-017) |
+| Independiente | directo siempre | app propia + verificación Google (OPEN) | app propia, registrar URI exacta |
+| Administrado | directo (sin backend por simetría) | backend + app prod | backend + app prod |
+
+### Seguridad por modalidad (§9; problema → propuesta, sin auto-fix)
+
+Independiente: IDs/secrets solo DPAPI local, nunca al backend; riesgo = perfil
+copiado/máquina comprometida (no mitigable, documentar). Administrado: secrets
+solo secret-manager, tokens cifrados, sesiones T-044, TLS, rate-limit; riesgo =
+abuso/escala Superficie (mitigar con cuotas T-051, rotación, monitoreo).
+Común: nada en Git/logs/UI, browser del sistema, sin WebView ni embebidos.
+
+### Backend por componente (§10)
+
+`kernel/ports/errors/config/logging` KEEP AS BASE; `auth/sessions/bootstrap/
+transactions/adapters/stores` KEEP AS BASE (Managed); stores memoria/Env =
+PROTOTYPE (prod: secret-manager + DB cifrada, T-054); `AllowAllRateLimiter`
+sustituido en T-044 (FixedWindow; distribuido = INCOMPLETE); nada a DEPRECATE.
+
+### UX actual vs modal (§11)
+
+Dock hoy: 5 campos universales (tw/yt/kk ID + yt/kk secret), Connect/Disconnect
+por proveedor, `Connected as`, selector broadcast YT, Apply secuencial,
+resultados independientes. Común siempre: metadata/Apply/estados/errores.
+Varía: selector de modalidad (NEW) + campos contextuales (Twitch: solo ID;
+YT/Kick: ID+secret) + wiring Managed (T-048). Sin duplicar la UI.

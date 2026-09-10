@@ -1,4 +1,4 @@
-"""Orquestación OAuth YouTube (T-045): transacciones de un solo uso + conexiones.
+"""Orquestación OAuth por proveedor (T-045 YouTube, T-046 Kick): transacciones de un solo uso + conexiones.
 
 Separa OAuth transaction (efímera, con verifier) de backend session (T-044).
 El verifier jamás sale del backend: vive en la transacción en memoria y se
@@ -13,9 +13,9 @@ import secrets
 import threading
 import time
 
-from backend.adapters.youtube import YouTubeProvider
 from backend.errors import AppError, ErrorCode
-from backend.kernel import Account, Connection, ConnectionStatus, Provider
+from backend.kernel import Account, Connection, ConnectionStatus
+from backend.ports import OAuthProvider
 
 TRANSACTION_TTL_S = 600  # Decisión T-045: 10 min para completar el consentimiento.
 REFRESH_MARGIN_S = 120   # Refrescar si el access expira en <2 min.
@@ -27,9 +27,9 @@ def _b64url_sha256(verifier: str) -> str:
 
 
 class ConnectService:
-    """Flujo Connect YouTube. Reloj inyectable para tests."""
+    """Flujo Connect genérico (un servicio por proveedor). Reloj inyectable."""
 
-    def __init__(self, provider: YouTubeProvider, transactions,
+    def __init__(self, provider: OAuthProvider, transactions,
                  connections, tokens, clock=None) -> None:
         self._provider = provider
         self._transactions = transactions
@@ -44,7 +44,7 @@ class ConnectService:
         verifier = secrets.token_urlsafe(64)[:128]
         transaction = {
             "id": secrets.token_hex(16),
-            "provider": Provider.YOUTUBE.value,
+            "provider": self._provider.provider.value,
             "installation_id": installation_id,
             "state": secrets.token_hex(16),
             "code_verifier": verifier,
@@ -65,10 +65,14 @@ class ConnectService:
         transaction = self._find_by_state(state)
         if transaction is None:
             raise AppError(ErrorCode.PROVIDER_REJECTED, "bad state")
+        if transaction.get("provider") != self._provider.provider.value:
+            # Transacción de otro proveedor usada en este callback → REJECT
+            # (sin consumir: el callback legítimo sigue siendo posible).
+            raise AppError(ErrorCode.PROVIDER_REJECTED, "wrong provider")
         if error:
             self._transactions.consume(transaction["id"])
             # access_denied del usuario → AUTHORIZATION (UI: "Authorization failed").
-            raise AppError(ErrorCode.AUTHORIZATION, f"google:{error}")
+            raise AppError(ErrorCode.AUTHORIZATION, f"{self._provider.provider.value}:{error}")
         if not code:
             raise AppError(ErrorCode.PROVIDER_REJECTED, "missing code")
         consumed = self._transactions.consume(transaction["id"])
@@ -76,15 +80,15 @@ class ConnectService:
             raise AppError(ErrorCode.PROVIDER_REJECTED, "replay/expired")
         tokens = self._provider.exchange(code, consumed["code_verifier"],
                                          consumed["redirect_uri"])
-        account = self._provider.channel_identity(tokens.access_token)
+        account = self._provider.fetch_identity(tokens.access_token)
         self._tokens.save(account, tokens)
-        self._connections.save(consumed["installation_id"], Provider.YOUTUBE.value, {
+        self._connections.save(consumed["installation_id"], self._provider.provider.value, {
             "account": {"provider_user_id": account.provider_user_id,
                         "display_name": account.display_name,
                         "scopes": list(account.scopes)},
             "obtained_at": self._clock(),
         })
-        return {"provider": Provider.YOUTUBE.value, "status": "connected",
+        return {"provider": self._provider.provider.value, "status": "connected",
                 "account": {"id": account.provider_user_id,
                             "displayName": account.display_name}}
 
@@ -93,21 +97,21 @@ class ConnectService:
 
     # --- status / conexión ---
     def status(self, installation_id: str) -> dict:
-        entry = self._connections.load(installation_id, Provider.YOUTUBE.value)
+        entry = self._connections.load(installation_id, self._provider.provider.value)
         if entry is None:
-            return {"provider": Provider.YOUTUBE.value, "status": "disconnected"}
+            return {"provider": self._provider.provider.value, "status": "disconnected"}
         account = entry["account"]
-        return {"provider": Provider.YOUTUBE.value, "status": "connected",
+        return {"provider": self._provider.provider.value, "status": "connected",
                 "account": {"id": account["provider_user_id"],
                             "displayName": account["display_name"]}}
 
     def connection(self, installation_id: str) -> Connection | None:
-        entry = self._connections.load(installation_id, Provider.YOUTUBE.value)
+        entry = self._connections.load(installation_id, self._provider.provider.value)
         if entry is None:
             return None
         account = entry["account"]
         return Connection(
-            account=Account(provider=Provider.YOUTUBE,
+            account=Account(provider=self._provider.provider,
                             provider_user_id=account["provider_user_id"],
                             display_name=account["display_name"],
                             scopes=tuple(account["scopes"])),
@@ -120,11 +124,11 @@ class ConnectService:
 
     def ensure_fresh_token(self, installation_id: str) -> str:
         """Access vigente o renovado. Sin loops: un intento de refresh."""
-        entry = self._connections.load(installation_id, Provider.YOUTUBE.value)
+        entry = self._connections.load(installation_id, self._provider.provider.value)
         if entry is None:
             raise AppError(ErrorCode.AUTHENTICATION, "not connected")
         account_data = entry["account"]
-        account = Account(provider=Provider.YOUTUBE,
+        account = Account(provider=self._provider.provider,
                           provider_user_id=account_data["provider_user_id"],
                           display_name=account_data["display_name"],
                           scopes=tuple(account_data["scopes"]))
@@ -136,7 +140,7 @@ class ConnectService:
             return tokens.access_token
         with self._lock_for(account.provider_user_id):
             # Releer bajo lock: otro hilo pudo refrescar ya.
-            entry = self._connections.load(installation_id, Provider.YOUTUBE.value)
+            entry = self._connections.load(installation_id, self._provider.provider.value)
             tokens = self._tokens.load(account)
             age = self._clock() - entry.get("obtained_at", 0)
             if tokens.expires_in and age < tokens.expires_in - REFRESH_MARGIN_S:
@@ -153,25 +157,25 @@ class ConnectService:
                 raise
             self._tokens.save(account, fresh)
             entry["obtained_at"] = self._clock()
-            self._connections.save(installation_id, Provider.YOUTUBE.value, entry)
+            self._connections.save(installation_id, self._provider.provider.value, entry)
             return fresh.access_token
 
     # --- disconnect ---
     def disconnect(self, installation_id: str, revoke_remote: bool = True) -> None:
         """Borrado local siempre; revoke remoto best-effort (F-030)."""
-        entry = self._connections.load(installation_id, Provider.YOUTUBE.value)
+        entry = self._connections.load(installation_id, self._provider.provider.value)
         tokens = None
         if entry is not None:
             account_data = entry["account"]
             tokens = self._tokens.load(Account(
-                provider=Provider.YOUTUBE,
+                provider=self._provider.provider,
                 provider_user_id=account_data["provider_user_id"],
                 display_name=account_data["display_name"],
                 scopes=tuple(account_data["scopes"])))
-        self._connections.delete(installation_id, Provider.YOUTUBE.value)
+        self._connections.delete(installation_id, self._provider.provider.value)
         if entry is not None:
             self._tokens.delete(Account(
-                provider=Provider.YOUTUBE,
+                provider=self._provider.provider,
                 provider_user_id=entry["account"]["provider_user_id"],
                 display_name=entry["account"]["display_name"],
                 scopes=tuple(entry["account"]["scopes"])))

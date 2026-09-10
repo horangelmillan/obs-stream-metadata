@@ -8,6 +8,7 @@ Producción: mismo wiring con SecretStore/TokenStore/SessionStore productivos
 """
 from __future__ import annotations
 
+from backend.adapters.kick import KickProvider
 from backend.adapters.youtube import YouTubeProvider
 from backend.config import load_settings
 from backend.http_server import BackendApp, serve
@@ -18,23 +19,46 @@ from backend.stores import (AllowAllRateLimiter, EnvSecretStore, InMemoryConnect
                             InMemoryTokenStore)
 
 
+def _loopback_base(public_base_url: str) -> str:
+    return public_base_url.rstrip("/")
+
+
+def _localhost_base(public_base_url: str) -> str:
+    # Kick exige `localhost`, no `127.0.0.1` (F-017); mismo puerto/path base.
+    return public_base_url.rstrip("/").replace("127.0.0.1", "localhost")
+
+
 def create_app(secrets=None, sessions=None, limiter=None,
-               ready_check=None, settings=None, youtube=None,
-               enable_youtube: bool = False) -> BackendApp:
+               ready_check=None, settings=None, providers=None,
+               enable_youtube: bool = False,
+               enable_kick: bool = False) -> BackendApp:
     settings = settings or load_settings()
     secrets = secrets or EnvSecretStore()
     sessions = sessions or InMemorySessionStore()
-    if youtube is None and enable_youtube:
-        redirect = (settings.public_base_url.rstrip("/") +
-                    "/connect/youtube/callback")
-        youtube = ConnectService(
-            YouTubeProvider(secrets, redirect),
-            InMemoryOAuthTransactionStore(), InMemoryConnectionStore(),
-            InMemoryTokenStore())
+    if providers is None:
+        providers = {}
+        redirects = {}
+        shared = (InMemoryOAuthTransactionStore(), InMemoryConnectionStore(),
+                  InMemoryTokenStore())
+        if enable_youtube:
+            redirect = _loopback_base(settings.public_base_url) + \
+                "/connect/youtube/callback"
+            providers["youtube"] = ConnectService(
+                YouTubeProvider(secrets, redirect), *shared)
+            redirects["youtube"] = redirect
+        if enable_kick:
+            redirect = _localhost_base(settings.public_base_url) + \
+                "/connect/kick/callback"
+            providers["kick"] = ConnectService(
+                KickProvider(secrets, redirect), *shared)
+            redirects["kick"] = redirect
+    else:
+        redirects = {name: "" for name in providers}
     return BackendApp(settings=settings,
                       sessions=sessions,
                       limiter=limiter or AllowAllRateLimiter(),
-                      ready_check=ready_check, youtube=youtube)
+                      ready_check=ready_check, providers=providers,
+                      provider_redirects=redirects)
 
 
 def main() -> None:

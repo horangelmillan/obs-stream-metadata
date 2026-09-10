@@ -35,7 +35,8 @@ class BackendApp:
     def __init__(self, settings: Settings, sessions, limiter: RateLimiter,
                  ready_check=None, auth_service: AuthService | None = None,
                  limiters: dict | None = None, clock=None,
-                 youtube=None) -> None:
+                 providers: dict | None = None,
+                 provider_redirects: dict | None = None) -> None:
         self.settings = settings
         self.sessions = sessions
         self.limiter = limiter
@@ -59,11 +60,23 @@ class BackendApp:
         self._ready_check = ready_check or (lambda: (True, "ok"))
         self.started_at = time.time()
         self.log = get_logger("http", settings.log_level)
-        self.youtube = youtube  # ConnectService (T-045); None = no configurado
+        # Registro provider → ConnectService (T-045 YouTube, T-046 Kick).
+        self.providers: dict = providers or {}
+        self.provider_redirects: dict = provider_redirects or {}
 
-    def youtube_redirect_uri(self) -> str:
-        return (self.settings.public_base_url.rstrip("/") +
-                "/connect/youtube/callback")
+    def _service(self, name: str):
+        try:
+            return self.providers[name]
+        except KeyError:
+            raise AppError(ErrorCode.INVALID_REQUEST,
+                           f"unknown provider {name}") from None
+
+    def _redirect_uri(self, name: str) -> str:
+        try:
+            return self.provider_redirects[name]
+        except KeyError:
+            raise AppError(ErrorCode.INTERNAL,
+                           f"{name} not configured") from None
 
     # --- rutas públicas ---
     def health(self) -> dict:
@@ -201,13 +214,27 @@ class _Handler(BaseHTTPRequestHandler):
             app._limited("auth_install", f"yt-disc:{record.installation_id}")
             app.youtube.disconnect(record.installation_id)
             return 200, {"provider": "youtube", "status": "disconnected"}
+        parts = path.split("/")
+        # /connect/<provider> y /connect/<provider>/disconnect (POST).
+        if len(parts) == 3 and parts[1] == "connect":
+            name = parts[2]
+            record = app.check_access(path, self.headers)
+            service = app._service(name)
+            app._limited("auth_install", f"{name}-connect:{record.installation_id}")
+            return 200, service.start(record.installation_id,
+                                      app._redirect_uri(name))
+        if len(parts) == 4 and parts[1] == "connect" and parts[3] == "disconnect":
+            name = parts[2]
+            record = app.check_access(path, self.headers)
+            service = app._service(name)
+            app._limited("auth_install", f"{name}-disc:{record.installation_id}")
+            service.disconnect(record.installation_id)
+            return 200, {"provider": name, "status": "disconnected"}
         raise AppError(ErrorCode.INVALID_REQUEST, f"unknown path {path}")
 
-    def _route_callback(self, query: dict) -> tuple[int, dict]:
+    def _route_callback(self, query: dict, provider: str) -> tuple[int, dict]:
         import urllib.parse as _up
-        service = self.server.app.youtube
-        if service is None:
-            raise AppError(ErrorCode.INTERNAL, "youtube not configured")
+        service = self.server.app._service(provider)
         decode = _up.unquote
         result = service.callback(decode(query.get("state", "")),
                                   decode(query.get("code", "")),
@@ -225,11 +252,13 @@ class _Handler(BaseHTTPRequestHandler):
                 raise AppError(ErrorCode.RATE_LIMITED, "global limit")
             if method == "GET":
                 query = _parse_query(self.path)
-                if path == "/connect/youtube/callback":
-                    # Sin bearer (viene del navegador): la transacción+state
-                    # son la autorización; rate-limit por IP.
+                parts = path.split("/")
+                # /connect/<provider>/callback: sin bearer (navegador); la
+                # transacción+state son la autorización; rate-limit por IP.
+                if (len(parts) == 4 and parts[1] == "connect"
+                        and parts[3] == "callback"):
                     self.server.app._limited("auth_ip", f"cb:{client_ip}")
-                    status, payload = self._route_callback(query)
+                    status, payload = self._route_callback(query, parts[2])
                 else:
                     record = self.server.app.check_access(path, self.headers)
                     if path == "/health":
@@ -238,9 +267,10 @@ class _Handler(BaseHTTPRequestHandler):
                         status, payload = self.server.app.ready()
                     elif path == "/version":
                         payload, status = self.server.app.version(), 200
-                    elif path == "/connect/youtube/status":
-                        payload = self.server.app.youtube.status(
-                            record.installation_id)
+                    elif (len(parts) == 4 and parts[1] == "connect"
+                          and parts[3] == "status"):
+                        service = self.server.app._service(parts[2])
+                        payload = service.status(record.installation_id)
                         status = 200
                     else:
                         raise AppError(ErrorCode.INVALID_REQUEST,
