@@ -600,6 +600,49 @@ int main(int argc, char **argv)
 			      QStringLiteral("")),
 		      "envbind-empty-current");
 	}
+	// T-047: distributed Twitch Client ID + DCF poll decision.
+	// (selfcheck builds metadata.cpp with OBS_TWITCH_CLIENT_ID fake.)
+	{
+		using meta::TwPollAction;
+		CHECK(meta::twitchClientId(QStringLiteral("")) ==
+			      QStringLiteral("fk-dist-tw-id-9z"),
+		      "twid-distributed-default");
+		CHECK(meta::twitchClientId(QStringLiteral("  byo-id-7 ")) ==
+			      QStringLiteral("byo-id-7"),
+		      "twid-field-override-trimmed");
+		CHECK(meta::classifyTwPoll(200, false, QStringLiteral(""),
+					   5) == TwPollAction::Consume,
+		      "twpoll-success");
+		CHECK(meta::classifyTwPoll(
+			      400, false,
+			      QStringLiteral("authorization_pending"), 3) ==
+			      TwPollAction::KeepPolling,
+		      "twpoll-pending");
+		CHECK(meta::classifyTwPoll(
+			      400, false,
+			      QStringLiteral("authorization_pending"), 0) ==
+			      TwPollAction::FailExpired,
+		      "twpoll-pending-exhausted");
+		CHECK(meta::classifyTwPoll(400, false,
+					   QStringLiteral("slow_down"),
+					   2) == TwPollAction::SlowDown,
+		      "twpoll-slowdown");
+		CHECK(meta::classifyTwPoll(400, false,
+					   QStringLiteral("slow_down"),
+					   0) == TwPollAction::FailExpired,
+		      "twpoll-slowdown-exhausted");
+		CHECK(meta::classifyTwPoll(400, false,
+					   QStringLiteral("access_denied"),
+					   2) == TwPollAction::FailDenied,
+		      "twpoll-denied");
+		CHECK(meta::classifyTwPoll(400, false,
+					   QStringLiteral("expired_token"),
+					   2) == TwPollAction::FailExpired,
+		      "twpoll-expired");
+		CHECK(meta::classifyTwPoll(0, true, QStringLiteral(""), 2) ==
+			      TwPollAction::FailExpired,
+		      "twpoll-netfail");
+	}
 
 	std::printf("SELFCHECK OK\n");
 	return 0;

@@ -29,7 +29,7 @@ Estados: pendiente / en-progreso / bloqueada / hecha / deuda / investigación / 
 | T-044 | hecha | 7 | Auth plugin↔backend (identidad instalación + sesiones cortas + rate-limit, sin secreto permanente) | ADR-010 + `/auth/*` + cliente Qt async + 43 tests + build/DLL/selfcheck en verde | ADR-009, ADR-010 |
 | T-045 | hecha | 7 | Adapter OAuth YouTube en backend (exchange/refresh/revoke + verificación Google) | ADR-011 + live PASS (connect/callback/exchange/identidad/disconnect) + 57 tests | ADR-009, ADR-011 |
 | T-046 | hecha | 7 | Adapter OAuth Kick en backend (exchange/refresh/revoke) | ConnectService genérico + live PASS (connect/callback/exchange/identidad/disconnect) + 69 tests | ADR-009 |
-| T-047 | pendiente | 7 | Twitch directo endurecido (Client ID distribuido + DCF, sin backend) | Connect Twitch sin cambios UX | F-015, F-033 |
+| T-047 | hecha | 7 | Twitch directo endurecido (Client ID distribuido/build-time + DCF, sin secret) | `OBS_TWITCH_CLIENT_ID` + `twitchClientId`/`classifyTwPoll` + 10 selfchecks; DCF real E2E (prefill, consent, `Connected as`, restart, revoke 200); Twitch Managed sigue unsupported | F-015, F-033 |
 | T-048 | hecha | 6 | [Managed] UX modo Administrado: wiring `backend_auth.*` + connect-vía-backend + status | Managed YT/Kick live PASS C++→backend→provider + 70 tests | ADR-012 |
 | T-049 | hecha | 6 | [Common] Modelo modal: `meta::ConnectionMode` + default Independent + strings canónicos + 7 checks (sin UI/wiring/persistencia) | selfcheck 75/75 + backend 69/69 + build/scan en verde | ADR-012 |
 | T-050 | hecha | 6 | Matriz Provider × Mode central (ARCHITECTURE-BACKEND §18, vigente) | 6 celdas con estado real; Twitch Managed = pendiente, sin falso soporte | ADR-012 |

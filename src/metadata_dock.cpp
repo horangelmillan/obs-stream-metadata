@@ -136,6 +136,14 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 	top->addWidget(credTitle);
 	twIdEdit_ = new QLineEdit(this);
 	twIdEdit_->setPlaceholderText(tr("Twitch Client ID"));
+	// T-047: distributed ID (public) prefilled when the build provides
+	// one; the user can still override it (BYO/dev preserved).
+	{
+		const QString distributed =
+			meta::twitchClientId(QString());
+		if (!distributed.isEmpty())
+			twIdEdit_->setText(distributed);
+	}
 	top->addWidget(twIdEdit_);
 	ytIdEdit_ = new QLineEdit(this);
 	ytIdEdit_->setPlaceholderText(tr("YouTube Client ID"));
@@ -969,7 +977,9 @@ void MetadataDock::onConnectTwitch()
 	}
 	Account &a = tw_;
 	a.clear();
-	const QString id = field(twIdEdit_);
+	// T-047: explicit field wins (BYO/dev); otherwise the distributed
+	// build-time ID (public, DCF needs no secret).
+	const QString id = meta::twitchClientId(field(twIdEdit_));
 	if (id.isEmpty()) {
 		finishConnectError(meta::Platform::Twitch,
 				   tr("Enter your Twitch Client ID first."));
@@ -1496,7 +1506,12 @@ void MetadataDock::onReply(QNetworkReply *reply)
 
 	case Op::TwPoll: {
 		const QJsonObject o = replyJson(reply);
-		if (http == 200) {
+		--twPollsLeft_; // one attempt consumed by this response (T-047)
+		switch (meta::classifyTwPoll(
+			http, netFail,
+			o.value(QStringLiteral("message")).toString(),
+			twPollsLeft_)) {
+		case meta::TwPollAction::Consume: {
 			tw_.access = o.value(QStringLiteral("access_token"))
 					     .toString();
 			tw_.refresh =
@@ -1508,30 +1523,26 @@ void MetadataDock::onReply(QNetworkReply *reply)
 				Op::TwValidate, tw_.access);
 			return;
 		}
-		const QString msg =
-			o.value(QStringLiteral("message")).toString();
-		if (msg.contains(QStringLiteral("authorization_pending")) &&
-		    --twPollsLeft_ > 0) {
+		case meta::TwPollAction::KeepPolling:
 			pending_ = Op::TwPoll;
 			QTimer::singleShot(tw_.pollInterval * 1000, this,
 					   &MetadataDock::onTwitchPollTimeout);
 			return;
-		}
-		if (msg.contains(QStringLiteral("slow_down"))) {
+		case meta::TwPollAction::SlowDown:
 			tw_.pollInterval += 5;
-			if (--twPollsLeft_ > 0) {
-				pending_ = Op::TwPoll;
-				QTimer::singleShot(
-					tw_.pollInterval * 1000, this,
-					&MetadataDock::onTwitchPollTimeout);
-				return;
-			}
+			pending_ = Op::TwPoll;
+			QTimer::singleShot(
+				tw_.pollInterval * 1000, this,
+				&MetadataDock::onTwitchPollTimeout);
+			return;
+		case meta::TwPollAction::FailDenied:
+			fail(P::Twitch, tr("Authorization denied."));
+			return;
+		case meta::TwPollAction::FailExpired:
+		default:
+			fail(P::Twitch, tr("Device flow expired. Try again."));
+			return;
 		}
-		fail(P::Twitch,
-		     msg.contains(QStringLiteral("access_denied"))
-			     ? tr("Authorization denied.")
-			     : tr("Device flow expired. Try again."));
-		return;
 	}
 
 	case Op::TwValidate: {
