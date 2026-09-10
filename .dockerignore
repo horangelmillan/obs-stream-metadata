@@ -1,0 +1,31 @@
+# Contexto mínimo: código + requirements. Nada de secretos, DBs, builds,
+# credenciales locales, docs de trabajo ajenas ni toolchains.
+build_x64/
+build/
+.deps/
+__pycache__/
+*.pyc
+.git/
+dev.env
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*token*.json
+*secret*.json
+credentials.json
+client_secret*.json
+meta.db
+*.log
+poc/
+tools/t030_*.py
+src/
+cmake/
+data/
+docs/
+T-055 - PostgreSQL portable + arquitectura Cloud Run/
+OBJETIVO CONFIRMADO RESULTADO.md
+RESULTADO.md
+T-48 - Wiring Managed.md
+obs-stream-metadata-arquitectura-dos-modalidades.md

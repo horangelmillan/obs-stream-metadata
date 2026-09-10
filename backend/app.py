@@ -85,34 +85,43 @@ def create_app(secrets=None, sessions=None, limiter=None,
                       provider_redirects=redirects)
 
 
-def _production_wiring(settings):
-    """Construye stores productivos (T-054). Fail-fast si falta configuración.
+def _migrations_dir() -> str:
+    import os as _os
+    return _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                         "migrations")
 
-    Sin adivinanzas: data_dir + secret_dir son obligatorios; el SQLite vive
-    en data_dir/meta.db (0600) y los secretos se leen de secret_dir (un
-    fichero por secreto). El limiter global usa límites explícitos.
+
+def _production_wiring(settings):
+    """Construye stores productivos PostgreSQL (T-055, ADR-014).
+
+    Fail-fast si falta configuración. Ejecuta migrations al arrancar para
+    que el deployment nunca corra contra un esquema viejo. Sin SQLite en
+    producción (§11 T-055: el contenedor es stateless, sin filesystem
+    persistente); sin nombres de proveedor en configuración (DATABASE_URL
+    genérica).
     """
-    from backend.prodstores import (FileSecretStore, ProdstoresError,
-                                    SqliteConnectionStore,
-                                    SqliteInstallationStore,
-                                    SqliteOAuthTransactionStore,
-                                    SqliteSessionStore, SqliteTokenStore)
+    from backend.db import PgPool, run_migrations
+    from backend.pgstores import (PgConnectionStore, PgInstallationStore,
+                                  PgOAuthTransactionStore, PgSessionStore,
+                                  PgTokenStore)
+    from backend.prodstores import FileSecretStore, ProdstoresError
     from backend.stores import FixedWindowRateLimiter
-    missing = [name for name, value in
-               (("STREAM_META_BACKEND_DATA_DIR", settings.data_dir),
-                ("STREAM_META_BACKEND_SECRET_DIR", settings.secret_dir))
-               if not value]
-    if missing:
+    if not settings.secret_dir:
         raise ProdstoresError(
-            f"production requires: {', '.join(missing)}")
-    db = settings.data_dir.rstrip("/\\") + "/meta.db"
+            "production requires STREAM_META_BACKEND_SECRET_DIR")
+    if not settings.database_url:
+        raise ProdstoresError(
+            "production requires STREAM_META_BACKEND_DATABASE_URL")
+    pool = PgPool(settings.database_url, max_size=settings.db_pool_max,
+                  acquire_timeout_s=settings.db_pool_timeout_s)
+    run_migrations(pool, _migrations_dir())
     return {
         "secrets": FileSecretStore(settings.secret_dir),
-        "sessions": SqliteSessionStore(db),
-        "installations": SqliteInstallationStore(db),
-        "transactions": SqliteOAuthTransactionStore(db),
-        "connections": SqliteConnectionStore(db),
-        "tokens": SqliteTokenStore(db),
+        "sessions": PgSessionStore(pool),
+        "installations": PgInstallationStore(pool),
+        "transactions": PgOAuthTransactionStore(pool),
+        "connections": PgConnectionStore(pool),
+        "tokens": PgTokenStore(pool),
         "limiter": FixedWindowRateLimiter(settings.global_limit,
                                           settings.global_window_s),
     }
@@ -148,6 +157,20 @@ def main() -> None:
     log.info("listening host=%s port=%s env=%s",
              app.settings.host, app.settings.port, app.settings.env,
              extra={"requestId": "-"})
+    # T-055: graceful shutdown (Cloud Run envía SIGTERM con gracia de ~10s).
+    # shutdown() debe correr fuera del hilo de serve_forever: el handler
+    # solo despacha un hilo que la ejecuta (in-flight termina, no se
+    # aceptan nuevas conexiones).
+    import signal as _signal
+    import threading as _threading
+
+    def _stop(*_args) -> None:
+        _threading.Thread(target=server.shutdown, daemon=True).start()
+
+    try:
+        _signal.signal(_signal.SIGTERM, _stop)
+    except (OSError, ValueError):
+        pass  # plataforma sin SIGTERM (p. ej. Windows): CTRL+C sigue válido
     try:
         server.serve_forever()
     except KeyboardInterrupt:
