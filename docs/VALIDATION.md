@@ -85,6 +85,31 @@ CI:        nuevo job backend-tests (stdlib, 3.13, sin credenciales)
 FINAL: T-054 PASS CON SALVEDAD (production-capable; no production-deployed)
 ```
 
+## T-055 PostgreSQL portable + Cloud Run/Neon (2026-09-10, ADR-014)
+
+```text
+BUILD:     PASS (sin cambios C++; dll + selfcheck + managed-link-test
+            vigentes; backend: imports + suite en verde)
+SELFCHECK: PASS 115/115, 0 FAIL (sin cambios; regresión intacta)
+BACKEND:   PASS 116/116 (104 heredados + 12 nuevos test_pg.py contra
+            PostgreSQL 18 real local: URL/migrations/CRUD/constraints/
+            pool/multi-instancia/wiring; 1 ajuste legítimo en
+            test_prodstores por SQLite→DEV-only)
+MIGRATIONS: PASS (001 desde cero + idempotencia + orden, en PG real)
+PG-SMOKE:  PASS (prod wiring + serve + /version.env + /ready sobre PG)
+DEV-SMOKE: PASS (dev in-memory intacto tras T-055)
+DOCKER:    no validado por build (daemon inactivo); HEALTHCHECK one-liner
+            validado contra servidor real; sintaxis revisada
+SECRET:    PASS (patrón CI sobre árbol trackeado: limpio; dev.env local
+            ignorado; sin credenciales reales en código/tests/docs/CI)
+AUDIT:     ADR-012 intacto; T-050/T-051/T-052/T-053/T-054 intactas
+            (test_environment intacto salvo 2 gates T-054 vigentes);
+            Managed backend-only; Account≠ManagedConn; sin `NEON_*`
+LIVE:      no repetido (Managed PASS 2026-09-09 vigentes; sin cambios)
+FINAL: T-055 PASS CON SALVEDAD (despliegue Cloud Run+Neon pendiente
+            del operador; ver DEPLOYMENT.md checklist)
+```
+
 ## P6 parcial (T-033, 2026-09-09, rama `feat/t-033-integration-testing`)
 
 ```text

@@ -102,7 +102,14 @@ def _connect(path: str) -> sqlite3.Connection:
 
 
 class SqliteStore:
-    """Base: conexión SQLite compartida + lock (ThreadingHTTPServer)."""
+    """Base: conexión SQLite compartida + lock (ThreadingHTTPServer).
+
+    T-055: DEV/TEST únicamente. SQLite nunca es producción (contenedor
+    stateless sin filesystem persistente): estas clases llevan
+    DEVELOPMENT_ONLY y los gates T-053 las rechazan con env=production.
+    """
+
+    DEVELOPMENT_ONLY = True
 
     def __init__(self, path: str) -> None:
         self._path = path

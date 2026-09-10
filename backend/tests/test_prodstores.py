@@ -97,7 +97,8 @@ class SqliteInstallationsTest(unittest.TestCase):
             again = second.load("i1")
             self.assertEqual(again[1], "fk-secret-9z")
             self.assertTrue(again[0].revoked)
-            self.assertFalse(hasattr(second, "DEVELOPMENT_ONLY"))
+            # T-055: SQLite es DEV/TEST únicamente (nunca producción).
+            self.assertTrue(second.DEVELOPMENT_ONLY)
         finally:
             second.close()
 
@@ -204,33 +205,19 @@ class ProductionWiringTest(unittest.TestCase):
         with self.assertRaises(ProdstoresError):
             _production_wiring(settings)
 
-    def test_prod_wiring_builds_non_dev_stores(self):
-        tmp = _mktemp(self)
-        data = os.path.join(tmp, "data")
-        sec = os.path.join(tmp, "sec")
-        os.makedirs(data)
-        os.makedirs(sec)
-        settings = Settings(host="127.0.0.1", port=0, env=PRODUCTION,
-                            public_base_url="https://backend.example.com",
-                            data_dir=data, secret_dir=sec)
-        wiring = _production_wiring(settings)
-        try:
-            for role, store in wiring.items():
-                if role == "limiter":
-                    continue
-                self.assertFalse(
-                    getattr(store, "DEVELOPMENT_ONLY", False), role)
-            app = create_app(settings=settings, providers={},
-                             secrets=wiring["secrets"],
-                             sessions=wiring["sessions"],
-                             installations=wiring["installations"],
-                             limiter=wiring["limiter"])
-            self.assertEqual(app.version()["env"], PRODUCTION)
-        finally:
-            for store in wiring.values():
-                close = getattr(store, "close", None)
-                if callable(close):
-                    close()
+    def test_missing_database_url_fail_fast(self):
+        # T-055: producción exige PostgreSQL (SQLite ya no es producción).
+        with tempfile.TemporaryDirectory() as tmp:
+            sec = os.path.join(tmp, "sec")
+            os.makedirs(sec)
+            settings = Settings(host="127.0.0.1", port=0, env=PRODUCTION,
+                                public_base_url="https://backend.example.com",
+                                secret_dir=sec)
+            with self.assertRaises(ProdstoresError):
+                _production_wiring(settings)
+
+    # El happy-path (wiring PG completo) vive en test_pg.py contra
+    # PostgreSQL real; aquí no hay servidor.
 
 
 class ServeTlsTest(unittest.TestCase):

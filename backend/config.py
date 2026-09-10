@@ -29,11 +29,19 @@ class Settings:
     tls_keyfile: str = ""
     global_limit: int = 600
     global_window_s: int = 60
+    # T-055: PostgreSQL portable. `database_url` es LA DATABASE_URL
+    # (genérica, sin nombre de proveedor: ni NEON_* ni CLOUD_SQL_*).
+    # Vacía = sin PostgreSQL (dev usa in-memory; production la exige).
+    database_url: str = ""
+    db_pool_max: int = 10
+    db_pool_timeout_s: int = 10
 
 
 def load_settings(env: dict[str, str] | None = None) -> Settings:
     src = env if env is not None else os.environ
-    port = int(src.get("STREAM_META_BACKEND_PORT", "8080"))
+    # T-055: Cloud Run inyecta PORT; STREAM_META_BACKEND_PORT manda si existe.
+    port = int(src.get("STREAM_META_BACKEND_PORT",
+                       src.get("PORT", "8080")))
     return Settings(
         host=src.get("STREAM_META_BACKEND_HOST", "127.0.0.1"),
         port=port,
@@ -52,4 +60,8 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         global_limit=int(src.get("STREAM_META_BACKEND_GLOBAL_LIMIT", "600")),
         global_window_s=int(src.get("STREAM_META_BACKEND_GLOBAL_WINDOW_S",
                                     "60")),
+        database_url=src.get("STREAM_META_BACKEND_DATABASE_URL", ""),
+        db_pool_max=int(src.get("STREAM_META_BACKEND_DB_POOL_MAX", "10")),
+        db_pool_timeout_s=int(src.get("STREAM_META_BACKEND_DB_POOL_TIMEOUT_S",
+                                      "10")),
     )

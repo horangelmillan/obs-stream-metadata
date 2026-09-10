@@ -280,3 +280,52 @@ despliegue (T-054) no pueda cruzarse con desarrollo por accidente.
   que la emitió; `loadInstallation` fail-closed ante mismatch (→
   `StorageError` → re-bootstrap automático existente, sin reutilizar el
   secreto en otro backend, sin fallback).
+
+## 20. PostgreSQL portable + Cloud Run/Neon (T-055, ADR-014, vigente 2026-09-10)
+
+1. **Por qué PostgreSQL:** persistencia externa, multi-instancia y ruta
+   de crecimiento que SQLite local no puede dar en un contenedor
+   stateless; SQL estándar y herramientas (`pg_dump`/`pg_restore`).
+2. **Por qué Neon inicialmente:** PostgreSQL gestionado con tier Free
+   para validación/MVP con coste ~cero; sin ataduras en el código.
+3. **Por qué Cloud Run:** contenedor stateless, escala a cero/carga,
+   `PORT` inyectado, SIGTERM graceful, salud HTTP.
+4. **"Portable" significa:** la app solo habla PostgreSQL estándar
+   (tipos TEXT/INTEGER/BIGINT, DDL idempotente, placeholders `%s`);
+   `backend/db.py` + `backend/pgstores.py` no importan nada de Neon;
+   config genérica `STREAM_META_BACKEND_DATABASE_URL` (nunca `NEON_*`).
+5. **Nada depende de Neon:** ni dominio, ni OAuth, ni API, ni seguridad,
+   ni tests (los tests usan PostgreSQL local o servicio CI).
+6. **`DATABASE_URL`:** `postgresql://USER:PASSWORD@HOST/DB?sslmode=...`
+   validada (esquema/host/db obligatorios); ausente en prod = fail-fast;
+   en dev = in-memory; en logs solo forma redactada.
+7. **Migrations:** `backend/migrations/NNN_*.sql` + tabla
+   `schema_migrations`, ordenadas, una transacción por fichero,
+   ejecutadas al arrancar en prod; `001_init.sql` crea todo desde cero.
+8. **Local dev:** PostgreSQL local con la misma semántica (ver
+   DEPLOYMENT.md); no requiere acceso a Neon.
+9. **Backups/export:** `pg_dump`/`pg_restore` documentados en
+   DEPLOYMENT.md; backup del proveedor ≠ backup controlado.
+10. **Neon → Cloud SQL:** cambiar URL + migrar datos (dump / ventana /
+    replicación según tamaño); cutover con downtime mínimo y rollback a
+    la URL anterior. Detalle en DEPLOYMENT.md.
+11. **Downtime:** mínimo y controlado, nunca cero absoluto prometido.
+12. **Lo que NO cambia al migrar:** OAuth, Managed, validación
+    cross-mode, seguridad, API, dominio, `DATABASE_URL` como concepto.
+13. **Lo que SÍ cambia:** host/credenciales (Secret Manager), proyecto
+    DB, backups del proveedor, límites de conexiones.
+14. **SQLite:** DEV/TEST únicamente (`DEVELOPMENT_ONLY`; prod lo
+    rechaza). T-054 queda como decisión histórica superada en este
+    punto (ver ADR-013 → ADR-014), no reescrita.
+15. **Secrets:** ficheros/`Secret Manager`, nunca repo/imagen/logs.
+16. **Stateless:** nada persistente en contenedor ni memoria como fuente
+    de verdad; re-arrancar es seguro.
+17. **Pooling:** `PgPool` acotado (`db_pool_max`, timeouts); dimensionar
+    instancias × pool ≤ max_connections (Neon Free: bajo; empezar con
+    max=5 e `instances` mínimas).
+18. **Límites/riesgos MVP:** single-instance-validado (multi-instancia
+    real pendiente de despliegue); sin réplicas; backups manuales;
+    monitoreo = logs + health endpoints.
+19. **Fuera de T-055:** billing, multi-region, K8s, Redis, HA, réplicas,
+    CDN, Cloud SQL ya, migración automática, monitoring empresarial
+    (§25 T-055).

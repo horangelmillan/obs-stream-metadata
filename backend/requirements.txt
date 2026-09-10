@@ -1,0 +1,4 @@
+# Backend runtime deps (T-055). Pinneadas: reproducibilidad del deployment.
+# psycopg-binary evita compilar libpq (ruedas para linux/win). El resto
+# del backend sigue stdlib-only.
+psycopg-binary==3.3.5

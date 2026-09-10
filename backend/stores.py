@@ -195,6 +195,8 @@ _SECRET_KEYS = ("secret", "token", "code", "verifier", "authorization",
 _SECRET_VALUE_RE = re.compile(
     r"(secret|token|verifier|password|authorization|cookie|api_key)\s*=\s*\S+",
     re.IGNORECASE)
+# T-055: passwords embebidos en URLs (DATABASE_URL `://usuario:pass@host`).
+_URL_PASSWORD_RE = re.compile(r"(://[^/:@\s]+:)[^@\s]+(@)")
 
 
 def redact_mapping(mapping: dict) -> dict:
@@ -210,4 +212,5 @@ def redact_mapping(mapping: dict) -> dict:
 
 
 def redact_text(text: str) -> str:
-    return _SECRET_VALUE_RE.sub(r"\1=[REDACTED]", text)
+    redacted = _SECRET_VALUE_RE.sub(r"\1=[REDACTED]", text)
+    return _URL_PASSWORD_RE.sub(r"\1***\2", redacted)
