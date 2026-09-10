@@ -20,6 +20,24 @@ namespace secure {
 
 namespace {
 
+// T-041: root-level mode key. Plaintext (context, not a secret).
+const char *kConnectionMode = "connection_mode";
+
+// Canonical wire strings (T-049 helpers are the single source of truth).
+QString modeToString(meta::ConnectionMode m)
+{
+	return QString::fromLatin1(meta::connectionModeName(m)).toLower();
+}
+
+meta::ConnectionMode modeFromString(const QString &s)
+{
+	const std::optional<meta::ConnectionMode> m =
+		meta::parseConnectionMode(s.trimmed().toLower());
+	// Legacy (missing) and invalid values map to Independent, never to
+	// Managed: no silent upgrade into the service-operated mode.
+	return m.value_or(meta::defaultConnectionMode());
+}
+
 // Sensitive payload keys. Never written outside a DPAPI blob.
 const char *kAccess = "a";
 const char *kRefresh = "r";
@@ -178,6 +196,13 @@ bool Store::save(const Data &d)
 			return false; // DPAPI failed: persist nothing
 		root[QString::fromLatin1(keys[i])] = o;
 	}
+	// T-041: the mode is always explicit once saved (idempotent
+	// migration); empty input means legacy Independent.
+	const QString mode = d.connectionMode.isEmpty()
+				     ? modeToString(
+					       meta::defaultConnectionMode())
+				     : d.connectionMode;
+	root[QString::fromLatin1(kConnectionMode)] = mode;
 	QSaveFile f(filePath_);
 	if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
 		return false;
@@ -193,6 +218,9 @@ bool Store::load(Data &d)
 {
 #ifdef Q_OS_WIN
 	d = Data();
+	// The mode is always canonical on the way out (legacy callers see
+	// Independent for missing/invalid files, never Managed).
+	d.connectionMode = modeToString(meta::defaultConnectionMode());
 	if (filePath_.isEmpty())
 		return false;
 	QFile f(filePath_);
@@ -218,8 +246,13 @@ bool Store::load(Data &d)
 	const bool backendOk = installFromJson(
 		root.value(QStringLiteral("backend")).toObject(),
 		d.backendInstall);
+	// T-041: missing/invalid mode (pre-T-041 files) maps to Independent,
+	// never to Managed. Parsed after the reset below so it survives it.
+	const meta::ConnectionMode mode = modeFromString(
+		root.value(QString::fromLatin1(kConnectionMode)).toString());
 	if (!any && !backendOk)
 		d = Data();
+	d.connectionMode = modeToString(mode);
 	return any;
 #else
 	d = Data();

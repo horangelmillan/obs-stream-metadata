@@ -47,6 +47,49 @@ class HttpTest(unittest.TestCase):
         cls.server.shutdown()
         cls.server.server_close()
 
+    def _served_app(self, **kwargs):
+        from backend.tests.test_adapters import FakeSecrets
+        settings = Settings(host="127.0.0.1", port=0,
+                            public_base_url="http://127.0.0.1:0")
+        app = create_app(settings=settings, secrets=FakeSecrets(),
+                         enable_youtube=True, **kwargs)
+        server = serve(app)
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.shutdown)
+        self.addCleanup(server.server_close)
+        return f"http://127.0.0.1:{port}"
+
+    def _session(self, base):
+        import time as _time
+        from backend.auth import sign_installation_secret
+        _, _, body = _post(base, "/auth/bootstrap", {})
+        creds = json.loads(body)
+        ts = int(_time.time())
+        nonce = "n" * 32
+        sig = sign_installation_secret(creds["installation_secret"],
+                                       creds["installation_id"], ts, nonce)
+        _, _, body = _post(base, "/auth/session",
+                           {"installation_id": creds["installation_id"],
+                            "timestamp": ts, "nonce": nonce,
+                            "signature": sig})
+        return json.loads(body)["session_token"]
+
+    def test_connect_alias_and_generic_routes(self):
+        """El alias /connect/youtube debe comportarse como el genérico
+        (regresión: AttributeError app.youtube → 500)."""
+        base = self._served_app()
+        token = self._session(base)
+        for path in ("/connect/youtube",):
+            status, _, body = _post(
+                base, path, {},
+                {"Authorization": "Bearer " + token})
+            self.assertEqual(status, 200, path)
+            payload = json.loads(body)
+            self.assertIn("authorization_url", payload)
+            self.assertNotIn("client_secret", json.dumps(payload))
+
     def test_health(self):
         status, headers, body = _get(self.base, "/health")
         self.assertEqual(status, 200)

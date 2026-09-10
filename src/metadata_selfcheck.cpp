@@ -306,6 +306,83 @@ int main(int argc, char **argv)
 	CHECK(true, "store-skipped-non-windows");
 #endif
 
+	// T-041: connection mode persistence/migration (no DPAPI needed for
+	// key-less files: empty records short-circuit before unprotect).
+	{
+		QTemporaryDir tmp;
+		CHECK(tmp.isValid(), "mode-tmpdir");
+		const QString path =
+			tmp.filePath(QStringLiteral("accounts.json"));
+		secure::Store store(path);
+		secure::Data d;
+		QFile f(path);
+		// Legacy file without the key -> Independent, no providers.
+		CHECK(f.open(QIODevice::WriteOnly | QIODevice::Truncate),
+		      "mode-write");
+		f.write(QByteArrayLiteral("{}"));
+		f.close();
+		CHECK(!store.load(d) &&
+			      d.connectionMode ==
+				      QStringLiteral("independent"),
+		      "mode-legacy-default");
+		// Unknown value -> Independent (never silent Managed).
+		CHECK(f.open(QIODevice::WriteOnly | QIODevice::Truncate),
+		      "mode-write");
+		f.write(QByteArrayLiteral("{\"connection_mode\":\"byo\"}"));
+		f.close();
+		CHECK(!store.load(d) &&
+			      d.connectionMode ==
+				      QStringLiteral("independent"),
+		      "mode-invalid-default");
+		// Explicit managed with zero providers restores the mode.
+		CHECK(f.open(QIODevice::WriteOnly | QIODevice::Truncate),
+		      "mode-write");
+		f.write(QByteArrayLiteral(
+			"{\"connection_mode\":\"managed\"}"));
+		f.close();
+		CHECK(!store.load(d) &&
+			      d.connectionMode ==
+				      QStringLiteral("managed"),
+		      "mode-managed-alone");
+	}
+#ifdef Q_OS_WIN
+	// T-041: round-trip with accounts + idempotent re-migration.
+	{
+		QTemporaryDir tmp;
+		CHECK(tmp.isValid(), "mode-rt-tmpdir");
+		const QString path =
+			tmp.filePath(QStringLiteral("accounts.json"));
+		secure::Store store(path);
+		secure::Data d;
+		d.twitch.connected = true;
+		d.twitch.display = QStringLiteral("fake-login");
+		d.twitch.access = QStringLiteral("fk-tok-4cc3ss-9z");
+		d.twitch.clientId = QStringLiteral("fk-client-id-9z");
+		d.connectionMode = QStringLiteral("managed");
+		CHECK(store.save(d), "mode-rt-save");
+		secure::Data back;
+		CHECK(store.load(back) && back.twitch.connected &&
+			      back.twitch.access ==
+				      QStringLiteral("fk-tok-4cc3ss-9z") &&
+			      back.twitch.clientId ==
+				      QStringLiteral("fk-client-id-9z") &&
+			      back.connectionMode ==
+				      QStringLiteral("managed"),
+		      "mode-rt-roundtrip");
+		// Idempotence: load -> save -> load keeps mode + accounts.
+		secure::Data again;
+		CHECK(store.load(again), "mode-rt-reload");
+		CHECK(store.save(again), "mode-rt-resave");
+		secure::Data third;
+		CHECK(store.load(third) && third.twitch.connected &&
+			      third.connectionMode ==
+				      QStringLiteral("managed"),
+		      "mode-rt-idempotent");
+	}
+#else
+	CHECK(true, "mode-rt-skipped-non-windows");
+#endif
+
 	// T-049: ConnectionMode domain concept (no UI, no persistence yet).
 	CHECK(QString::fromLatin1(connectionModeName(
 					 ConnectionMode::Independent)) ==

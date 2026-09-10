@@ -62,7 +62,14 @@ def create_app(secrets=None, sessions=None, limiter=None,
 
 
 def main() -> None:
-    app = create_app()
+    import os as _os
+    # DEV-only: lista separada por comas para levantar providers en local
+    # (p. ej. "youtube,kick"). Producción lo decide el despliegue (T-054).
+    wanted = {p.strip().lower()
+              for p in _os.environ.get("STREAM_META_BACKEND_PROVIDERS", "")
+              .split(",") if p.strip()}
+    app = create_app(enable_youtube="youtube" in wanted,
+                     enable_kick="kick" in wanted)
     log = get_logger("main", app.settings.log_level)
     server = serve(app)
     log.info("listening host=%s port=%s env=%s",

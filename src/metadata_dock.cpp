@@ -28,6 +28,7 @@ secrets in memory + DPAPI-encrypted store, never plaintext/printed/logged.
 #include <QPushButton>
 #include <QRandomGenerator>
 #include <QScrollArea>
+#include <QSignalBlocker>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTimer>
@@ -63,6 +64,22 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 	// instead of forcing the main window wide.
 	QWidget *body = new QWidget(this);
 	QVBoxLayout *top = new QVBoxLayout(body);
+
+	// T-041: connection mode selector (ADR-012). One mode per plugin
+	// installation; Independent keeps the existing direct/BYO-app flows,
+	// Managed only prepares the context until T-048 wires the backend.
+	QLabel *modeLabel = new QLabel(tr("Connection mode"), this);
+	modeCombo_ = new QComboBox(this);
+	modeCombo_->addItem(QString::fromLatin1(meta::connectionModeName(
+		meta::ConnectionMode::Independent)));
+	modeCombo_->addItem(QString::fromLatin1(meta::connectionModeName(
+		meta::ConnectionMode::Managed)));
+	connect(modeCombo_,
+		static_cast<void (QComboBox::*)(int)>(
+			&QComboBox::currentIndexChanged),
+		this, &MetadataDock::onModeChanged);
+	top->addWidget(modeLabel);
+	top->addWidget(modeCombo_);
 
 	QLabel *platTitle = new QLabel(tr("Platforms"), this);
 	top->addWidget(platTitle);
@@ -115,6 +132,7 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 		new QLabel(tr("App credentials (register your own app per "
 			      "platform)"),
 			   this);
+	credTitle_ = credTitle;
 	top->addWidget(credTitle);
 	twIdEdit_ = new QLineEdit(this);
 	twIdEdit_->setPlaceholderText(tr("Twitch Client ID"));
@@ -138,7 +156,17 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 		   "PC (DPAPI). Never logged, never shared."),
 		this);
 	credNote->setWordWrap(true);
+	credNote_ = credNote;
 	top->addWidget(credNote);
+	managedNote_ = new QLabel(
+		tr("Managed mode: connections go through the managed "
+		   "backend. No Client ID or Secret needed. Your "
+		   "Independent credentials stay stored locally and are "
+		   "never used for Managed."),
+		this);
+	managedNote_->setWordWrap(true);
+	managedNote_->setVisible(false);
+	top->addWidget(managedNote_);
 
 	QLabel *titleLabel = new QLabel(tr("Title"), this);
 	titleEdit_ = new QLineEdit(this);
@@ -214,12 +242,316 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 		obs_log(LOG_WARNING, "account store unavailable, "
 				     "sessions will not survive restart");
 	loadStore();
+	refreshModeUi();
+	initManaged();
+	obs_log(LOG_INFO, "dock ready (mode=%s)",
+		meta::connectionModeName(mode_));
 }
 
 MetadataDock::~MetadataDock()
 {
 	delete store_;
 	store_ = nullptr;
+}
+
+// --- connection mode (T-041, ADR-012) -------------------------------------
+
+bool MetadataDock::isManaged() const
+{
+	return mode_ == meta::ConnectionMode::Managed;
+}
+
+meta::ConnectionMode MetadataDock::modeFromCombo() const
+{
+	if (modeCombo_ && modeCombo_->currentIndex() == 1)
+		return meta::ConnectionMode::Managed;
+	return meta::defaultConnectionMode();
+}
+
+void MetadataDock::onModeChanged(int)
+{
+	// Selecting a mode never moves or deletes credentials/tokens: it only
+	// changes the context future Connect flows will use (T-048 wires
+	// Managed). A pending Managed poll belongs to the old selection and
+	// is abandoned (backend transaction expires on its own TTL).
+	if (managedPollTimer_)
+		managedPollTimer_->stop();
+	mode_ = modeFromCombo();
+	refreshModeUi();
+	saveStore();
+}
+
+void MetadataDock::refreshModeUi()
+{
+	const bool managed = isManaged();
+	if (modeCombo_) {
+		const QSignalBlocker block(modeCombo_);
+		modeCombo_->setCurrentIndex(managed ? 1 : 0);
+	}
+	credTitle_->setVisible(!managed);
+	twIdEdit_->setVisible(!managed);
+	ytIdEdit_->setVisible(!managed);
+	ytSecretEdit_->setVisible(!managed);
+	kkIdEdit_->setVisible(!managed);
+	kkSecretEdit_->setVisible(!managed);
+	credNote_->setVisible(!managed);
+	managedNote_->setVisible(managed);
+	repaintModeStatuses();
+}
+
+// --- managed wiring (T-048; Independent handlers untouched) --------------
+
+namespace {
+
+// DEV default only: local backend under test. Overridable (DEV-only) via
+// STREAM_META_BACKEND_URL. No production URL is bundled in T-048.
+const char *kManagedDefaultBaseUrl = "http://127.0.0.1:8080";
+
+QString providerSlug(meta::Platform p)
+{
+	if (p == meta::Platform::YouTube)
+		return QStringLiteral("youtube");
+	if (p == meta::Platform::Kick)
+		return QStringLiteral("kick");
+	return QStringLiteral("twitch");
+}
+
+// Backend-backed providers in T-048 (YouTube T-045, Kick T-046). Twitch has
+// no backend service: representable, not functional (§12 of the task).
+bool managedSupported(meta::Platform p)
+{
+	return p == meta::Platform::YouTube || p == meta::Platform::Kick;
+}
+
+} // namespace
+
+void MetadataDock::initManaged()
+{
+	managedBaseUrl_ = QString::fromLocal8Bit(
+		qgetenv("STREAM_META_BACKEND_URL"));
+	if (managedBaseUrl_.isEmpty())
+		managedBaseUrl_ =
+			QString::fromLatin1(kManagedDefaultBaseUrl);
+	while (managedBaseUrl_.endsWith(QLatin1Char('/')))
+		managedBaseUrl_.chop(1);
+	managedAuth_ = new backend_auth::Client(net_, this);
+	managedAuth_->setBaseUrl(managedBaseUrl_);
+	managedAuth_->setStore(store_);
+	managedPollTimer_ = new QTimer(this);
+	managedPollTimer_->setSingleShot(false);
+	connect(managedPollTimer_, &QTimer::timeout, this,
+		&MetadataDock::onManagedPollTimeout);
+}
+
+MetadataDock::MetadataDock::ManagedConn &MetadataDock::managedAccount(meta::Platform p)
+{
+	if (p == meta::Platform::YouTube)
+		return mYt_;
+	return mKk_;
+}
+
+void MetadataDock::repaintModeStatuses()
+{
+	// Labels always reflect the active mode's own state objects; the
+	// other mode's accounts are never read here (§17: no mixing).
+	if (isManaged()) {
+		for (meta::Platform p :
+		     {meta::Platform::YouTube, meta::Platform::Kick}) {
+			const ManagedConn &m = managedAccount(p);
+			if (m.connected && !m.display.isEmpty())
+				setStatus(p, tr("Connected as %1").arg(m.display));
+			else
+				setStatus(p, tr("Not connected"));
+		}
+		return;
+	}
+	for (meta::Platform p :
+	     {meta::Platform::Twitch, meta::Platform::YouTube,
+	      meta::Platform::Kick}) {
+		const Account &a = account(p);
+		if (a.connected && !a.display.isEmpty())
+			setStatus(p, tr("Connected as %1").arg(a.display));
+		else
+			setStatus(p, tr("Not connected"));
+	}
+}
+
+void MetadataDock::onConnectManaged(meta::Platform p)
+{
+	if (!managedSupported(p)) {
+		setResult(p, false,
+			  tr("Managed Twitch is not available yet "
+			     "(direct only)."));
+		return;
+	}
+	startConnectBusy(p);
+	managedAuth_->ensureSession([this, p](backend_auth::Result r) {
+		if (r == backend_auth::Result::StorageError) {
+			// No installation yet: bootstrap once, then retry.
+			managedAuth_->bootstrap([this, p](backend_auth::Result b) {
+				if (b != backend_auth::Result::Ok) {
+					finishManagedError(
+						p, managedAuthError(p, b, 0));
+					return;
+				}
+				onConnectManaged(p);
+			});
+			return;
+		}
+		if (r != backend_auth::Result::Ok) {
+			finishManagedError(p, managedAuthError(p, r, 0));
+			return;
+		}
+		managedAuth_->apiPost(QStringLiteral("/connect/%1").arg(
+						      providerSlug(p)),
+				      QJsonObject(),
+				      [this, p](const backend_auth::Client::ApiReply &rep) {
+					      if (rep.result !=
+						      backend_auth::Result::Ok) {
+						      finishManagedError(
+							      p, managedApiError(
+									 p, rep));
+						      return;
+					      }
+					      const QString url = rep.body
+								  .value(QStringLiteral(
+									  "authorization_url"))
+								  .toString();
+					      if (url.isEmpty()) {
+						      finishManagedError(
+							      p, tr("Backend returned no "
+								    "authorization URL."));
+						      return;
+					      }
+					      openBrowser(url);
+					      setStatus(p, tr("Waiting for browser "
+							      "authorization…"));
+					      managedPollFor_ = p;
+					      managedPollsLeft_ = 120; // 5 s x 10 min
+					      managedPollTimer_->start(5000);
+				      });
+	});
+}
+
+void MetadataDock::onManagedPollTimeout()
+{
+	const meta::Platform p = managedPollFor_;
+	if (--managedPollsLeft_ < 0) {
+		managedPollTimer_->stop();
+		finishManagedError(p, tr("Timed out waiting for authorization."));
+		return;
+	}
+	managedAuth_->apiGet(QStringLiteral("/connect/%1/status").arg(
+					     providerSlug(p)),
+			     [this, p](const backend_auth::Client::ApiReply &rep) {
+				     if (rep.result != backend_auth::Result::Ok) {
+					     if (rep.result == backend_auth::Result::
+								    Unauthorized) {
+						     managedPollTimer_->stop();
+						     finishManagedError(
+							     p, tr("Session expired. "
+								   "Press Connect again."));
+					     }
+					     // Other transient failures: keep
+					     // polling until timeout (no loops
+					     // beyond the bounded poll count).
+					     return;
+				     }
+				     const QJsonObject o = rep.body;
+				     if (o.value(QStringLiteral("status")).toString() ==
+					 QStringLiteral("connected")) {
+					     managedPollTimer_->stop();
+					     const QJsonObject acc = o.value(
+							     QStringLiteral(
+								     "account"))
+							     .toObject();
+					     finishManagedConnected(
+						     p, acc.value(QStringLiteral(
+									    "displayName"))
+								.toString());
+				     }
+				     // Else still disconnected: keep polling.
+			     });
+}
+
+void MetadataDock::finishManagedConnected(meta::Platform p,
+					  const QString &display)
+{
+	ManagedConn &m = managedAccount(p);
+	m.connected = true;
+	m.display = display;
+	setStatus(p, tr("Connected as %1").arg(display));
+	setResult(p, true, tr("connected"));
+	obs_log(LOG_INFO, "managed connected: %s", meta::platformName(p));
+}
+
+void MetadataDock::finishManagedError(meta::Platform p, const QString &msg)
+{
+	managedPollTimer_->stop();
+	setStatus(p, tr("Error: %1").arg(msg));
+	obs_log(LOG_WARNING, "managed connect failed: %s",
+		meta::platformName(p));
+}
+
+QString MetadataDock::managedAuthError(meta::Platform p, backend_auth::Result r,
+				       int)
+{
+	switch (r) {
+	case backend_auth::Result::RateLimited:
+		return meta::userMessage(meta::Outcome::RateLimited, p);
+	case backend_auth::Result::NetworkError:
+		return tr("Could not reach the managed backend (network).");
+	case backend_auth::Result::StorageError:
+		return tr("Local installation storage failed (DPAPI).");
+	default:
+		return tr("Backend authentication failed.");
+	}
+}
+
+QString MetadataDock::managedApiError(meta::Platform p,
+				      const backend_auth::Client::ApiReply &rep)
+{
+	// Reuse the common UX error system (§22); backend bodies carry only
+	// safe fields, and only the HTTP code leaves this function.
+	switch (rep.result) {
+	case backend_auth::Result::Unauthorized:
+		return tr("Session expired. Press Connect again.");
+	case backend_auth::Result::RateLimited:
+		return meta::userMessage(meta::Outcome::RateLimited, p);
+	case backend_auth::Result::ServerError:
+		return meta::userMessage(meta::Outcome::ServerRetry, p);
+	case backend_auth::Result::NetworkError:
+		return tr("Could not reach the managed backend (network).");
+	default:
+		return meta::userMessage(
+			meta::classifyStatus(rep.http == 0 ? -1 : rep.http), p);
+	}
+}
+
+void MetadataDock::onDisconnectManaged(meta::Platform p)
+{
+	if (!managedSupported(p)) {
+		setResult(p, false,
+			  tr("Managed Twitch is not available yet "
+			     "(direct only)."));
+		return;
+	}
+	// Clear local Managed state first (mirrors Independent semantics),
+	// then best-effort remote disconnect; a network failure must not
+	// resurrect the local state.
+	ManagedConn &m = managedAccount(p);
+	m.connected = false;
+	m.display.clear();
+	setStatus(p, tr("Not connected"));
+	setResult(p, true, tr("disconnected"));
+	managedAuth_->ensureSession([this, p](backend_auth::Result r) {
+		if (r != backend_auth::Result::Ok)
+			return; // local state already cleared
+		managedAuth_->apiPost(QStringLiteral("/connect/%1/disconnect").arg(
+						      providerSlug(p)),
+				      QJsonObject(),
+				      [](const backend_auth::Client::ApiReply &) {});
+	});
 }
 
 // --- helpers ----------------------------------------------------------
@@ -419,6 +751,9 @@ void MetadataDock::saveStore()
 	if (!store_)
 		return;
 	secure::Data d;
+	// Preserve anything this dock does not own (T-044 backendInstall):
+	// load first, then overwrite only provider records + mode.
+	store_->load(d);
 	auto fill = [](const Account &a, secure::Record &r) {
 		r.connected = a.connected && !a.access.isEmpty();
 		if (!r.connected)
@@ -433,7 +768,12 @@ void MetadataDock::saveStore()
 	fill(tw_, d.twitch);
 	fill(yt_, d.youtube);
 	fill(kk_, d.kick);
-	if (!d.anyConnected()) {
+	// T-041: the mode is always persisted explicitly (idempotent
+	// migration: first save after upgrade writes it). Legacy clear
+	// behavior stays unless Managed was explicitly selected.
+	d.connectionMode = QString::fromLatin1(meta::connectionModeName(mode_))
+				   .toLower();
+	if (!d.anyConnected() && !isManaged()) {
 		store_->clear();
 		return;
 	}
@@ -446,8 +786,15 @@ void MetadataDock::loadStore()
 	if (!store_)
 		return;
 	secure::Data d;
-	if (!store_->load(d))
-		return; // fresh start: nothing persisted yet
+	store_->load(d); // return ignored on purpose: the mode restores
+	// even when zero providers are connected (T-041).
+	{
+		const std::optional<meta::ConnectionMode> m =
+			meta::parseConnectionMode(d.connectionMode);
+		// Missing/invalid (pre-T-041 files) -> Independent, never
+		// Managed: no silent upgrade into the service-operated mode.
+		mode_ = m.value_or(meta::defaultConnectionMode());
+	}
 	auto restore = [](Account &a, const secure::Record &r) {
 		a.clear();
 		if (!r.connected)
@@ -542,6 +889,13 @@ void MetadataDock::wipeLocal(meta::Platform p)
 
 void MetadataDock::onConnectTwitch()
 {
+	// T-041: Managed has no flow yet (T-048). Explicit pending state:
+	// no network, no simulation, no fallback into Independent.
+	if (isManaged()) {
+		setResult(meta::Platform::Twitch, false,
+			  tr("Managed connections arrive with T-048."));
+		return;
+	}
 	Account &a = tw_;
 	a.clear();
 	const QString id = field(twIdEdit_);
@@ -672,6 +1026,10 @@ void MetadataDock::handleCallbackData(const QByteArray &request)
 
 void MetadataDock::onConnectYouTube()
 {
+	if (isManaged()) {
+		onConnectManaged(meta::Platform::YouTube);
+		return;
+	}
 	Account &a = yt_;
 	a.clear();
 	const QString id = field(ytIdEdit_);
@@ -736,6 +1094,10 @@ void MetadataDock::startYouTubeExchange(const QString &code)
 
 void MetadataDock::onDisconnectYouTube()
 {
+	if (isManaged()) {
+		onDisconnectManaged(meta::Platform::YouTube);
+		return;
+	}
 	const Account snap = yt_;
 	wipeLocal(meta::Platform::YouTube);
 	startRevoke(meta::Platform::YouTube, snap);
@@ -743,6 +1105,10 @@ void MetadataDock::onDisconnectYouTube()
 
 void MetadataDock::onConnectKick()
 {
+	if (isManaged()) {
+		onConnectManaged(meta::Platform::Kick);
+		return;
+	}
 	Account &a = kk_;
 	a.clear();
 	const QString id = field(kkIdEdit_);
@@ -806,6 +1172,10 @@ void MetadataDock::startKickExchange(const QString &code)
 
 void MetadataDock::onDisconnectKick()
 {
+	if (isManaged()) {
+		onDisconnectManaged(meta::Platform::Kick);
+		return;
+	}
 	const Account snap = kk_;
 	wipeLocal(meta::Platform::Kick);
 	startRevoke(meta::Platform::Kick, snap);

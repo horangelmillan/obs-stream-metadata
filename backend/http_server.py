@@ -201,18 +201,18 @@ class _Handler(BaseHTTPRequestHandler):
                                          body["nonce"], body["signature"])
             return 200, {}
         if path == "/connect/youtube":
+            # Compatibilidad: la ruta genérica /connect/<provider> la cubre;
+            # este alias existe para no romper clientes antiguos.
             record = app.check_access(path, self.headers)
-            if app.youtube is None:
-                raise AppError(ErrorCode.INTERNAL, "youtube not configured")
+            service = app._service("youtube")
             app._limited("auth_install", f"yt-connect:{record.installation_id}")
-            return 200, app.youtube.start(record.installation_id,
-                                          app.youtube_redirect_uri())
+            return 200, service.start(record.installation_id,
+                                      app._redirect_uri("youtube"))
         if path == "/connect/youtube/disconnect":
             record = app.check_access(path, self.headers)
-            if app.youtube is None:
-                raise AppError(ErrorCode.INTERNAL, "youtube not configured")
+            service = app._service("youtube")
             app._limited("auth_install", f"yt-disc:{record.installation_id}")
-            app.youtube.disconnect(record.installation_id)
+            service.disconnect(record.installation_id)
             return 200, {"provider": "youtube", "status": "disconnected"}
         parts = path.split("/")
         # /connect/<provider> y /connect/<provider>/disconnect (POST).

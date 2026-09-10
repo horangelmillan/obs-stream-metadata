@@ -54,6 +54,18 @@ if(ENABLE_QT)
     target_link_libraries(metadata-selfcheck PRIVATE crypt32)
   endif()
   target_include_directories(metadata-selfcheck PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+  # T-048: console live test for the C++ Managed wiring (no OBS/Widgets).
+  # Exercises the real backend_auth client against a real backend + provider.
+  # Dev-only, headless-capable; never part of the plugin or the installer.
+  add_executable(managed-link-test EXCLUDE_FROM_ALL src/managed_link_test.cpp src/backend_auth.cpp
+                                                    src/secure_store.cpp src/metadata.cpp)
+  target_link_libraries(managed-link-test PRIVATE Qt6::Core Qt6::Network)
+  set_target_properties(managed-link-test PROPERTIES AUTOMOC ON)
+  if(WIN32)
+    target_link_libraries(managed-link-test PRIVATE crypt32)
+  endif()
+  target_include_directories(managed-link-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 endif()
 
 if(WIN32 AND ENABLE_QT)
