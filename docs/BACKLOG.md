@@ -15,8 +15,8 @@ Estados: pendiente / en-progreso / bloqueada / hecha / deuda / investigación / 
 | T-030 | hecha | 3 | PoCs OAuth + título por proveedor (Twitch/YouTube/Kick) + desc YouTube | lógica offline PASS 28/28 + triple LIVE PASS (Twitch/YouTube/Kick) con read-back | AGENTS §10-14, docs/T030-POC.md, F-015–F-024 |
 | T-031 | hecha | 4 | Dock unificado: título/desc + apply por plataforma + resultado independiente | matriz viva §19 en verde (T1–T20: OAuth+updates reales, parcial, validación, 401, async, persistencia) + fixes F-026/F-027/F-028 | F-001, F-004, F-025–F-028 |
 | T-032 | hecha | 5 | Hardening: storage seguro OS, revoke en Disconnect, backoff 429/5xx, fin de env-vars, distribución secrets F-017/F-019 | sobrevive reinicio sin plaintext; revocación verificada por proveedor; 429 sin reintento agresivo; cero secretos en repo/logs; matriz T1–T20 sin regresión | AGENTS §16-18, §26-29, ADR-008, F-029–F-032 |
-| T-033 | en-progreso | 6 | Testing integración + negativos AGENTS §39-40 | gate §50 en verde | AGENTS §39-40, §50 |
-| T-034 | futuro | 7 | Packaging/release instalador plugin | flujo §36 funciona | template wiki Distribute |
+| T-033 | hecha | 6 | Testing integración + negativos AGENTS §39-40 | gate §50 GREEN (matriz 22 criterios PASS, T-050/51/52, E2E YT/Kick/Twitch, 125 selfcheck + 134 backend) | AGENTS §39-40, §50 |
+| T-034 | hecha | 7 | Packaging/release instalador plugin | satisfecha de facto por T-061 (NSIS .exe + install/upgrade/uninstall reales PASS, PR #25) | template wiki Distribute |
 | T-035 | hecha | 6 | Prueba empírica YouTube secretless (Desktop + PKCE + loopback + `youtube.force-ssl`, sin secret) | FAIL: `400 invalid_request: client_secret is missing` con auth real; secret exigido en esta configuración | F-034 → F-038 |
 | T-036 | hecha | 6 | Prueba empírica Kick secretless (auth + PKCE + localhost, sin secret) + control con secret | FAIL secretless (`400` vacío) + control `200` con secret; secreto aislado como causa | F-036 → F-039 |
 | T-037 | hecha | 6 | Investigación distribución Client ID Google (política open-source/release privada/backend) | Sin permiso oficial para secreto en binario público; release-privada no resuelve extracción; backend como vía conforme | F-035 → F-040 |
@@ -24,7 +24,7 @@ Estados: pendiente / en-progreso / bloqueada / hecha / deuda / investigación / 
 | T-039 | hecha | 6 | ADR-009 arquitectura OAuth final | `docs/DECISIONS/ADR-009-centralized-backend-architecture.md` aprobado en T-038 | T-038 |
 | T-040 | hecha | 0 | Normalizar `core.autocrlf` y convención `master` vs `main` | ADR + config | — |
 | T-041 | hecha | 6 | [Independent] UX modal: selector Independent/Managed + persistencia/migración modo (sin wiring Managed) | selector + `connection_mode` + legacy→Independent idempotente + 89 selfchecks | ADR-012 |
-| T-042 | pendiente | 7 | [Infra] Arquitectura backend Kick — SUPERSEDED en la práctica por T-046 (adapter + live PASS); se conserva por historia, cierre formal pendiente | alcance conceptual aprobado | F-036 |
+| T-042 | superseded | 7 | [Infra] Arquitectura backend Kick — SUPERSEDED en la práctica por T-046 (adapter + live PASS); se conserva por historia, cierre formal pendiente | alcance conceptual aprobado | F-036 |
 | T-043 | hecha | 7 | Backend foundation (servicio HTTPS + DB mínima + secret manager + dominio/TLS) | fundación stdlib `backend/` en verde: 27 tests, health/ready/version, kernel/ports/adapters aislados, sin secretos | ADR-009 |
 | T-044 | hecha | 7 | Auth plugin↔backend (identidad instalación + sesiones cortas + rate-limit, sin secreto permanente) | ADR-010 + `/auth/*` + cliente Qt async + 43 tests + build/DLL/selfcheck en verde | ADR-009, ADR-010 |
 | T-045 | hecha | 7 | Adapter OAuth YouTube en backend (exchange/refresh/revoke + verificación Google) | ADR-011 + live PASS (connect/callback/exchange/identidad/disconnect) + 57 tests | ADR-009, ADR-011 |
@@ -42,8 +42,8 @@ Estados: pendiente / en-progreso / bloqueada / hecha / deuda / investigación / 
 | T-059 | futuro | 7 | [Commercial] Diseño suscripción/licencias (OPEN: proveedor pagos, planes, expiración, grace, límites) | decisión documentada, sin implementar pagos | ADR-012 |
 | T-060 | hecha | 7 | [Security] Privacy policy + inventario de datos Managed (retención, revoke, eliminación, logs, incidentes) | `docs/PRIVACY.md` (inventario trazable a código; sin secretos ni claims legales) | ADR-012 |
 | T-058 | hecha | 7 | [Infrastructure] Múltiples directorios de secretos (CompositeSecretStore + SECRET_DIRS, Cloud Run 1-secreto-por-directorio) | 8 tests nuevos; 134 backend en verde; compat single-DIR intacta | ADR-012, ADR-014 |
-| T-058 | pendiente | 7 | [Security] Privacy policy + inventario de datos Managed (retención, revoke, eliminación, logs, incidentes) | documento previo a producción | ADR-012 |
+| T-058 | duplicada | 7 | [Security] Privacy policy + inventario de datos Managed (retención, revoke, eliminación, logs, incidentes) | DUPLICADA obsoleta de T-060 (la tarea real es T-060, hecha); se conserva por historia | ADR-012 |
 | T-056 | hecha | 7 | [Infrastructure] Bind production 0.0.0.0 (Cloud Run) + estado de despliegue | host por entorno + override explícito + 5 tests; 121 backend en verde; despliegue pendiente de reintento | ADR-012 |
-| T-061 | pendiente | 7 | [Installer] Windows NSIS .exe + install real en OBS (encargo nombrado T-057; ID T-061 por colisión con T-057 existente) | en progreso en rama release/t057-windows-installer | — |
+| T-061 | hecha | 7 | [Installer] Windows NSIS .exe + install real en OBS (encargo nombrado T-057; ID T-061 por colisión con T-057 existente) | NSIS 3.12 + install/upgrade/uninstall reales PASS + PR #25 mergeada | — |
 
 Regla: cada PR referencia su T-### y actualiza esta tabla + STATE.
