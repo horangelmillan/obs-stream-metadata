@@ -78,12 +78,14 @@ backend; con Cloud Run + HTTPS público, terminación en la plataforma.
 
 ## Secretos
 
-- `GOOGLE_CLIENT_ID/SECRET`, `KICK_CLIENT_ID/SECRET`: ficheros en
-  `$SECRET_DIR` (Cloud Run: Secret Manager montado como volumen o env —
-  nunca en la imagen, nunca en el repo, nunca en logs).
+- `GOOGLE_CLIENT_ID/SECRET`, `KICK_CLIENT_ID/SECRET`
+  (+ `TWITCH_CLIENT_ID/SECRET` al habilitar Twitch Managed, FASE 2):
+  ficheros en `$SECRET_DIR` (Cloud Run: Secret Manager montado como
+  volumen o env — nunca en la imagen, nunca en el repo, nunca en logs).
 - `DATABASE_URL` (con password): Secret Manager; en logs solo forma
   redactada `postgresql://usuario:***@host/db` (redacción verificada).
 - OAuth apps PROD (operador): proyecto Google PROD + app Kick PROD
+  (+ app Twitch PROD tipo confidencial con secret para Managed, FASE 2)
   separados de DEV; redirects = `$PUBLIC_URL/connect/*/callback`.
 
 ## Secret Manager ↔ FileSecretStore (T-057, precisado en T-058)

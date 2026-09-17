@@ -27,6 +27,7 @@ AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 REVOKE_URL = "https://oauth2.googleapis.com/revoke"
 CHANNELS_URL = "https://www.googleapis.com/youtube/v3/channels"
+BROADCASTS_URL = "https://www.googleapis.com/youtube/v3/liveBroadcasts"
 
 BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
@@ -83,6 +84,78 @@ def classify_token_error(payload: dict, status: int) -> AppError:
     if status >= 500:
         return AppError(ErrorCode.PROVIDER_UNAVAILABLE, f"google:{status}")
     return AppError(ErrorCode.PROVIDER_REJECTED, f"google:{error or status}")
+
+
+def _api(method: str, url: str, token: str, payload: dict | None,
+         transport=None) -> tuple[int, dict]:
+    """Llamadas JSON a YouTube Data API (Bearer). Transport inyectable."""
+    if transport is not None:
+        return transport(method, url, {"token": token,
+                                       "payload": payload or {}})
+    body = json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(url, data=body, method=method)
+    req.add_header("Authorization", "Bearer " + token)
+    req.add_header("User-Agent", BROWSER_UA)
+    if payload is not None:
+        req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            raw = r.read().decode("utf-8", "replace")
+            return r.status, json.loads(raw) if raw.strip() else {}
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", "replace")
+        try:
+            return e.code, json.loads(raw) if raw.strip() else {"error": {}}
+        except ValueError:
+            return e.code, {"error": {}}
+
+
+def _normalize_google_text(payload: dict) -> tuple[str, str]:
+    """(reason principal, texto normalizado) de un error YouTube Data API.
+
+    Forma Google: {"error": {"code": N, "message": ..., "errors": [{"reason"}]}}.
+    Normalización: minúsculas sin no-alfabéticos, porque los mensajes
+    contienen espacios ("Rate limit exceeded") y los reasons no
+    ("rateLimitExceeded"): ambas formas deben mapear igual (FASE 2.1-C.1:
+    un 403 de cuota/rate con espacios caía al default PROVIDER_REJECTED).
+    El reason es un enum de protocolo (sin secretos) y viaja en el detail
+    (solo logs, jamás respuestas: ver ErrorCode.public_body).
+    """
+    err = payload.get("error", {}) if isinstance(payload, dict) else {}
+    reasons = [str(e.get("reason", ""))
+               for e in (err.get("errors", []) if isinstance(err, dict) else [])
+               if isinstance(e, dict) and e.get("reason")]
+    message = str(err.get("message", "") if isinstance(err, dict) else "")
+    import re as _re
+    norm = _re.sub(r"[^a-z]", "", (",".join(reasons) + "," + message).lower())
+    return (str(reasons[0]) if reasons else "", norm)
+
+
+def classify_broadcast_error(payload: dict, status: int) -> AppError:
+    """Mapeo errores YouTube Data API → modelo backend (respuestas seguras)."""
+    reason, text = _normalize_google_text(payload)
+    tag = f"google:{status}:{reason}" if reason else f"google:{status}"
+    if status == 401 or "unauthorized" in text or "invalidcredentials" in text:
+        # Access revocado/expirado más allá del refresh → reconectar.
+        return AppError(ErrorCode.SESSION_EXPIRED, "google:auth-expired")
+    # "Rate limit exceeded" / "... exceeded your quota" / "Daily Limit
+    # Exceeded": el orden de palabras varía entre message y reason, así que
+    # se matchea por co-ocurrencia, no por subcadena contigua.
+    limited = ("ratelimit" in text or "quotaexceeded" in text
+               or ("exceed" in text and ("quota" in text or "daily" in text)))
+    if status == 429 or limited:
+        return AppError(ErrorCode.PROVIDER_RATE_LIMITED, "google:rate")
+    if status >= 500 or "backenderror" in text:
+        return AppError(ErrorCode.PROVIDER_UNAVAILABLE, tag)
+    if ("insufficientpermissions" in text or "livestreamingnotenabled" in text
+            or "forbidden" in text):
+        return AppError(ErrorCode.AUTHORIZATION, "google:forbidden")
+    if ("invalidtitle" in text or "invaliddescription" in text
+            or "invalid" in text or "badrequest" in text):
+        return AppError(ErrorCode.INVALID_REQUEST, "google:invalid")
+    if "livebroadcastnotfound" in text or "notfound" in text or status == 404:
+        return AppError(ErrorCode.PROVIDER_REJECTED, "google:not-found")
+    return AppError(ErrorCode.PROVIDER_REJECTED, tag)
 
 
 class YouTubeProvider(OAuthProvider):
@@ -170,6 +243,59 @@ class YouTubeProvider(OAuthProvider):
 
     def channel_identity(self, access_token: str) -> Account:
         return self.fetch_identity(access_token)
+
+    # --- metadata Managed (FASE 2.1-C) ---
+    def list_resources(self, access_token: str) -> list:
+        """Broadcasts editables (activos primero, luego próximos)."""
+        out: list[dict] = []
+        for bstatus in ("active", "upcoming"):
+            url = BROADCASTS_URL + "?" + urllib.parse.urlencode(
+                {"part": "snippet,status", "mine": "true",
+                 "broadcastStatus": bstatus, "maxResults": "25"})
+            status, payload = _api("GET", url, access_token, None,
+                                   self._transport)
+            if status != 200:
+                raise classify_broadcast_error(payload, status)
+            for item in payload.get("items", []):
+                snippet = item.get("snippet", {})
+                out.append({"id": str(item.get("id", "")),
+                            "title": str(snippet.get("title", "")),
+                            "status": bstatus})
+        return out
+
+    def apply_metadata(self, access_token: str, data: dict) -> dict:
+        """Actualiza título/descripción preservando el resto del snippet
+        (fetch+merge, regla T-031/F-021: nunca resetear categoryId etc.)."""
+        broadcast_id = str(data.get("broadcast_id", ""))
+        title = str(data.get("title", ""))
+        description = str(data.get("description", ""))
+        if not broadcast_id:
+            raise AppError(ErrorCode.INVALID_REQUEST, "broadcast required")
+        if not (1 <= len(title) <= 100):
+            raise AppError(ErrorCode.INVALID_REQUEST, "invalid title")
+        if len(description) > 5000:
+            raise AppError(ErrorCode.INVALID_REQUEST, "invalid description")
+        get_url = BROADCASTS_URL + "?" + urllib.parse.urlencode(
+            {"part": "snippet", "id": broadcast_id})
+        status, payload = _api("GET", get_url, access_token, None,
+                               self._transport)
+        if status != 200:
+            raise classify_broadcast_error(payload, status)
+        items = payload.get("items", [])
+        if not items:
+            raise AppError(ErrorCode.PROVIDER_REJECTED, "google:not-found")
+        snippet = dict(items[0].get("snippet", {}))
+        snippet["title"] = title
+        snippet["description"] = description
+        put_url = BROADCASTS_URL + "?" + urllib.parse.urlencode(
+            {"part": "snippet"})
+        status, payload = _api("PUT", put_url, access_token,
+                               {"id": broadcast_id, "snippet": snippet},
+                               self._transport)
+        if status != 200:
+            raise classify_broadcast_error(payload, status)
+        return {"id": broadcast_id, "title": title,
+                "description": description}
 
     def fetch_identity(self, access_token: str) -> Account:
         status, payload = _get_json(

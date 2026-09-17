@@ -17,6 +17,22 @@ if(OBS_TWITCH_CLIENT_ID AND NOT OBS_TWITCH_CLIENT_ID MATCHES "^[A-Za-z0-9]+$")
   message(FATAL_ERROR "OBS_TWITCH_CLIENT_ID must be alphanumeric or empty")
 endif()
 
+# FASE 1: Managed backend base URL bundled at build time (public endpoint,
+# never a secret). Default = local dev backend (today's behavior; T-048).
+# Distribuible builds pass the production URL explicitly:
+#   -DSTREAM_META_BACKEND_URL=https://<cloud-run-url>
+# Plain http is only accepted for loopback (127.0.0.1/localhost); anything
+# else must be https (mirrors the backend T-053 production gate).
+set(STREAM_META_BACKEND_URL "http://127.0.0.1:8080" CACHE STRING
+    "Managed backend base URL bundled into the plugin (public, no secret)")
+if(STREAM_META_BACKEND_URL MATCHES "^http://")
+  if(NOT STREAM_META_BACKEND_URL MATCHES "^http://(127\\.0\\.0\\.1|localhost)(:[0-9]+)?(/|$)")
+    message(FATAL_ERROR "STREAM_META_BACKEND_URL: plain http only allowed for loopback; production must be https")
+  endif()
+elseif(NOT STREAM_META_BACKEND_URL MATCHES "^https://")
+  message(FATAL_ERROR "STREAM_META_BACKEND_URL must start with https:// (or http:// loopback for dev)")
+endif()
+
 include(compilerconfig)
 include(defaults)
 include(helpers)
@@ -43,9 +59,11 @@ if(ENABLE_QT)
     PRIVATE $<$<C_COMPILER_ID:Clang,AppleClang>:-Wno-quoted-include-in-framework-header -Wno-comma>
   )
   # T-047: distributed ID visible to metadata.cpp (empty string when unset).
+  # FASE 1: managed backend URL visible to metadata_dock.cpp.
   target_compile_definitions(
     ${CMAKE_PROJECT_NAME}
     PRIVATE OBS_TWITCH_CLIENT_ID="${OBS_TWITCH_CLIENT_ID}"
+    PRIVATE STREAM_META_BACKEND_URL_DEFAULT="${STREAM_META_BACKEND_URL}"
   )
   set_target_properties(
     ${CMAKE_PROJECT_NAME}

@@ -10,6 +10,10 @@ ver `docs/TROUBLESHOOTING.md` T-013).
 $cmake = 'C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin'
 $env:Path = "$cmake;$env:Path"
 cmake -S . -B build_x64 --preset windows-x64 -DENABLE_FRONTEND_API=ON -DENABLE_QT=ON -DCMAKE_SYSTEM_VERSION=10.0.22621.0
+# FASE 1: el build distribuible (Managed) debe apuntar al backend de
+# producción; sin este flag el plugin intentaría localhost:8080 y Managed
+# YouTube/Kick no conectarían. Dev builds omiten el flag (default local).
+# -DSTREAM_META_BACKEND_URL=https://<cloud-run-url>
 cmake --build build_x64 --config RelWithDebInfo
 # Staging con el payload exacto (componente obs-package):
 cmake --install build_x64 --config RelWithDebInfo --prefix '<staging>' --component obs-package

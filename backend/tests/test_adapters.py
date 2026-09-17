@@ -18,7 +18,9 @@ class FakeSecrets:
         return {"GOOGLE_CLIENT_ID": "test-client-id",
                 "GOOGLE_CLIENT_SECRET": "test-secret",
                 "KICK_CLIENT_ID": "test-kick-id",
-                "KICK_CLIENT_SECRET": "test-kick-secret"}.get(name)
+                "KICK_CLIENT_SECRET": "test-kick-secret",
+                "TWITCH_CLIENT_ID": "test-tw-id",
+                "TWITCH_CLIENT_SECRET": "test-tw-secret"}.get(name)
 
 
 def _session(provider: Provider) -> OAuthSession:
