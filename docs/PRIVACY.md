@@ -87,7 +87,7 @@ Migrations in `backend/migrations/` (reproducible schema):
 | `sessions` | session payload (`token`, `installation_id`, issued/expiry) |
 | `transactions` | OAuth transaction incl. `code_verifier`, `state`, redirect |
 | `connections` | `(installation_id, provider)` → `{account: {provider_user_id, display_name, scopes}, obtained_at}` |
-| `tokens` | `(provider, provider_user_id)` → `access_token`, `refresh_token`, `expires_in`, `scope` |
+| `tokens` | `(provider, provider_user_id)` → `access_token`, `refresh_token` (cifrados `v1:` Fernet, F-C1; legacy en claro solo hasta el backfill), `expires_in`, `scope` (en claro) |
 
 Provider secrets (`GOOGLE_/KICK_CLIENT_ID/SECRET`) live in Google
 Secret Manager as files consumed via `FileSecretStore`/
@@ -237,7 +237,7 @@ fixed here, never by silently changing the system (T-060 rule).
 | session token record | `/auth/*` | PG `sessions` | bearer auth | 30 min TTL; **flagged, not deleted**, on revoke | new session / operator DB delete |
 | OAuth transaction | `/connect/*` | PG `transactions` | CSRF/PKCE/exchange | 600 s TTL, single-use | consume/expiry |
 | connection entry | callback | PG `connections` | status/reconnect | until Disconnect | disconnect |
-| user tokens | exchange/refresh | PG `tokens` | API calls | until Disconnect | disconnect |
+| user tokens | exchange/refresh | PG `tokens` (ciphertext `v1:` + metadata en claro) | API calls | until Disconnect | disconnect |
 | provider client secrets | operator Secret Manager | Secret Manager → files | OAuth | managed externally | operator rotation |
 | `DATABASE_URL` | operator Secret Manager | Secret Manager env | DB access | managed externally | operator rotation |
 | title/description text | user typing | memory only (+ provider on Apply) | metadata update | transient | — |

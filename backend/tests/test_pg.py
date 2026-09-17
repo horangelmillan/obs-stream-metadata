@@ -85,7 +85,7 @@ def fresh_db(test):
     pool = PgPool(url, max_size=3)
     test.addCleanup(pool.close)
     applied = run_migrations(pool, MIGRATIONS)
-    test.assertEqual(applied, ["001"])
+    test.assertEqual(applied, ["001", "002"])
     test.assertEqual(run_migrations(pool, MIGRATIONS), [])
     return url, pool
 
@@ -133,12 +133,12 @@ class DatabaseUrlTest(unittest.TestCase):
 class MigrationsTest(unittest.TestCase):
     def test_discover_ordered(self):
         found = discover_migrations(MIGRATIONS)
-        self.assertEqual([version for version, _ in found], ["001"])
+        self.assertEqual([version for version, _ in found], ["001", "002"])
 
     def test_schema_created_from_scratch(self):
         _, pool = fresh_db(self)
         with pool as conn:
-            self.assertEqual(applied_versions(conn), {"001"})
+            self.assertEqual(applied_versions(conn), {"001", "002"})
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT tablename FROM pg_tables "
@@ -222,6 +222,10 @@ class ProdWiringPgTest(unittest.TestCase):
         self.addCleanup(lambda: __import__("shutil").rmtree(sec, True))
         with open(os.path.join(sec, "GOOGLE_CLIENT_ID"), "w") as handle:
             handle.write("fk-prod-cid-9z")
+        # F-C1: el wiring productivo exige clave de cifrado (runtime).
+        from cryptography.fernet import Fernet as _Fernet
+        with open(os.path.join(sec, "TOKEN_ENCRYPTION_KEY"), "w") as handle:
+            handle.write(_Fernet.generate_key().decode())
         settings = Settings(host="127.0.0.1", port=0, env=PRODUCTION,
                             public_base_url="https://backend.example.com",
                             secret_dir=sec, database_url=url)
@@ -255,6 +259,33 @@ class ProdWiringPgTest(unittest.TestCase):
         finally:
             for pool in pools:
                 pool.close()
+
+
+class PgTokenCryptoTest(unittest.TestCase):
+    """F-C1 sobre PostgreSQL real: roundtrip cifrado + doble lectura de
+    filas legacy en claro (solo con servidor; skip local por diseño)."""
+
+    def test_encrypted_roundtrip_and_legacy_dual_read(self):
+        from cryptography.fernet import Fernet
+
+        from backend.token_crypto import (CIPHERTEXT_PREFIX,
+                                          EncryptedTokenStore, TokenCipher)
+        _, pool = fresh_db(self)
+        cipher = TokenCipher(Fernet.generate_key())
+        plain = PgTokenStore(pool)
+        store = EncryptedTokenStore(plain, cipher)
+        # Fila legacy en claro, escrita sin decorar (pre-F-C1).
+        plain.save(_account(), _pair())
+        self.assertEqual(store.load(_account()).refresh_token, "fk-ref-9z")
+        # Tras guardar con el decorador, en crudo solo hay ciphertext.
+        store.save(_account(), _pair())
+        raw = plain.load(_account())
+        self.assertTrue(raw.access_token.startswith(CIPHERTEXT_PREFIX))
+        self.assertNotIn("fk-acc-9z", raw.access_token)
+        self.assertNotIn("fk-ref-9z", raw.refresh_token)
+        self.assertEqual(store.load(_account()), _pair())
+        for role in (plain, store):
+            self.assertFalse(getattr(role, "DEVELOPMENT_ONLY", False))
 
 
 if __name__ == "__main__":

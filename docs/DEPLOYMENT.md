@@ -150,6 +150,42 @@ Reglas:
 - Los nombres de fichero siguen siendo los que exige cada adapter; el
   directorio es solo el mount.
 
+## Cifrado de tokens en reposo (F-C1, T-063)
+
+`tokens.access_token`/`refresh_token` se guardan como `v1:<token-Fernet>`
+(AEAD en `backend/token_crypto.py`); las filas legacy en claro se siguen
+leyendo (doble lectura). La clave vive solo en Secret Manager + memoria.
+
+Creación inicial (operador, una vez; nunca en repo/logs):
+
+```text
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"  # solo muestra, no guardar en disco compartido
+printf '%s' '<CLAVE>' | gcloud secrets create TOKEN_ENCRYPTION_KEY --data-file=-
+```
+
+Montaje (un secreto por directorio, se añade a `SECRET_DIRS`):
+
+```text
+--set-secrets=/run/secrets/token-encryption-key/TOKEN_ENCRYPTION_KEY=TOKEN_ENCRYPTION_KEY:1
+--set-env-vars=STREAM_META_BACKEND_SECRET_DIRS=...:/run/secrets/token-encryption-key
+```
+
+Sin la clave, prod falla antes de escuchar (`ProdstoresError` con el
+nombre, nunca el valor). Reglas:
+
+- Backfill tras el deploy: `python tools/backfill_token_crypto.py --dry-run`
+  y luego `--apply` (idempotente, por lotes, solo conteos en salida).
+- Rollback: la revisión anterior no lee `v1:` (sus bearers fallarían como
+  `SESSION_EXPIRED`, sin corromper); ante un backfill ya aplicado, el
+  rollback correcto es forward-fix (re-desplegar la revisión nueva), no
+  re-encriptar a claro.
+- Rotación (nueva clave → re-cifrado): 1. crear versión nueva del secreto
+  como `TOKEN_ENCRYPTION_KEY_PREVIOUS=<antigua>` y `TOKEN_ENCRYPTION_KEY=
+  <nueva>`; 2. desplegar (lee ambas, cifra con la nueva); 3. backfill
+  `--apply` (toda fila queda bajo la nueva); 4. retirar `PREVIOUS` y
+  re-desplegar. Detalle del descarte de alternativas (KMS/pgcrypto) en
+  `docs/superpowers/plans/2026-09-17-f-c1-token-encryption.md`.
+
 ## Arranque / salud / parada (Cloud Run)
 
 - Arranque: migrations al inicio (falla antes de escuchar si el esquema

@@ -1,0 +1,14 @@
+-- 002_token_ciphertext.sql — F-C1 (T-063): formato versionado de tokens.
+--
+-- Sin cambio DDL por diseño:
+-- - Las columnas `tokens.access_token`/`refresh_token` ya son TEXT y ya
+--   contienen el formato versionado `v1:<token-Fernet>` (AEAD app-layer en
+--   `backend/token_crypto.py`); el texto en claro legacy (pre-F-C1) coexiste
+--   y se lee por doble lectura en la capa de aplicacion.
+-- - La clave de cifrado JAMAS entra a la DB (solo Secret Manager + memoria),
+--   asi que ningun DDL podria expresarla; `pgcrypto` se descarto con razones
+--   en el plan `docs/superpowers/plans/2026-09-17-f-c1-token-encryption.md`.
+-- Este fichero existe para registrar la version del formato en
+-- `schema_migrations` (el runner exige contenido no vacio; `SELECT 1` es la
+-- transaccion minima valida) y como contrato legible junto a `001_init.sql`.
+SELECT 1;

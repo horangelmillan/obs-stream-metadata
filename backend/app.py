@@ -130,6 +130,12 @@ def _production_wiring(settings):
                 "production requires STREAM_META_BACKEND_SECRET_DIR")
         dirs = [settings.secret_dir]
     secrets = CompositeSecretStore(FileSecretStore(path) for path in dirs)
+    # F-C1: los tokens en reposo siempre van cifrados (Fernet). La clave
+    # es obligatoria en prod aunque no haya providers habilitados (se
+    # verifica antes de abrir el pool: fail-fast sin red; solo nombres en
+    # el error, nunca valores).
+    from backend.token_crypto import EncryptedTokenStore, TokenCipher
+    cipher = TokenCipher.from_secret_store(secrets)
     if not settings.database_url:
         raise ProdstoresError(
             "production requires STREAM_META_BACKEND_DATABASE_URL")
@@ -162,7 +168,7 @@ def _production_wiring(settings):
         "installations": PgInstallationStore(pool),
         "transactions": PgOAuthTransactionStore(pool),
         "connections": PgConnectionStore(pool),
-        "tokens": PgTokenStore(pool),
+        "tokens": EncryptedTokenStore(PgTokenStore(pool), cipher),
         "limiter": FixedWindowRateLimiter(settings.global_limit,
                                           settings.global_window_s),
     }
