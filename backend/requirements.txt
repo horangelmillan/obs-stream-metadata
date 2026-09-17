@@ -3,6 +3,9 @@
 # psycopg-binary NO arrastra a psycopg como dependencia):
 #   psycopg          = driver puro Python
 #   psycopg-binary   = libpq empaquetada (evita compilar; ruedas linux/win)
-# El resto del backend sigue stdlib-only.
+# El resto del backend sigue stdlib-only, salvo `cryptography` (F-C1):
+# AEAD Fernet para tokens en reposo. Ruedas binarias abi3 (manylinux +
+# win) publicadas por upstream: sin compilador en slim/CI/Windows.
+cryptography==50.0.1
 psycopg==3.3.5
 psycopg-binary==3.3.5

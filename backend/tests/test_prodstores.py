@@ -241,6 +241,11 @@ class ProviderSecretsBootCheckTest(unittest.TestCase):
         for name in files:
             with open(os.path.join(sec, name), "w") as handle:
                 handle.write("fk-9z")
+        # F-C1: el wiring productivo siempre exige clave de cifrado; los
+        # tests la plantan (generada en runtime, jamas literal).
+        from cryptography.fernet import Fernet
+        with open(os.path.join(sec, "TOKEN_ENCRYPTION_KEY"), "w") as handle:
+            handle.write(Fernet.generate_key().decode())
         settings = self._settings(sec)
         with mock.patch.dict(os.environ,
                              {"STREAM_META_BACKEND_PROVIDERS": providers}):
@@ -310,6 +315,12 @@ def _secret_dir(test, files):
     for name, value in files.items():
         with open(os.path.join(tmp, name), "w") as handle:
             handle.write(value)
+    if "TOKEN_ENCRYPTION_KEY" not in files:
+        # F-C1: el wiring productivo siempre exige clave de cifrado
+        # (generada en runtime, jamas literal).
+        from cryptography.fernet import Fernet
+        with open(os.path.join(tmp, "TOKEN_ENCRYPTION_KEY"), "w") as handle:
+            handle.write(Fernet.generate_key().decode())
     return tmp
 
 
@@ -406,6 +417,52 @@ class MultiDirWiringTest(unittest.TestCase):
         message = str(ctx.exception)
         self.assertIn("youtube/GOOGLE_CLIENT_SECRET", message)
         self.assertNotIn("fk-cid-9z", message)
+
+
+class TokenWiringTest(unittest.TestCase):
+    """F-C1: produccion cifra tokens siempre (clave obligatoria, fail-fast
+    sin red; dobles de PgPool/migrations como T-057)."""
+
+    def _wiring(self, settings, providers=""):
+        from unittest import mock
+        with mock.patch.dict(os.environ,
+                             {"STREAM_META_BACKEND_PROVIDERS": providers}):
+            with mock.patch("backend.db.PgPool"), \
+                 mock.patch("backend.db.run_migrations"):
+                return _production_wiring(settings)
+
+    def _settings(self, **over):
+        kw = dict(host="127.0.0.1", port=0, env=PRODUCTION,
+                  public_base_url="https://backend.example.com",
+                  database_url="postgresql://u@host/db")
+        kw.update(over)
+        return Settings(**kw)
+
+    def test_missing_token_key_fails_fast_naming_it(self):
+        import shutil
+        import tempfile
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        with self.assertRaises(ProdstoresError) as ctx:
+            self._wiring(self._settings(secret_dir=tmp))
+        message = str(ctx.exception)
+        self.assertIn("TOKEN_ENCRYPTION_KEY", message)
+
+    def test_malformed_token_key_fails_fast_without_values(self):
+        sec = _secret_dir(self, {"TOKEN_ENCRYPTION_KEY": "fk-bad-9z"})
+        with self.assertRaises(ProdstoresError) as ctx:
+            self._wiring(self._settings(secret_dir=sec))
+        message = str(ctx.exception)
+        self.assertIn("TOKEN_ENCRYPTION_KEY", message)
+        self.assertNotIn("fk-bad-9z", message)
+
+    def test_tokens_store_is_encrypted_and_production_grade(self):
+        from backend.token_crypto import EncryptedTokenStore
+        sec = _secret_dir(self, {})
+        wiring = self._wiring(self._settings(secret_dir=sec))
+        self.assertIsInstance(wiring["tokens"], EncryptedTokenStore)
+        self.assertFalse(
+            getattr(wiring["tokens"], "DEVELOPMENT_ONLY", False))
 
 
 if __name__ == "__main__":
