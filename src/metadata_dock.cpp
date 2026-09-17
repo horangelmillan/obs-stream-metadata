@@ -1189,6 +1189,76 @@ void MetadataDock::startManagedYouTubeApply()
 			      });
 }
 
+// --- managed Twitch apply ------------------------------------------------
+// Token server-side: el plugin envía solo sesión bearer + {title,
+// broadcaster_id} (la propia identidad Managed, visible en la UI; Twitch
+// la valida contra el token). Sin descripción: Twitch no tiene equivalente.
+
+void MetadataDock::startManagedTwitchApply()
+{
+	using P = meta::Platform;
+	const P p = P::Twitch;
+	const ManagedConn &m = managedAccount(p);
+	if (!m.connected || m.userId.isEmpty()) {
+		finishPlatform(p, false,
+			       meta::userMessage(meta::Outcome::AuthRequired,
+						 p));
+		startApplyNext();
+		return;
+	}
+	setResult(p, true, tr("Updating…"));
+	QJsonObject body;
+	body[QStringLiteral("title")] = titleEdit_->text();
+	body[QStringLiteral("broadcaster_id")] = m.userId;
+	managedAuth_->apiPost(QStringLiteral("/metadata/twitch"), body,
+			      [this, p](const backend_auth::Client::ApiReply &rep) {
+				      obs_log(LOG_INFO,
+					      "managed apply reply: result=%d "
+					      "http=%d",
+					      static_cast<int>(rep.result),
+					      rep.http);
+				      if (!isManaged())
+					      return; // user switched mode
+				      if (rep.result ==
+					  backend_auth::Result::Ok) {
+					      finishPlatform(
+						      p, true,
+						      meta::userMessage(
+							      meta::Outcome::Success,
+							      p));
+					      obs_log(LOG_INFO,
+						      "apply %s: ok (managed)",
+						      meta::platformName(p));
+					      startApplyNext();
+					      return;
+				      }
+				      const meta::Outcome oc =
+					      rep.result ==
+						      backend_auth::Result::
+							      NetworkError
+					      ? meta::Outcome::NetworkError
+					      : meta::classifyStatus(
+						      rep.http == 0 ? -1
+								    : rep.http);
+				      if (scheduleBackoff(p, oc, rep.http))
+					      return;
+				      if (oc == meta::Outcome::AuthRequired) {
+					      ManagedConn &mm =
+						      managedAccount(p);
+					      mm.connected = false;
+					      mm.userId.clear();
+					      mm.display.clear();
+					      setStatus(p,
+							tr("Needs reconnection."));
+					      saveStore(); // drop the stale snapshot
+				      }
+				      finishPlatform(
+					      p, false,
+					      meta::userMessage(oc, p));
+				      startApplyNext();
+			      });
+}
+
 // --- helpers ----------------------------------------------------------
 
 void MetadataDock::setStatus(meta::Platform p, const QString &text)
@@ -1934,11 +2004,11 @@ void MetadataDock::startApplyNext()
 		backoffCount_ = 0;
 	}
 	backoffResume_ = false;
-	// FASE 2.1-C: YouTube in Managed mode authorizes via ManagedConn
-	// (backend token); every other provider×mode still uses its own
-	// Independent account (Twitch/Kick Managed have no Apply path).
+	// Managed Apply (backend token): YouTube (FASE 2.1-C) y Twitch.
+	// Cualquier otro provider×mode sigue con su cuenta Independent
+	// (Kick Managed no tiene Apply path).
 	const bool authorized =
-		(isManaged() && p == P::YouTube)
+		(isManaged() && (p == P::YouTube || p == P::Twitch))
 			? managedAccount(p).connected
 			: account(p).connected;
 	if (!authorized) {
@@ -1951,6 +2021,12 @@ void MetadataDock::startApplyNext()
 	setResult(p, true, tr("Updating…"));
 	const QString title = titleEdit_->text();
 	if (p == P::Twitch) {
+		// Apply Managed Twitch vía backend (token server-side);
+		// Independent sigue directo abajo, intacto.
+		if (isManaged()) {
+			startManagedTwitchApply();
+			return;
+		}
 		QUrl url(QStringLiteral(
 			"https://api.twitch.tv/helix/channels"));
 		QUrlQuery q;

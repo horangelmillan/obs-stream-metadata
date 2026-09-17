@@ -197,5 +197,188 @@ class FlowTest(unittest.TestCase):
         self.assertTrue(revoked)
 
 
+def fake_twitch_meta(method, url, fields):
+    if "helix/channels" in url:
+        assert fields.get("token") == "twat-1", "token Managed server-side"
+        assert fields.get("client_id") == "test-tw-id", "Client-Id server-side"
+        assert set(fields["payload"]) == {"title"}, \
+            "solo titulo (Twitch no tiene descripcion equivalente)"
+        assert "broadcaster_id=18200" in url
+        return 204, {}
+    return fake_twitch_ok(method, url, fields)
+
+
+class MetadataTest(unittest.TestCase):
+    def _connected(self):
+        svc, _ = make_service(fake_twitch_meta)
+        started = svc.start("inst-7", "http://127.0.0.1:8080/cb")
+        txn = svc._transactions.load(started["transaction_id"])
+        result = svc.callback(txn["state"], "code-7")
+        self.assertEqual(result["status"], "connected")
+        return svc
+
+    def test_apply_title_204(self):
+        svc = self._connected()
+        out = svc.apply_metadata("inst-7", {"title": "Nuevo directo",
+                                            "broadcaster_id": "18200",
+                                            "description": "ignorada"})
+        self.assertEqual(out["status"], "updated")
+        self.assertEqual(out["result"],
+                         {"broadcaster_id": "18200", "title": "Nuevo directo"})
+
+    def test_response_carries_no_tokens(self):
+        import json as _json
+        svc = self._connected()
+        out = svc.apply_metadata("inst-7", {"title": "T",
+                                            "broadcaster_id": "18200"})
+        self.assertNotIn("twat-1", _json.dumps(out))
+        self.assertNotIn("twrt-1", _json.dumps(out))
+        self.assertNotIn("secret", _json.dumps(out).lower())
+
+    def test_validation(self):
+        svc = self._connected()
+        for bad in ({"title": "", "broadcaster_id": "18200"},
+                    {"title": "x" * 141, "broadcaster_id": "18200"},
+                    {"title": "T", "broadcaster_id": ""}):
+            with self.assertRaises(AppError) as ctx:
+                svc.apply_metadata("inst-7", bad)
+            self.assertEqual(ctx.exception.code, ErrorCode.INVALID_REQUEST)
+
+    def test_helix_error_mapping(self):
+        cases = [({"status": 400, "message": "Title too long"}, 400,
+                  ErrorCode.INVALID_REQUEST),
+                 ({"status": 401, "message": "Unauthorized"}, 401,
+                  ErrorCode.SESSION_EXPIRED),
+                 ({"status": 403, "message": "Forbidden"}, 403,
+                  ErrorCode.AUTHORIZATION)]
+
+        for payload, status, code in cases:
+            def transport(method, url, fields, _p=payload, _s=status):
+                if "helix/channels" in url:
+                    return _s, _p
+                return fake_twitch_ok(method, url, fields)
+
+            svc, _ = make_service(transport)
+            started = svc.start("inst-7", "http://127.0.0.1:8080/cb")
+            txn = svc._transactions.load(started["transaction_id"])
+            svc.callback(txn["state"], "code-7")
+            with self.assertRaises(AppError) as ctx:
+                svc.apply_metadata("inst-7", {"title": "T",
+                                              "broadcaster_id": "18200"})
+            self.assertEqual(ctx.exception.code, code)
+
+    def test_headers_on_real_path(self):
+        """Bearer + Client-Id viajan en headers (spy sobre urlopen)."""
+        import urllib.request
+        import backend.adapters.twitch as tw_mod
+        captured = {}
+        real_urlopen = urllib.request.urlopen
+
+        class FakeResponse:
+            status = 204
+
+            def read(self):
+                return b""
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def spy(req, timeout=None):
+            headers = {k.lower(): v for k, v in req.header_items()}
+            captured["authorization"] = headers.get("authorization")
+            captured["client-id"] = headers.get("client-id")
+            captured["method"] = req.get_method()
+            return FakeResponse()
+
+        urllib.request.urlopen = spy
+        try:
+            provider = TwitchProvider(FakeSecrets(), "http://x/cb")
+            out = provider.apply_metadata("at-real",
+                                          {"title": "T",
+                                           "broadcaster_id": "18200"})
+        finally:
+            urllib.request.urlopen = real_urlopen
+        self.assertEqual(captured.get("authorization"), "Bearer at-real")
+        self.assertEqual(captured.get("client-id"), "test-tw-id")
+        self.assertEqual(captured.get("method"), "PATCH")
+        self.assertEqual(out, {"broadcaster_id": "18200", "title": "T"})
+
+    def test_not_connected_is_authentication(self):
+        svc, _ = make_service(fake_twitch_meta)
+        with self.assertRaises(AppError) as ctx:
+            svc.apply_metadata("nadie", {"title": "T",
+                                         "broadcaster_id": "18200"})
+        self.assertEqual(ctx.exception.code, ErrorCode.AUTHENTICATION)
+
+
+class HttpMetadataTwitchTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import threading
+        from backend.app import create_app
+        from backend.config import Settings
+        from backend.http_server import serve
+        settings = Settings(host="127.0.0.1", port=0,
+                            public_base_url="http://127.0.0.1:0")
+        provider = TwitchProvider(FakeSecrets(), "http://x/cb",
+                                  transport=fake_twitch_meta)
+        svc = ConnectService(provider, InMemoryOAuthTransactionStore(),
+                             InMemoryConnectionStore(), InMemoryTokenStore())
+        cls.app = create_app(settings=settings, secrets=FakeSecrets(),
+                             providers={"twitch": svc})
+        cls.server = serve(cls.app)
+        cls.port = cls.server.server_address[1]
+        cls.thread = threading.Thread(target=cls.server.serve_forever,
+                                      daemon=True)
+        cls.thread.start()
+        cls.base = f"http://127.0.0.1:{cls.port}"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def _connected_token(self):
+        import json as _json
+        import time as _time
+        import secrets as _secrets
+        import urllib.parse as _up
+        from backend.auth import sign_installation_secret
+        from backend.tests.test_http import _post
+        _, _, body = _post(self.base, "/auth/bootstrap", {})
+        creds = _json.loads(body)
+        ts = int(_time.time())
+        nonce = _secrets.token_hex(16)
+        sig = sign_installation_secret(creds["installation_secret"],
+                                       creds["installation_id"], ts, nonce)
+        _, _, body = _post(self.base, "/auth/session",
+                           {"installation_id": creds["installation_id"],
+                            "timestamp": ts, "nonce": nonce,
+                            "signature": sig})
+        tok = _json.loads(body)["session_token"]
+        h = {"Authorization": "Bearer " + tok}
+        s, _, body = _post(self.base, "/connect/twitch", {}, headers=h)
+        self.assertEqual(s, 200)
+        query = _up.urlparse(_json.loads(body)["authorization_url"]).query
+        state = dict(_up.parse_qsl(query))["state"]
+        self.app.providers["twitch"].callback(state, "code-h")
+        return h
+
+    def test_apply_roundtrip(self):
+        import json as _json
+        from backend.tests.test_http import _post
+        h = self._connected_token()
+        s, _, body = _post(self.base, "/metadata/twitch",
+                           {"title": "Nuevo directo",
+                            "broadcaster_id": "18200"}, headers=h)
+        self.assertEqual(s, 200)
+        payload = _json.loads(body)
+        self.assertEqual(payload["status"], "updated")
+        self.assertNotIn("twat-1", body.decode())
+
+
 if __name__ == "__main__":
     unittest.main()

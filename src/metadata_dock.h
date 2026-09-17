@@ -109,6 +109,9 @@ private slots:
 	// Independent YouTube path untouched.
 	void fetchManagedBroadcasts();
 	void startManagedYouTubeApply();
+	// Apply Managed Twitch via backend (solo título; Twitch no tiene
+	// descripción de stream equivalente). Independent DCF intacto.
+	void startManagedTwitchApply();
 
 private:
 	// One request at a time; replies carry their Op in a property.
