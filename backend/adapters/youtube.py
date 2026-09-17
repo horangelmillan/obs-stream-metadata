@@ -246,21 +246,29 @@ class YouTubeProvider(OAuthProvider):
 
     # --- metadata Managed (FASE 2.1-C) ---
     def list_resources(self, access_token: str) -> list:
-        """Broadcasts editables (activos primero, luego próximos)."""
+        """Broadcasts propios (misma forma probada que Independent: solo
+        filtro `mine`; `broadcastStatus`+`mine` es incompatibleParameters).
+        Etiqueta derivada de status.lifeCycleStatus."""
+        url = BROADCASTS_URL + "?" + urllib.parse.urlencode(
+            {"part": "snippet,status", "mine": "true",
+             "broadcastType": "all", "maxResults": "25"})
+        status, payload = _api("GET", url, access_token, None,
+                               self._transport)
+        if status != 200:
+            raise classify_broadcast_error(payload, status)
         out: list[dict] = []
-        for bstatus in ("active", "upcoming"):
-            url = BROADCASTS_URL + "?" + urllib.parse.urlencode(
-                {"part": "snippet,status", "mine": "true",
-                 "broadcastStatus": bstatus, "maxResults": "25"})
-            status, payload = _api("GET", url, access_token, None,
-                                   self._transport)
-            if status != 200:
-                raise classify_broadcast_error(payload, status)
-            for item in payload.get("items", []):
-                snippet = item.get("snippet", {})
-                out.append({"id": str(item.get("id", "")),
-                            "title": str(snippet.get("title", "")),
-                            "status": bstatus})
+        for item in payload.get("items", []):
+            snippet = item.get("snippet", {})
+            life = str(item.get("status", {}).get("lifeCycleStatus", ""))
+            if life in ("live", "liveStarting"):
+                label = "active"
+            elif life in ("complete", "revoked"):
+                label = "completed"
+            else:
+                label = "upcoming"
+            out.append({"id": str(item.get("id", "")),
+                        "title": str(snippet.get("title", "")),
+                        "status": label})
         return out
 
     def apply_metadata(self, access_token: str, data: dict) -> dict:

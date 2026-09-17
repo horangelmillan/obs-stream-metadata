@@ -31,11 +31,14 @@ def fake_google_meta(method, url, fields):
                      "scope": "https://www.googleapis.com/auth/youtube.force-ssl"}
     if "channels?part=snippet" in url:
         return 200, {"items": [{"id": "UC9z", "snippet": {"title": "Canal 9z"}}]}
-    if "liveBroadcasts" in url and "broadcastStatus" in url:
-        if "broadcastStatus=upcoming" in url:
-            return 200, {"items": []}
+    if "liveBroadcasts" in url and "mine=true" in url:
+        # Un solo filtro (mine): broadcastStatus+mine es incompatibleParameters.
+        assert "broadcastStatus" not in url, "filtros excluyentes combinados"
         return 200, {"items": [
-            {"id": "B-ACT", "snippet": {"title": "En vivo", "categoryId": "20"}}]}
+            {"id": "B-ACT", "snippet": {"title": "En vivo", "categoryId": "20"},
+             "status": {"lifeCycleStatus": "live"}},
+            {"id": "B-UP", "snippet": {"title": "Próximo", "categoryId": "20"},
+             "status": {"lifeCycleStatus": "ready"}}]}
     if "liveBroadcasts" in url and "id=" in url and method == "GET":
         return 200, {"items": [
             {"id": "B-ACT", "snippet": {"title": "En vivo", "description": "vieja",
@@ -144,7 +147,17 @@ class FlowMetadataTest(unittest.TestCase):
         out = svc.list_resources("inst-m")
         self.assertEqual(out["provider"], "youtube")
         self.assertEqual(out["resources"],
-                         [{"id": "B-ACT", "title": "En vivo", "status": "active"}])
+                         [{"id": "B-ACT", "title": "En vivo", "status": "active"},
+                          {"id": "B-UP", "title": "Próximo", "status": "upcoming"}])
+
+    def test_list_incompatible_filters_rejected(self):
+        """Google 400 incompatibleParameters → INVALID_REQUEST (no 502 opaco)."""
+        from backend.adapters.youtube import classify_broadcast_error
+        err = {"error": {"code": 400, "message": "Request contains an invalid "
+                                                 "combination of parameters.",
+                         "errors": [{"reason": "incompatibleParameters"}]}}
+        out = classify_broadcast_error(err, 400)
+        self.assertEqual(out.code, ErrorCode.INVALID_REQUEST)
 
     def test_apply_title_and_description(self):
         svc = self._connected()

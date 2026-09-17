@@ -33,6 +33,7 @@ AUTH_URL = "https://id.twitch.tv/oauth2/authorize"
 TOKEN_URL = "https://id.twitch.tv/oauth2/token"
 REVOKE_URL = "https://id.twitch.tv/oauth2/revoke"
 VALIDATE_URL = "https://id.twitch.tv/oauth2/validate"
+HELIX_CHANNELS_URL = "https://api.twitch.tv/helix/channels"
 
 
 def _post_form(url: str, fields: dict, transport=None) -> tuple[int, dict]:
@@ -65,6 +66,29 @@ def _get_json(url: str, token: str, transport=None) -> tuple[int, dict]:
     except urllib.error.HTTPError as e:
         try:
             return e.code, json.loads(e.read().decode("utf-8", "replace"))
+        except ValueError:
+            return e.code, {"message": "unknown"}
+
+
+def _patch_json(url: str, token: str, client_id: str, payload: dict,
+                transport=None) -> tuple[int, dict]:
+    """PATCH Helix (Bearer + Client-Id + JSON). Transport inyectable."""
+    if transport is not None:
+        return transport("PATCH", url, {"token": token, "client_id": client_id,
+                                        "payload": payload})
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(url, data=data, method="PATCH")
+    req.add_header("Authorization", "Bearer " + token)
+    req.add_header("Client-Id", client_id)
+    req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            raw = r.read().decode("utf-8", "replace")
+            return r.status, json.loads(raw) if raw.strip() else {}
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", "replace")
+        try:
+            return e.code, json.loads(raw) if raw.strip() else {"message": "unknown"}
         except ValueError:
             return e.code, {"message": "unknown"}
 
@@ -194,3 +218,33 @@ class TwitchProvider(OAuthProvider):
                        provider_user_id=user_id,
                        display_name=login,
                        scopes=self.SCOPES)
+
+    # --- metadata Managed (Apply Twitch desde Cloud Run) ---
+    def apply_metadata(self, access_token: str, data: dict) -> dict:
+        """PATCH title vía Helix con token Managed server-side.
+
+        Twitch no tiene descripción de stream equivalente (AGENTS.md §2):
+        `description` se acepta y se ignora. Éxito = 204 sin body.
+        `broadcaster_id` lo envía el plugin (es su propia identidad,
+        visible en "Connected as"; Twitch lo valida contra el token).
+        """
+        title = str(data.get("title", ""))
+        broadcaster_id = str(data.get("broadcaster_id", ""))
+        if not broadcaster_id:
+            raise AppError(ErrorCode.INVALID_REQUEST, "broadcaster required")
+        if not (1 <= len(title) <= 140):
+            raise AppError(ErrorCode.INVALID_REQUEST, "invalid title")
+        cid, _ = self._creds()
+        url = HELIX_CHANNELS_URL + "?" + urllib.parse.urlencode(
+            {"broadcaster_id": broadcaster_id})
+        status, payload = _patch_json(url, access_token, cid,
+                                      {"title": title}, self._transport)
+        if status in (200, 204):
+            return {"broadcaster_id": broadcaster_id, "title": title}
+        if status == 400:
+            raise AppError(ErrorCode.INVALID_REQUEST, "twitch:invalid")
+        if status == 401:
+            raise AppError(ErrorCode.SESSION_EXPIRED, "twitch:auth-expired")
+        if status == 403:
+            raise AppError(ErrorCode.AUTHORIZATION, "twitch:forbidden")
+        raise classify_twitch_error(payload, status)
