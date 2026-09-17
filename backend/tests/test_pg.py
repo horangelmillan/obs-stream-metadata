@@ -138,7 +138,7 @@ class MigrationsTest(unittest.TestCase):
     def test_schema_created_from_scratch(self):
         _, pool = fresh_db(self)
         with pool as conn:
-            self.assertEqual(applied_versions(conn), {"001"})
+            self.assertEqual(applied_versions(conn), {"001", "002"})
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT tablename FROM pg_tables "
