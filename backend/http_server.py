@@ -218,6 +218,17 @@ class _Handler(BaseHTTPRequestHandler):
             service.disconnect(record.installation_id)
             return 200, {"provider": "youtube", "status": "disconnected"}
         parts = path.split("/")
+        # FASE 2.1-C: metadata Managed (tokens server-side; el plugin
+        # envía solo sesión bearer + {broadcast_id,title,description}).
+        if len(parts) == 3 and parts[1] == "metadata":
+            name = parts[2]
+            for key in ("broadcast_id", "title", "description"):
+                if key in body and not isinstance(body[key], str):
+                    raise AppError(ErrorCode.INVALID_REQUEST, f"bad {key}")
+            record = app.check_access(path, self.headers)
+            service = app._service(name)
+            app._limited("auth_install", f"{name}-meta:{record.installation_id}")
+            return 200, service.apply_metadata(record.installation_id, body)
         # /connect/<provider> y /connect/<provider>/disconnect (POST).
         if len(parts) == 3 and parts[1] == "connect":
             name = parts[2]
@@ -275,6 +286,11 @@ class _Handler(BaseHTTPRequestHandler):
                         service = self.server.app._service(parts[2])
                         payload = service.status(record.installation_id)
                         status = 200
+                    elif (len(parts) == 4 and parts[1] == "metadata"
+                          and parts[3] == "broadcasts"):
+                        service = self.server.app._service(parts[2])
+                        payload = service.list_resources(record.installation_id)
+                        status = 200
                     else:
                         raise AppError(ErrorCode.INVALID_REQUEST,
                                        f"unknown path {path}")
@@ -287,8 +303,11 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(status, payload, request_id)
         except AppError as exc:
             status = exc.http_status()
-            self.server.app.log.warning("request error code=%s",
-                                        exc.code.value,
+            # FASE 2.1-C.1: el detail viaja al log (no a la respuesta, que
+            # usa safe_message). Contiene solo enums/códigos de protocolo;
+            # el RedactingFilter sigue redactando cualquier secreto.
+            self.server.app.log.warning("request error code=%s detail=%s",
+                                        exc.code.value, exc.detail,
                                         extra={"requestId": request_id})
             self._send(status, exc.public_body(request_id), request_id)
         except (ConnectionError, BrokenPipeError):

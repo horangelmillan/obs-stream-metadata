@@ -160,6 +160,21 @@ class ConnectService:
             self._connections.save(installation_id, self._provider.provider.value, entry)
             return fresh.access_token
 
+    # --- metadata Managed (FASE 2.1-C) ---
+    def list_resources(self, installation_id: str) -> dict:
+        """Recursos editables con el token Managed server-side (sin
+        secretos en la respuesta: solo IDs/títulos)."""
+        access = self.ensure_fresh_token(installation_id)
+        return {"provider": self._provider.provider.value,
+                "resources": self._provider.list_resources(access)}
+
+    def apply_metadata(self, installation_id: str, data: dict) -> dict:
+        """Aplica metadata con el token Managed server-side."""
+        access = self.ensure_fresh_token(installation_id)
+        result = self._provider.apply_metadata(access, data or {})
+        return {"provider": self._provider.provider.value, "status": "updated",
+                "result": result}
+
     # --- disconnect ---
     def disconnect(self, installation_id: str, revoke_remote: bool = True) -> None:
         """Borrado local siempre; revoke remoto best-effort (F-030)."""

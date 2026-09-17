@@ -54,8 +54,10 @@ struct Data {
 	// only a context. Empty = legacy file without mode.
 	QString connectionMode;
 	// T-051: Managed snapshots (plaintext identity labels, see below).
+	// FASE 2 adds Twitch Managed (same shape, key "managed_twitch").
 	ManagedSnapshot managedYoutube;
 	ManagedSnapshot managedKick;
+	ManagedSnapshot managedTwitch;
 	// T-053: backend this installation belongs to (explicit environment
 	// binding). Plaintext URL, not a secret; empty = legacy file without
 	// binding (treated as mismatch → re-bootstrap, never cross-backend
@@ -68,7 +70,8 @@ struct Data {
 	}
 	bool anyManaged() const
 	{
-		return managedYoutube.connected || managedKick.connected;
+		return managedYoutube.connected || managedKick.connected ||
+		       managedTwitch.connected;
 	}
 };
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+from backend.errors import AppError, ErrorCode
 from backend.kernel import Account, OAuthSession, Provider
 
 
@@ -41,6 +42,17 @@ class OAuthProvider(ABC):
     @abstractmethod
     def fetch_identity(self, access_token: str) -> Account:
         """Identidad mínima para `Connected as` (Account del kernel)."""
+
+    # FASE 2.1-C: metadata Managed (opt-in por proveedor). Defaults que
+    # rechazan: solo el adapter que implemente la operación la soporta.
+    # `data` y retornos son dicts simples sin secretos (solo IDs/títulos).
+    def list_resources(self, access_token: str) -> list:
+        """Recursos editables del usuario (p. ej. broadcasts YouTube)."""
+        raise AppError(ErrorCode.INVALID_REQUEST, "metadata operation unsupported")
+
+    def apply_metadata(self, access_token: str, data: dict) -> dict:
+        """Aplica metadata con el token Managed server-side."""
+        raise AppError(ErrorCode.INVALID_REQUEST, "metadata operation unsupported")
 
 
 class TokenStore(ABC):

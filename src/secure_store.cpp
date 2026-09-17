@@ -253,6 +253,9 @@ bool Store::save(const Data &d)
 	if (d.managedKick.connected)
 		root[QStringLiteral("managed_kick")] =
 			managedToJson(d.managedKick);
+	if (d.managedTwitch.connected)
+		root[QStringLiteral("managed_twitch")] =
+			managedToJson(d.managedTwitch);
 	// T-053: installation↔backend binding (plaintext endpoint). Written
 	// whenever known so a later backend switch is detectable; like the
 	// mode, it survives the load-time reset below.
@@ -313,7 +316,11 @@ bool Store::load(Data &d)
 	const bool kkManaged = managedFromJson(
 		root.value(QStringLiteral("managed_kick")).toObject(),
 		d.managedKick);
-	if (!any && !backendOk && !ytManaged && !kkManaged)
+	// FASE 2: pre-FASE-2 files lack this key (-> disconnected, same rule).
+	const bool twManaged = managedFromJson(
+		root.value(QStringLiteral("managed_twitch")).toObject(),
+		d.managedTwitch);
+	if (!any && !backendOk && !ytManaged && !kkManaged && !twManaged)
 		d = Data();
 	d.connectionMode = modeToString(mode);
 	// T-053: binding parsed after the reset so it is always faithful to

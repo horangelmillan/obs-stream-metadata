@@ -15,6 +15,11 @@ Credentials: client IDs/secrets are typed once into the dock and kept
 in memory + DPAPI-encrypted store (never plaintext, never logged).
 Disconnect revokes server-side (best effort) then wipes local state.
 Apply retries 429/5xx at most twice with backoff (no loops).
+
+UX FASE 1 (Modelo B): the same widgets/state live inside one expandable
+card per platform (single-open). No functional change: checkboxes keep
+their Apply-selection semantics, OAuth/Apply/broadcast/persistence and
+Managed behavior are untouched.
 */
 
 #pragma once
@@ -26,6 +31,7 @@ Apply retries 429/5xx at most twice with backoff (no loops).
 
 class QCheckBox;
 class QComboBox;
+class QFrame;
 class QLabel;
 class QLineEdit;
 class QNetworkAccessManager;
@@ -79,9 +85,30 @@ private slots:
 	void repaintModeStatuses();
 	ManagedConn &managedAccount(meta::Platform p);
 	void initManaged();
+	// UX FASE 1 (Modelo B): single-open cards. Visibility only: closing
+	// a card never disconnects, clears or reselects anything.
+	void toggleCard(meta::Platform p);
+	void updateCardVisibility();
+	void updateCardStyle(meta::Platform p);
+	void updateAllCardStyles();
+	// FASE 1.1 progressive disclosure: visibility only, derived from
+	// the existing Account/ManagedConn state. Never a new availability
+	// model: usable == connected in the active mode.
+	bool platformUsable(meta::Platform p);
+	bool anyUsable();
+	void refreshContentVisibility();
+	// FASE 1.1 mode-switch safety: cancel in-flight connect flows so a
+	// late reply cannot connect in the previous context. Never wipes
+	// stored accounts, never revokes.
+	void cancelPendingForModeSwitch();
+	bool eventFilter(QObject *watched, QEvent *event) override;
 	QString managedAuthError(meta::Platform p, backend_auth::Result r, int);
 	QString managedApiError(meta::Platform p,
 				const backend_auth::Client::ApiReply &rep);
+	// FASE 2.1-C: Apply Managed YouTube via backend (tokens server-side).
+	// Independent YouTube path untouched.
+	void fetchManagedBroadcasts();
+	void startManagedYouTubeApply();
 
 private:
 	// One request at a time; replies carry their Op in a property.
@@ -186,11 +213,36 @@ private:
 	QLabel *ytResult_ = nullptr;
 	QLabel *kkResult_ = nullptr;
 	QLabel *generalMsg_ = nullptr;
+	// UX FASE 1 (Modelo B): one card per platform. The functional
+	// widgets above are reparented into these containers; no new state.
+	QFrame *twCard_ = nullptr;
+	QFrame *ytCard_ = nullptr;
+	QFrame *kkCard_ = nullptr;
+	QWidget *twDetail_ = nullptr;
+	QWidget *ytDetail_ = nullptr;
+	QWidget *kkDetail_ = nullptr;
+	QPushButton *twHeader_ = nullptr;
+	QPushButton *ytHeader_ = nullptr;
+	QPushButton *kkHeader_ = nullptr;
+	// FASE 1.2: no separate close buttons. The header alone expands /
+	// collapses (chevron shows the state); the Apply check stays an
+	// independent control so header-click and check-click never mix.
+	// FASE 1.1: Content widgets need handles for disclosure (same
+	// objects as before, only shown/hidden as a group).
+	QLabel *titleLabel_ = nullptr;
+	QLabel *descLabel_ = nullptr;
+	QLabel *descCaps_ = nullptr;
+	QLabel *bcLabel_ = nullptr;
+	// FASE 1.1 note, kept hidden since FASE 2 (Twitch connects in
+	// Managed like the other platforms; see refreshContentVisibility).
+	QLabel *twManagedNote_ = nullptr;
+	std::optional<meta::Platform> expanded_; // none = all cards closed
 	QNetworkAccessManager *net_ = nullptr;
 	// T-041: connection mode (ADR-012). Global for the dock: a single
 	// plugin installation uses one App-Identity source. Defaults to
 	// Independent (all pre-T-041 behavior). T-048 wires Managed via
-	// backend_auth (YouTube/Kick); Twitch stays direct-only.
+	// backend_auth (YouTube/Kick); FASE 2 adds Twitch Managed
+	// (Independent DCF untouched).
 	meta::ConnectionMode mode_ = meta::defaultConnectionMode();
 	QComboBox *modeCombo_ = nullptr;
 	QLabel *credTitle_ = nullptr;
@@ -203,6 +255,7 @@ private:
 	QString managedBaseUrl_;
 	ManagedConn mYt_;
 	ManagedConn mKk_;
+	ManagedConn mTw_;
 	QTimer *managedPollTimer_ = nullptr;
 	meta::Platform managedPollFor_ = meta::Platform::YouTube;
 	int managedPollsLeft_ = 0;
@@ -247,4 +300,11 @@ private:
 	void startRevoke(meta::Platform p, const Account &snapshot);
 	void sendNextRevoke();
 	void wipeLocal(meta::Platform p);
+	// Card widget accessors (no logic, only lookup).
+	QFrame *cardFor(meta::Platform p) const;
+	QWidget *detailFor(meta::Platform p) const;
+	QPushButton *headerFor(meta::Platform p) const;
+	QCheckBox *checkFor(meta::Platform p) const;
+	QLabel *statusFor(meta::Platform p) const;
+	QLabel *resultFor(meta::Platform p) const;
 };

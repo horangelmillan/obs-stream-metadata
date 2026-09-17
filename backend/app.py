@@ -9,6 +9,7 @@ Producción: mismo wiring con SecretStore/TokenStore/SessionStore productivos
 from __future__ import annotations
 
 from backend.adapters.kick import KickProvider
+from backend.adapters.twitch import TwitchProvider
 from backend.adapters.youtube import YouTubeProvider
 from backend.auth import AuthService
 from backend.config import load_settings
@@ -34,8 +35,9 @@ def create_app(secrets=None, sessions=None, limiter=None,
                ready_check=None, settings=None, providers=None,
                installations=None, auth_service=None,
                transactions=None, connections=None, tokens=None,
-               enable_youtube: bool = False,
-               enable_kick: bool = False) -> BackendApp:
+                enable_youtube: bool = False,
+                enable_kick: bool = False,
+                enable_twitch: bool = False) -> BackendApp:
     settings = settings or load_settings()
     secrets = secrets or EnvSecretStore()
     sessions = sessions or InMemorySessionStore()
@@ -67,6 +69,14 @@ def create_app(secrets=None, sessions=None, limiter=None,
             providers["kick"] = ConnectService(
                 KickProvider(secrets, redirect), *shared)
             redirects["kick"] = redirect
+        if enable_twitch:
+            # FASE 2: auth-code flow (sin PKCE: ver adapter). Mismo
+            # loopback que YouTube en dev; https prod en producción.
+            redirect = _loopback_base(settings.public_base_url) + \
+                "/connect/twitch/callback"
+            providers["twitch"] = ConnectService(
+                TwitchProvider(secrets, redirect), *shared)
+            redirects["twitch"] = redirect
     else:
         redirects = {name: "" for name in providers}
     # T-053: entorno explícito. Producción con piezas de grado-dev o con
@@ -133,6 +143,7 @@ def _production_wiring(settings):
     required: dict[str, tuple[str, ...]] = {
         "youtube": YouTubeProvider.required_secret_names,
         "kick": KickProvider.required_secret_names,
+        "twitch": TwitchProvider.required_secret_names,
     }
     missing = [f"{provider}/{name}"
                for provider in sorted(wanted)
@@ -162,7 +173,7 @@ def main() -> None:
     from backend.environment import PRODUCTION
     settings = load_settings()
     # DEV-only: lista separada por comas para levantar providers en local
-    # (p. ej. "youtube,kick"). Producción lo decide el despliegue (T-054).
+    # (p. ej. "youtube,kick,twitch"). Producción lo decide el despliegue.
     wanted = {p.strip().lower()
               for p in _os.environ.get("STREAM_META_BACKEND_PROVIDERS", "")
               .split(",") if p.strip()}
@@ -175,13 +186,15 @@ def main() -> None:
                          transactions=wiring["transactions"],
                          connections=wiring["connections"],
                          tokens=wiring["tokens"],
-                         limiter=wiring["limiter"],
-                         enable_youtube="youtube" in wanted,
-                         enable_kick="kick" in wanted)
+                          limiter=wiring["limiter"],
+                          enable_youtube="youtube" in wanted,
+                          enable_kick="kick" in wanted,
+                          enable_twitch="twitch" in wanted)
     else:
         app = create_app(settings=settings,
                          enable_youtube="youtube" in wanted,
-                         enable_kick="kick" in wanted)
+                         enable_kick="kick" in wanted,
+                         enable_twitch="twitch" in wanted)
     log = get_logger("main", app.settings.log_level)
     server = serve(app)
     log.info("listening host=%s port=%s env=%s",

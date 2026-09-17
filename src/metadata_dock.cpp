@@ -15,7 +15,9 @@ secrets in memory + DPAPI-encrypted store, never plaintext/printed/logged.
 #include <QComboBox>
 #include <QCryptographicHash>
 #include <QDesktopServices>
+#include <QEvent>
 #include <QFrame>
+#include <QHBoxLayout>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -56,6 +58,32 @@ QJsonObject replyJson(QNetworkReply *reply)
 	return QJsonDocument::fromJson(reply->readAll()).object();
 }
 
+// Forward: defined with the Managed wiring below; needed by the
+// constructor's build-identity log (FASE 2.1-B).
+bool managedSupported(meta::Platform p);
+
+// FASE 1.1: platform glyphs as header icons (local Qt only: no downloads,
+// no assets). Byte escapes keep them encoding-independent (the build sets
+// no /utf-8 flag, so raw emoji literals would be codepage-dependent).
+QString platformIcon(meta::Platform p)
+{
+	if (p == meta::Platform::Twitch)
+		return QString::fromUtf8("\xF0\x9F\x8E\xAE"); // gamepad
+	if (p == meta::Platform::YouTube)
+		return QString::fromUtf8("\xE2\x96\xB6\xEF\xB8\x8F"); // play
+	return QString::fromUtf8("\xF0\x9F\x9F\xA2"); // green circle
+}
+
+QString cardTitle(meta::Platform p, bool open)
+{
+	// ASCII chevron: guaranteed to render in any font (a previous
+	// Unicode close glyph showed as an empty square in OBS).
+	return QStringLiteral("%1 %2 %3")
+		.arg(platformIcon(p),
+		     QString::fromLatin1(meta::platformName(p)),
+		     QString::fromLatin1(open ? "v" : ">"));
+}
+
 } // namespace
 
 MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
@@ -84,18 +112,65 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 	QLabel *platTitle = new QLabel(tr("Platforms"), this);
 	top->addWidget(platTitle);
 
-	auto addRow = [&](meta::Platform p, const QString &name) {
-		QCheckBox *check = new QCheckBox(name, this);
+	// UX FASE 1 (Modelo B): one card per platform. The functional
+	// widgets (check/status/buttons) are the same objects as before,
+	// only reparented: header row (open/close + hover Apply check) on
+	// top, detail below (hidden unless expanded). Single-open via
+	// expanded_ (see toggleCard/updateCardVisibility).
+	QVBoxLayout *twDetailLayout = nullptr;
+	QVBoxLayout *ytDetailLayout = nullptr;
+	QVBoxLayout *kkDetailLayout = nullptr;
+	auto addCard = [&](meta::Platform p, const QString &name) {
+		QFrame *card = new QFrame(this);
+		card->setFrameShape(QFrame::StyledPanel);
+		QVBoxLayout *cardLayout = new QVBoxLayout(card);
+		cardLayout->setContentsMargins(8, 8, 8, 8);
+		cardLayout->setSpacing(4);
+		QHBoxLayout *headerRow = new QHBoxLayout();
+		headerRow->setContentsMargins(0, 0, 0, 0);
+		QPushButton *header = new QPushButton(card);
+		// Text set by updateCardVisibility() (icon + name + chevron).
+		header->setToolTip(tr("Open %1 settings").arg(name));
+		header->setAccessibleName(tr("%1 settings").arg(name));
+		// The Apply-selection checkbox itself (same semantics as
+		// before: onApply() reads isChecked()). Text cleared: the
+		// header already names the platform. Visible on hover or
+		// when the card is expanded; the selection persists.
+		QCheckBox *check = new QCheckBox(card);
 		check->setChecked(true);
-		QLabel *status = new QLabel(tr("Not connected"), this);
-		QPushButton *connBtn = new QPushButton(tr("Connect"), this);
+		check->setToolTip(tr("Include %1 in Apply").arg(name));
+		check->setAccessibleName(
+			tr("Include %1 in Apply").arg(name));
+		check->setVisible(false);
+		// FASE 1.2: no separate close button. The header is the only
+		// expand/collapse control; the check stays independent so a
+		// header click never changes isChecked() and a check click
+		// never expands/collapses the card.
+		headerRow->addWidget(header, 1);
+		headerRow->addWidget(check);
+		cardLayout->addLayout(headerRow);
+		QWidget *detail = new QWidget(card);
+		QVBoxLayout *detailLayout = new QVBoxLayout(detail);
+		detailLayout->setContentsMargins(0, 4, 0, 0);
+		detail->setVisible(false);
+		cardLayout->addWidget(detail);
+		card->installEventFilter(this);
+		top->addWidget(card);
+		connect(header, &QPushButton::clicked, this,
+			[this, p]() { toggleCard(p); });
+		QLabel *status = new QLabel(tr("Not connected"), detail);
+		QPushButton *connBtn =
+			new QPushButton(tr("Connect"), detail);
 		QPushButton *disc =
-			new QPushButton(tr("Disconnect"), this);
-		top->addWidget(check);
-		top->addWidget(status);
-		top->addWidget(connBtn);
-		top->addWidget(disc);
+			new QPushButton(tr("Disconnect"), detail);
+		detailLayout->addWidget(status);
+		detailLayout->addWidget(connBtn);
+		detailLayout->addWidget(disc);
 		if (p == meta::Platform::Twitch) {
+			twCard_ = card;
+			twHeader_ = header;
+			twDetail_ = detail;
+			twDetailLayout = detailLayout;
 			twCheck_ = check;
 			twStatus_ = status;
 			twConnect_ = connBtn;
@@ -105,6 +180,10 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 			connect(disc, &QPushButton::clicked, this,
 				&MetadataDock::onDisconnectTwitch);
 		} else if (p == meta::Platform::YouTube) {
+			ytCard_ = card;
+			ytHeader_ = header;
+			ytDetail_ = detail;
+			ytDetailLayout = detailLayout;
 			ytCheck_ = check;
 			ytStatus_ = status;
 			ytConnect_ = connBtn;
@@ -114,6 +193,10 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 			connect(disc, &QPushButton::clicked, this,
 				&MetadataDock::onDisconnectYouTube);
 		} else {
+			kkCard_ = card;
+			kkHeader_ = header;
+			kkDetail_ = detail;
+			kkDetailLayout = detailLayout;
 			kkCheck_ = check;
 			kkStatus_ = status;
 			kkConnect_ = connBtn;
@@ -124,9 +207,9 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 				&MetadataDock::onDisconnectKick);
 		}
 	};
-	addRow(meta::Platform::Twitch, QStringLiteral("Twitch"));
-	addRow(meta::Platform::YouTube, QStringLiteral("YouTube"));
-	addRow(meta::Platform::Kick, QStringLiteral("Kick"));
+	addCard(meta::Platform::Twitch, QStringLiteral("Twitch"));
+	addCard(meta::Platform::YouTube, QStringLiteral("YouTube"));
+	addCard(meta::Platform::Kick, QStringLiteral("Kick"));
 
 	QLabel *credTitle =
 		new QLabel(tr("App credentials (register your own app per "
@@ -134,7 +217,9 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 			   this);
 	credTitle_ = credTitle;
 	top->addWidget(credTitle);
-	twIdEdit_ = new QLineEdit(this);
+	// Credential fields live inside their platform card detail (same
+	// objects, same refreshModeUi() visibility rules as before).
+	twIdEdit_ = new QLineEdit(twDetail_);
 	twIdEdit_->setPlaceholderText(tr("Twitch Client ID"));
 	// T-047: distributed ID (public) prefilled when the build provides
 	// one; the user can still override it (BYO/dev preserved).
@@ -144,21 +229,21 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 		if (!distributed.isEmpty())
 			twIdEdit_->setText(distributed);
 	}
-	top->addWidget(twIdEdit_);
-	ytIdEdit_ = new QLineEdit(this);
+	twDetailLayout->addWidget(twIdEdit_);
+	ytIdEdit_ = new QLineEdit(ytDetail_);
 	ytIdEdit_->setPlaceholderText(tr("YouTube Client ID"));
-	top->addWidget(ytIdEdit_);
-	ytSecretEdit_ = new QLineEdit(this);
+	ytDetailLayout->addWidget(ytIdEdit_);
+	ytSecretEdit_ = new QLineEdit(ytDetail_);
 	ytSecretEdit_->setPlaceholderText(tr("YouTube Client Secret"));
 	ytSecretEdit_->setEchoMode(QLineEdit::Password);
-	top->addWidget(ytSecretEdit_);
-	kkIdEdit_ = new QLineEdit(this);
+	ytDetailLayout->addWidget(ytSecretEdit_);
+	kkIdEdit_ = new QLineEdit(kkDetail_);
 	kkIdEdit_->setPlaceholderText(tr("Kick Client ID"));
-	top->addWidget(kkIdEdit_);
-	kkSecretEdit_ = new QLineEdit(this);
+	kkDetailLayout->addWidget(kkIdEdit_);
+	kkSecretEdit_ = new QLineEdit(kkDetail_);
 	kkSecretEdit_->setPlaceholderText(tr("Kick Client Secret"));
 	kkSecretEdit_->setEchoMode(QLineEdit::Password);
-	top->addWidget(kkSecretEdit_);
+	kkDetailLayout->addWidget(kkSecretEdit_);
 	QLabel *credNote = new QLabel(
 		tr("Typed once: kept in memory and stored encrypted on this "
 		   "PC (DPAPI). Never logged, never shared."),
@@ -179,6 +264,7 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 	QLabel *titleLabel = new QLabel(tr("Title"), this);
 	titleEdit_ = new QLineEdit(this);
 	titleLabel->setBuddy(titleEdit_);
+	titleLabel_ = titleLabel;
 	top->addWidget(titleLabel);
 	top->addWidget(titleEdit_);
 
@@ -188,6 +274,7 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 		tr("YouTube only — Twitch and Kick have no equivalent "
 		   "stream description."));
 	descLabel->setBuddy(descEdit_);
+	descLabel_ = descLabel;
 	top->addWidget(descLabel);
 	top->addWidget(descEdit_);
 	QLabel *descCaps = new QLabel(
@@ -195,34 +282,65 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 		   "available"),
 		this);
 	descCaps->setWordWrap(true);
+	descCaps_ = descCaps;
 	top->addWidget(descCaps);
 
-	QLabel *bcLabel = new QLabel(tr("YouTube broadcast"), this);
-	broadcastCombo_ = new QComboBox(this);
+	// YouTube broadcast controls live inside the YouTube card detail
+	// (same objects: currentData storage and clear() behavior unchanged).
+	QLabel *bcLabel = new QLabel(tr("YouTube broadcast"), ytDetail_);
+	bcLabel_ = bcLabel;
+	broadcastCombo_ = new QComboBox(ytDetail_);
 	bcLabel->setBuddy(broadcastCombo_);
-	refreshButton_ = new QPushButton(tr("Refresh broadcasts"), this);
+	refreshButton_ = new QPushButton(tr("Refresh broadcasts"), ytDetail_);
 	connect(refreshButton_, &QPushButton::clicked, this,
 		&MetadataDock::onRefreshBroadcasts);
-	top->addWidget(bcLabel);
-	top->addWidget(broadcastCombo_);
-	top->addWidget(refreshButton_);
+	ytDetailLayout->addWidget(bcLabel);
+	ytDetailLayout->addWidget(broadcastCombo_);
+	ytDetailLayout->addWidget(refreshButton_);
 
-	devicePrompt_ = new QLabel(this);
+	// Twitch device-flow prompt lives inside the Twitch card detail
+	// (same show/hide call sites as before).
+	devicePrompt_ = new QLabel(twDetail_);
 	devicePrompt_->setWordWrap(true);
 	devicePrompt_->setVisible(false);
-	top->addWidget(devicePrompt_);
+	twDetailLayout->addWidget(devicePrompt_);
+	// FASE 1.1 note, retired in FASE 2 (Twitch connects in Managed;
+	// kept hidden — see refreshContentVisibility).
+	twManagedNote_ = new QLabel(
+		tr("Twitch is not available in Managed mode (direct only). "
+		   "Switch to Independent to connect it."),
+		twDetail_);
+	twManagedNote_->setWordWrap(true);
+	twManagedNote_->setVisible(false);
+	twDetailLayout->addWidget(twManagedNote_);
 
 	applyButton_ = new QPushButton(tr("Apply changes"), this);
+	// FASE 1.1: Apply is the primary action: positive-action green,
+	// readable on the dark OBS theme, neutral gray when disabled.
+	applyButton_->setStyleSheet(QStringLiteral(
+		"QPushButton { background-color: #2da44e; color: white; "
+		"border-radius: 6px; padding: 8px; font-weight: bold; } "
+		"QPushButton:hover { background-color: #36b558; } "
+		"QPushButton:disabled { background-color: #3a3a3a; "
+		"color: #8a8a8a; }"));
 	connect(applyButton_, &QPushButton::clicked, this,
 		&MetadataDock::onApply);
 	top->addWidget(applyButton_);
 
-	twResult_ = new QLabel(QStringLiteral("Twitch —"), this);
-	ytResult_ = new QLabel(QStringLiteral("YouTube —"), this);
-	kkResult_ = new QLabel(QStringLiteral("Kick —"), this);
-	top->addWidget(twResult_);
-	top->addWidget(ytResult_);
-	top->addWidget(kkResult_);
+	// Per-platform results live inside their card detail: no global
+	// RESULTS section. setStatus()/setResult() call sites unchanged.
+	twResult_ = new QLabel(QStringLiteral("Twitch —"), twDetail_);
+	ytResult_ = new QLabel(QStringLiteral("YouTube —"), ytDetail_);
+	kkResult_ = new QLabel(QStringLiteral("Kick —"), kkDetail_);
+	twResult_->setWordWrap(true);
+	ytResult_->setWordWrap(true);
+	kkResult_->setWordWrap(true);
+	twDetailLayout->addWidget(twResult_);
+	ytDetailLayout->addWidget(ytResult_);
+	kkDetailLayout->addWidget(kkResult_);
+	// generalMsg_ stays global on purpose: validation messages and
+	// broadcast counts have no single owning platform, and the UX
+	// definitions require no invented mapping.
 	generalMsg_ = new QLabel(this);
 	generalMsg_->setWordWrap(true);
 	top->addWidget(generalMsg_);
@@ -252,8 +370,14 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 	loadStore();
 	refreshModeUi();
 	initManaged();
-	obs_log(LOG_INFO, "dock ready (mode=%s)",
-		meta::connectionModeName(mode_));
+	// FASE 2.1-B: non-invasive build identity (public endpoint + feature
+	// flags only, never secrets/tokens): lets any OBS log prove which
+	// backend and provider×mode matrix the loaded DLL was built with.
+	obs_log(LOG_INFO, "dock ready (mode=%s, managed-backend=%s, "
+			  "twitch-managed=%s)",
+		meta::connectionModeName(mode_),
+		qPrintable(managedBaseUrl_),
+		managedSupported(meta::Platform::Twitch) ? "yes" : "no");
 }
 
 MetadataDock::~MetadataDock()
@@ -279,11 +403,11 @@ meta::ConnectionMode MetadataDock::modeFromCombo() const
 void MetadataDock::onModeChanged(int)
 {
 	// Selecting a mode never moves or deletes credentials/tokens: it only
-	// changes the context future Connect flows will use (T-048 wires
-	// Managed). A pending Managed poll belongs to the old selection and
-	// is abandoned (backend transaction expires on its own TTL).
-	if (managedPollTimer_)
-		managedPollTimer_->stop();
+	// changes the context future Connect flows will use. A pending
+	// connect flow belongs to the old context and is cancelled safely
+	// (stored accounts untouched); the backend transaction behind a
+	// Managed poll expires on its own TTL.
+	cancelPendingForModeSwitch();
 	mode_ = modeFromCombo();
 	refreshModeUi();
 	saveStore();
@@ -305,15 +429,286 @@ void MetadataDock::refreshModeUi()
 	credNote_->setVisible(!managed);
 	managedNote_->setVisible(managed);
 	repaintModeStatuses();
+	updateAllCardStyles();
+	refreshContentVisibility();
+}
+
+// --- platform cards (UX FASE 1, Modelo B; visibility/style only) --------
+
+QFrame *MetadataDock::cardFor(meta::Platform p) const
+{
+	if (p == meta::Platform::Twitch)
+		return twCard_;
+	if (p == meta::Platform::YouTube)
+		return ytCard_;
+	return kkCard_;
+}
+
+QWidget *MetadataDock::detailFor(meta::Platform p) const
+{
+	if (p == meta::Platform::Twitch)
+		return twDetail_;
+	if (p == meta::Platform::YouTube)
+		return ytDetail_;
+	return kkDetail_;
+}
+
+QPushButton *MetadataDock::headerFor(meta::Platform p) const
+{
+	if (p == meta::Platform::Twitch)
+		return twHeader_;
+	if (p == meta::Platform::YouTube)
+		return ytHeader_;
+	return kkHeader_;
+}
+
+QCheckBox *MetadataDock::checkFor(meta::Platform p) const
+{
+	if (p == meta::Platform::Twitch)
+		return twCheck_;
+	if (p == meta::Platform::YouTube)
+		return ytCheck_;
+	return kkCheck_;
+}
+
+QLabel *MetadataDock::statusFor(meta::Platform p) const
+{
+	if (p == meta::Platform::Twitch)
+		return twStatus_;
+	if (p == meta::Platform::YouTube)
+		return ytStatus_;
+	return kkStatus_;
+}
+
+QLabel *MetadataDock::resultFor(meta::Platform p) const
+{
+	if (p == meta::Platform::Twitch)
+		return twResult_;
+	if (p == meta::Platform::YouTube)
+		return ytResult_;
+	return kkResult_;
+}
+
+void MetadataDock::toggleCard(meta::Platform p)
+{
+	// Single-open: clicking the open card closes it, clicking another
+	// one switches. Never touches connection, credentials, broadcast
+	// or Apply selection state.
+	if (expanded_.has_value() && *expanded_ == p)
+		expanded_.reset();
+	else
+		expanded_ = p;
+	updateCardVisibility();
+}
+
+void MetadataDock::updateCardVisibility()
+{
+	using P = meta::Platform;
+	for (P p : {P::Twitch, P::YouTube, P::Kick}) {
+		const bool open =
+			expanded_.has_value() && *expanded_ == p;
+		if (detailFor(p))
+			detailFor(p)->setVisible(open);
+		if (headerFor(p)) {
+			headerFor(p)->setText(cardTitle(p, open));
+			headerFor(p)->setToolTip(
+				open ? tr("Close %1 settings")
+					       .arg(meta::platformName(p))
+				     : tr("Open %1 settings")
+					       .arg(meta::platformName(p)));
+		}
+		// The Apply check is visible when open AND the platform is
+		// usable; when closed it only appears on hover (eventFilter).
+		// Either way isChecked() is preserved.
+		if (checkFor(p))
+			checkFor(p)->setVisible(open && platformUsable(p));
+	}
+}
+
+// FASE 1.1 progressive disclosure. Usable == connected in the active
+// mode, derived from the existing state objects only. YouTube needs no
+// special case here: a missing broadcast is already handled inside
+// Apply (auto-list) and reported per-platform, so no new availability
+// concept is introduced.
+bool MetadataDock::platformUsable(meta::Platform p)
+{
+	if (isManaged())
+		return managedAccount(p).connected;
+	return account(p).connected;
+}
+
+bool MetadataDock::anyUsable()
+{
+	using P = meta::Platform;
+	return platformUsable(P::Twitch) || platformUsable(P::YouTube) ||
+	       platformUsable(P::Kick);
+}
+
+void MetadataDock::refreshContentVisibility()
+{
+	// Nothing usable: Content + Apply have no target yet, hide them.
+	const bool any = anyUsable();
+	if (titleLabel_)
+		titleLabel_->setVisible(any);
+	titleEdit_->setVisible(any);
+	if (descLabel_)
+		descLabel_->setVisible(any);
+	descEdit_->setVisible(any);
+	if (descCaps_)
+		descCaps_->setVisible(any);
+	applyButton_->setVisible(any);
+	// Broadcast depends on the YouTube connection, not on the card
+	// being open: hide it while YouTube is not connected.
+	const bool yt = platformUsable(meta::Platform::YouTube);
+	if (bcLabel_)
+		bcLabel_->setVisible(yt);
+	broadcastCombo_->setVisible(yt);
+	refreshButton_->setVisible(yt);
+	// FASE 2: Twitch connects/disconnects in Managed like the other
+	// platforms (own ManagedConn state, no shared Independent account).
+	// The legacy "not available" note stays hidden.
+	twConnect_->setVisible(true);
+	twDisconnect_->setVisible(true);
+	if (twManagedNote_)
+		twManagedNote_->setVisible(false);
+	updateCardVisibility();
+}
+
+void MetadataDock::updateCardStyle(meta::Platform p)
+{
+	QFrame *card = cardFor(p);
+	const QLabel *status = statusFor(p);
+	const QLabel *result = resultFor(p);
+	if (!card || !status || !result)
+		return;
+	// Same sources the labels already show; no new state system.
+	bool connected = false;
+	if (isManaged())
+		connected = managedAccount(p).connected;
+	else
+		connected = account(p).connected;
+	const QString st = status->text();
+	const QString rs = result->text();
+	const bool failed =
+		st.startsWith(tr("Error")) ||
+		st == tr("Needs reconnection.") ||
+		rs.contains(QStringLiteral(" ✗ "));
+	const char *brand = "#8a8a8a";
+	const char *tint = "transparent";
+	if (p == meta::Platform::Twitch) {
+		brand = "#9146FF";
+		tint = "rgba(145, 70, 255, 36)";
+	} else if (p == meta::Platform::YouTube) {
+		brand = "#FF0000";
+		tint = "rgba(255, 0, 0, 28)";
+	} else {
+		brand = "#35c759";
+		tint = "rgba(53, 199, 89, 30)";
+	}
+	QString border = QStringLiteral("#5a5a5a");
+	QString bg = QStringLiteral("transparent");
+	if (failed) {
+		border = QStringLiteral("#e5484d");
+		bg = QStringLiteral("rgba(229, 72, 77, 30)");
+	} else if (connected) {
+		border = QString::fromLatin1(brand);
+		bg = QString::fromLatin1(tint);
+	}
+	card->setStyleSheet(
+		QStringLiteral("QFrame { border: 2px solid %1; "
+			       "border-radius: 10px; background: %2; }")
+			.arg(border, bg));
+}
+
+void MetadataDock::updateAllCardStyles()
+{
+	using P = meta::Platform;
+	for (P p : {P::Twitch, P::YouTube, P::Kick})
+		updateCardStyle(p);
+}
+
+bool MetadataDock::eventFilter(QObject *watched, QEvent *event)
+{
+	// Hover Apply check on closed cards. Never connects/disconnects:
+	// it only shows the existing selection checkbox.
+	meta::Platform p = meta::Platform::Twitch;
+	bool isCard = false;
+	if (watched == twCard_) {
+		p = meta::Platform::Twitch;
+		isCard = true;
+	} else if (watched == ytCard_) {
+		p = meta::Platform::YouTube;
+		isCard = true;
+	} else if (watched == kkCard_) {
+		p = meta::Platform::Kick;
+		isCard = true;
+	}
+	if (isCard && event) {
+		const bool open =
+			expanded_.has_value() && *expanded_ == p;
+		if (event->type() == QEvent::Enter) {
+			// Hover check only when the platform can take part
+			// in Apply; never connects/disconnects anything.
+			if (platformUsable(p) && checkFor(p))
+				checkFor(p)->setVisible(true);
+		} else if (event->type() == QEvent::Leave) {
+			if (!open && checkFor(p))
+				checkFor(p)->setVisible(false);
+		}
+	}
+	return QWidget::eventFilter(watched, event);
+}
+
+// FASE 1.1: cancel in-flight Independent connect flows on mode switch so
+// a late reply/callback cannot connect in the previous context. Only
+// connect-phase ops are invalidated (Apply/refresh traffic keeps its own
+// bounded lifecycle). Stored accounts are never wiped, nothing revoked.
+void MetadataDock::cancelPendingForModeSwitch()
+{
+	if (managedPollTimer_)
+		managedPollTimer_->stop();
+	twPollsLeft_ = 0; // onTwitchPollTimeout re-checks pending_/count
+	if (callbackServer_) {
+		// Late browser callbacks find no listener and are ignored.
+		callbackServer_->close();
+		callbackServer_->deleteLater();
+		callbackServer_ = nullptr;
+	}
+	callbackDone_ = false;
+	switch (pending_) {
+	case Op::TwDevice:
+	case Op::TwPoll:
+	case Op::TwValidate:
+	case Op::YtExchange:
+	case Op::YtChannels:
+	case Op::KkExchange:
+	case Op::KkChannels:
+		pending_ = Op::None;
+		devicePrompt_->setVisible(false);
+		// Repaint from the real state: a finished connection was
+		// never touched; a fresh attempt had already cleared its own
+		// record when it started, so this only neutralizes the UI.
+		repaintModeStatuses();
+		break;
+	default:
+		break;
+	}
 }
 
 // --- managed wiring (T-048; Independent handlers untouched) --------------
 
 namespace {
 
-// DEV default only: local backend under test. Overridable (DEV-only) via
-// STREAM_META_BACKEND_URL. No production URL is bundled in T-048.
+// Build-time default (FASE 1): dev builds bundle the local backend;
+// distribuible builds pass -DSTREAM_META_BACKEND_URL=<prod https URL>.
+// Precedence at runtime: STREAM_META_BACKEND_URL env (DEV-only) wins,
+// otherwise this bundled default. The URL is a public endpoint, never a
+// secret; installation secrets stay DPAPI-bound per backend (T-053).
+#ifdef STREAM_META_BACKEND_URL_DEFAULT
+const char *kManagedDefaultBaseUrl = STREAM_META_BACKEND_URL_DEFAULT;
+#else
 const char *kManagedDefaultBaseUrl = "http://127.0.0.1:8080";
+#endif
 
 QString providerSlug(meta::Platform p)
 {
@@ -324,11 +719,12 @@ QString providerSlug(meta::Platform p)
 	return QStringLiteral("twitch");
 }
 
-// Backend-backed providers in T-048 (YouTube T-045, Kick T-046). Twitch has
-// no backend service: representable, not functional (§12 of the task).
+// Backend-backed providers: YouTube (T-045), Kick (T-046), Twitch FASE 2
+// (auth-code via backend; Independent DCF untouched).
 bool managedSupported(meta::Platform p)
 {
-	return p == meta::Platform::YouTube || p == meta::Platform::Kick;
+	return p == meta::Platform::YouTube || p == meta::Platform::Kick ||
+	       p == meta::Platform::Twitch;
 }
 
 } // namespace
@@ -355,7 +751,9 @@ MetadataDock::MetadataDock::ManagedConn &MetadataDock::managedAccount(meta::Plat
 {
 	if (p == meta::Platform::YouTube)
 		return mYt_;
-	return mKk_;
+	if (p == meta::Platform::Kick)
+		return mKk_;
+	return mTw_;
 }
 
 void MetadataDock::repaintModeStatuses()
@@ -364,7 +762,8 @@ void MetadataDock::repaintModeStatuses()
 	// other mode's accounts are never read here (§17: no mixing).
 	if (isManaged()) {
 		for (meta::Platform p :
-		     {meta::Platform::YouTube, meta::Platform::Kick}) {
+		     {meta::Platform::Twitch, meta::Platform::YouTube,
+		      meta::Platform::Kick}) {
 			const ManagedConn &m = managedAccount(p);
 			if (m.connected && !m.display.isEmpty())
 				setStatus(p, tr("Connected as %1").arg(m.display));
@@ -394,9 +793,13 @@ void MetadataDock::onConnectManaged(meta::Platform p)
 	}
 	startConnectBusy(p);
 	managedAuth_->ensureSession([this, p](backend_auth::Result r) {
+		if (!isManaged())
+			return; // user switched mode: previous context
 		if (r == backend_auth::Result::StorageError) {
 			// No installation yet: bootstrap once, then retry.
 			managedAuth_->bootstrap([this, p](backend_auth::Result b) {
+				if (!isManaged())
+					return; // user switched mode
 				if (b != backend_auth::Result::Ok) {
 					finishManagedError(
 						p, managedAuthError(p, b, 0));
@@ -416,6 +819,8 @@ void MetadataDock::onConnectManaged(meta::Platform p)
 		managedAuth_->apiGet(QStringLiteral("/connect/%1/status").arg(
 					     providerSlug(p)),
 				     [this, p](const backend_auth::Client::ApiReply &rep) {
+					     if (!isManaged())
+						     return; // user switched mode
 					     if (rep.result ==
 						     backend_auth::Result::Ok) {
 						     const QJsonObject o = rep.body;
@@ -447,6 +852,8 @@ void MetadataDock::startManagedBrowserFlow(meta::Platform p)
 					      providerSlug(p)),
 			      QJsonObject(),
 			      [this, p](const backend_auth::Client::ApiReply &rep) {
+					      if (!isManaged())
+						      return; // user switched mode
 					      if (rep.result !=
 						      backend_auth::Result::Ok) {
 						      finishManagedError(
@@ -475,6 +882,12 @@ void MetadataDock::startManagedBrowserFlow(meta::Platform p)
 
 void MetadataDock::onManagedPollTimeout()
 {
+	if (!isManaged()) {
+		// Cancelled by a mode switch (see onModeChanged).
+		if (managedPollTimer_)
+			managedPollTimer_->stop();
+		return;
+	}
 	const meta::Platform p = managedPollFor_;
 	if (--managedPollsLeft_ < 0) {
 		managedPollTimer_->stop();
@@ -601,6 +1014,181 @@ void MetadataDock::onDisconnectManaged(meta::Platform p)
 	});
 }
 
+// --- managed YouTube apply (FASE 2.1-C) ----------------------------------
+// Tokens stay server-side: the plugin sends only the session bearer (via
+// managedAuth_) plus {broadcast_id,title,description}. Item data in the
+// combo are plain broadcast IDs (Independent stores full JSON there;
+// branches are mode-split, never mixed).
+
+void MetadataDock::fetchManagedBroadcasts()
+{
+	using P = meta::Platform;
+	refreshButton_->setEnabled(false);
+	managedAuth_->apiGet(QStringLiteral("/metadata/youtube/broadcasts"),
+			     [this](const backend_auth::Client::ApiReply &rep) {
+				     using P = meta::Platform;
+				     // FASE 2.1-C.1: diagnóstico redactado (enums/códigos;
+				     // nunca cuerpos, tokens ni bearer).
+				     obs_log(LOG_INFO,
+					     "managed broadcasts reply: result=%d "
+					     "http=%d",
+					     static_cast<int>(rep.result),
+					     rep.http);
+				     refreshButton_->setEnabled(true);
+				     if (!isManaged())
+					     return; // user switched mode
+				     if (rep.result !=
+					 backend_auth::Result::Ok) {
+					     const meta::Outcome oc =
+						     rep.result ==
+							     backend_auth::Result::
+								     NetworkError
+							     ? meta::Outcome::
+								       NetworkError
+							     : meta::classifyStatus(
+								       rep.http == 0
+									   ? -1
+									   : rep.http);
+					     if (applyAfterList_) {
+						     applyAfterList_ = false;
+						     const P p = applyQueue_
+								     .takeFirst();
+						     finishPlatform(
+							     p, false,
+							     meta::userMessage(
+								     oc, p));
+						     startApplyNext();
+					     } else {
+						     generalMsg_->setText(
+							     meta::userMessage(
+								     oc, P::YouTube));
+					     }
+					     return;
+				     }
+				     broadcastCombo_->clear();
+				     const QJsonArray items =
+					     rep.body
+						     .value(QStringLiteral(
+							     "resources"))
+						     .toArray();
+				     for (const auto &v : items) {
+					     const QJsonObject it =
+						     v.toObject();
+					     const QString id = it.value(
+								QStringLiteral(
+									"id"))
+								.toString();
+					     const QString title =
+						     it.value(QStringLiteral(
+								     "title"))
+								.toString();
+					     if (id.isEmpty())
+						     continue;
+					     broadcastCombo_->addItem(
+						     QStringLiteral("%1 (%2)")
+							     .arg(title, id),
+						     id);
+				     }
+				     if (applyAfterList_) {
+					     applyAfterList_ = false;
+					     if (broadcastCombo_->count() ==
+						     0 &&
+						 !applyQueue_.isEmpty()) {
+						     const P p = applyQueue_
+								     .takeFirst();
+						     finishPlatform(
+							     p, false,
+							     meta::userMessage(
+								     meta::Outcome::
+									     NotFound,
+								     p));
+					     }
+					     startApplyNext();
+				     } else {
+					     generalMsg_->setText(
+						     tr("Broadcasts loaded (%1).")
+							     .arg(broadcastCombo_
+								      ->count()));
+				     }
+			     });
+}
+
+void MetadataDock::startManagedYouTubeApply()
+{
+	using P = meta::Platform;
+	const P p = P::YouTube;
+	if (!managedAccount(p).connected) {
+		finishPlatform(p, false,
+			       meta::userMessage(meta::Outcome::AuthRequired,
+						 p));
+		startApplyNext();
+		return;
+	}
+	const QString broadcastId =
+		broadcastCombo_->currentData().toString();
+	if (broadcastId.isEmpty()) {
+		// Same prepend/retry shape as the Independent list-first path.
+		applyQueue_.prepend(p);
+		applyAfterList_ = true;
+		fetchManagedBroadcasts();
+		return;
+	}
+	setResult(p, true, tr("Updating…"));
+	QJsonObject body;
+	body[QStringLiteral("broadcast_id")] = broadcastId;
+	body[QStringLiteral("title")] = titleEdit_->text();
+	body[QStringLiteral("description")] = descEdit_->toPlainText();
+	managedAuth_->apiPost(QStringLiteral("/metadata/youtube"), body,
+			      [this, p](const backend_auth::Client::ApiReply &rep) {
+				      // FASE 2.1-C.1: diagnóstico redactado (enums/códigos;
+				      // nunca cuerpos, tokens ni bearer).
+				      obs_log(LOG_INFO,
+					      "managed apply reply: result=%d "
+					      "http=%d",
+					      static_cast<int>(rep.result),
+					      rep.http);
+				      if (!isManaged())
+					      return; // user switched mode
+				      if (rep.result ==
+					  backend_auth::Result::Ok) {
+					      finishPlatform(
+						      p, true,
+						      meta::userMessage(
+							      meta::Outcome::Success,
+							      p));
+					      obs_log(LOG_INFO,
+						      "apply %s: ok (managed)",
+						      meta::platformName(p));
+					      startApplyNext();
+					      return;
+				      }
+				      const meta::Outcome oc =
+					      rep.result ==
+						      backend_auth::Result::
+							      NetworkError
+					      ? meta::Outcome::NetworkError
+					      : meta::classifyStatus(
+						      rep.http == 0 ? -1
+								    : rep.http);
+				      if (scheduleBackoff(p, oc, rep.http))
+					      return;
+				      if (oc == meta::Outcome::AuthRequired) {
+					      ManagedConn &m =
+						      managedAccount(p);
+					      m.connected = false;
+					      m.userId.clear();
+					      m.display.clear();
+					      setStatus(p,
+							tr("Needs reconnection."));
+					      saveStore(); // drop the stale snapshot
+				      }
+				      finishPlatform(
+					      p, false,
+					      meta::userMessage(oc, p));
+				      startApplyNext();
+			      });
+}
+
 // --- helpers ----------------------------------------------------------
 
 void MetadataDock::setStatus(meta::Platform p, const QString &text)
@@ -611,6 +1199,8 @@ void MetadataDock::setStatus(meta::Platform p, const QString &text)
 		ytStatus_->setText(text);
 	else
 		kkStatus_->setText(text);
+	updateCardStyle(p); // card border/color follows the same state
+	refreshContentVisibility(); // Content/Apply/checks follow usability
 }
 
 void MetadataDock::setResult(meta::Platform p, bool ok, const QString &text)
@@ -626,6 +1216,8 @@ void MetadataDock::setResult(meta::Platform p, bool ok, const QString &text)
 		ytResult_->setText(line);
 	else
 		kkResult_->setText(line);
+	updateCardStyle(p); // e.g. Apply failure shows a red card border
+	refreshContentVisibility(); // e.g. 401 hides Content until reconnect
 }
 
 MetadataDock::Account &MetadataDock::account(meta::Platform p)
@@ -830,6 +1422,7 @@ void MetadataDock::saveStore()
 	};
 	fillManaged(mYt_, d.managedYoutube);
 	fillManaged(mKk_, d.managedKick);
+	fillManaged(mTw_, d.managedTwitch);
 	// T-041: the mode is always persisted explicitly (idempotent
 	// migration: first save after upgrade writes it). Legacy clear
 	// behavior stays unless Managed was explicitly selected or a
@@ -889,6 +1482,7 @@ void MetadataDock::loadStore()
 	};
 	restoreManaged(mYt_, d.managedYoutube);
 	restoreManaged(mKk_, d.managedKick);
+	restoreManaged(mTw_, d.managedTwitch);
 	if (tw_.connected)
 		twIdEdit_->setText(tw_.clientId);
 	if (yt_.connected) {
@@ -968,11 +1562,10 @@ void MetadataDock::wipeLocal(meta::Platform p)
 
 void MetadataDock::onConnectTwitch()
 {
-	// T-041: Managed has no flow yet (T-048). Explicit pending state:
-	// no network, no simulation, no fallback into Independent.
+	// FASE 2: Managed Twitch goes through the backend like YouTube/Kick;
+	// Independent keeps the Device Flow below untouched.
 	if (isManaged()) {
-		setResult(meta::Platform::Twitch, false,
-			  tr("Managed connections arrive with T-048."));
+		onConnectManaged(meta::Platform::Twitch);
 		return;
 	}
 	Account &a = tw_;
@@ -997,6 +1590,12 @@ void MetadataDock::onConnectTwitch()
 
 void MetadataDock::onDisconnectTwitch()
 {
+	// FASE 2: Managed Twitch disconnects via backend (local state is
+	// cleared first inside onDisconnectManaged, mirroring YouTube/Kick).
+	if (isManaged()) {
+		onDisconnectManaged(meta::Platform::Twitch);
+		return;
+	}
 	const Account snap = tw_; // revoke needs the wiped tokens
 	wipeLocal(meta::Platform::Twitch);
 	startRevoke(meta::Platform::Twitch, snap);
@@ -1264,6 +1863,19 @@ void MetadataDock::onDisconnectKick()
 
 void MetadataDock::onRefreshBroadcasts()
 {
+	// FASE 2.1-C: in Managed the list comes from the backend (tokens
+	// server-side); same combo model, plain broadcast IDs as item data.
+	if (isManaged()) {
+		if (!managedAccount(meta::Platform::YouTube).connected) {
+			generalMsg_->setText(meta::userMessage(
+				meta::Outcome::AuthRequired,
+				meta::Platform::YouTube));
+			return;
+		}
+		applyAfterList_ = false;
+		fetchManagedBroadcasts();
+		return;
+	}
 	if (!yt_.connected) {
 		generalMsg_->setText(meta::userMessage(
 			meta::Outcome::AuthRequired,
@@ -1322,7 +1934,14 @@ void MetadataDock::startApplyNext()
 		backoffCount_ = 0;
 	}
 	backoffResume_ = false;
-	if (!account(p).connected) {
+	// FASE 2.1-C: YouTube in Managed mode authorizes via ManagedConn
+	// (backend token); every other provider×mode still uses its own
+	// Independent account (Twitch/Kick Managed have no Apply path).
+	const bool authorized =
+		(isManaged() && p == P::YouTube)
+			? managedAccount(p).connected
+			: account(p).connected;
+	if (!authorized) {
 		finishPlatform(p, false,
 			       meta::userMessage(meta::Outcome::AuthRequired,
 						 p));
@@ -1342,6 +1961,12 @@ void MetadataDock::startApplyNext()
 			 meta::twitchPayload(title), Op::UpTw, tw_.access,
 			 tw_.clientId);
 	} else if (p == P::YouTube) {
+		// FASE 2.1-C: Managed Apply goes through the backend with the
+		// Managed token server-side; Independent path below untouched.
+		if (isManaged()) {
+			startManagedYouTubeApply();
+			return;
+		}
 		const QString item =
 			broadcastCombo_->currentData().toString();
 		if (item.isEmpty()) {
@@ -1465,6 +2090,25 @@ void MetadataDock::onReply(QNetworkReply *reply)
 		reply->error() != QNetworkReply::NoError && http == 0;
 	reply->deleteLater();
 	using P = meta::Platform;
+
+	// A mode switch cancels Independent connect-phase flows (see
+	// cancelPendingForModeSwitch): a late reply must not complete a
+	// connection in the previous context. Apply/refresh traffic keeps
+	// its own lifecycle and is unaffected.
+	switch (op) {
+	case Op::TwDevice:
+	case Op::TwPoll:
+	case Op::TwValidate:
+	case Op::YtExchange:
+	case Op::YtChannels:
+	case Op::KkExchange:
+	case Op::KkChannels:
+		if (isManaged())
+			return;
+		break;
+	default:
+		break;
+	}
 
 	auto fail = [&](P p, const QString &msg) {
 		finishConnectError(p, msg);
