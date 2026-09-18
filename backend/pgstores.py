@@ -54,6 +54,14 @@ class PgInstallationStore(InstallationStore):
                             (installation_id,))
             conn.commit()
 
+    def delete(self, installation_id: str) -> None:
+        """Borrado total de la fila (F-C2). Idempotente."""
+        with self._pool as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM installations WHERE id=%s",
+                            (installation_id,))
+            conn.commit()
+
 
 class PgSessionStore(SessionStore):
     def __init__(self, pool: PgPool) -> None:
@@ -84,6 +92,20 @@ class PgSessionStore(SessionStore):
                 cur.execute("DELETE FROM sessions WHERE id=%s",
                             (session_id,))
             conn.commit()
+
+    def delete_for_installation(self, installation_id: str) -> int:
+        """Borra las sesiones de una instalación (F-C2). Devuelve el conteo."""
+        with self._pool as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id, payload_json FROM sessions")
+                rows = cur.fetchall()
+                doomed = [sid for sid, blob in rows
+                          if json.loads(blob).get("installation_id")
+                          == installation_id]
+                for sid in doomed:
+                    cur.execute("DELETE FROM sessions WHERE id=%s", (sid,))
+            conn.commit()
+            return len(doomed)
 
 
 class PgOAuthTransactionStore:
@@ -143,6 +165,21 @@ class PgOAuthTransactionStore:
                 return entry
         return None
 
+    def delete_for_installation(self, installation_id: str) -> int:
+        """Borra transacciones pendientes de una instalación (F-C2)."""
+        with self._pool as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id, entry_json FROM transactions")
+                rows = cur.fetchall()
+                doomed = [tid for tid, blob in rows
+                          if json.loads(blob).get("installation_id")
+                          == installation_id]
+                for tid in doomed:
+                    cur.execute("DELETE FROM transactions WHERE id=%s",
+                                (tid,))
+            conn.commit()
+            return len(doomed)
+
 
 class PgConnectionStore:
     def __init__(self, pool: PgPool) -> None:
@@ -178,6 +215,20 @@ class PgConnectionStore:
                     "WHERE installation_id=%s AND provider=%s",
                     (installation_id, provider))
             conn.commit()
+
+    def list_referencing(self, provider: str, provider_user_id: str) -> list:
+        """Instalaciones cuya conexión apunta a esta cuenta (F-C2)."""
+        with self._pool as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT installation_id, provider, entry_json "
+                    "FROM connections")
+                rows = cur.fetchall()
+            conn.commit()
+        return sorted(iid for iid, prov, blob in rows
+                      if prov == provider and json.loads(blob).get(
+                          "account", {}).get("provider_user_id")
+                      == provider_user_id)
 
 
 class PgTokenStore(TokenStore):

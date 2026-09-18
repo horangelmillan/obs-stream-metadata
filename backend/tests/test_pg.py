@@ -213,6 +213,28 @@ class PgStoresTest(unittest.TestCase):
         finally:
             small.release(leaked)
 
+    def test_purge_methods_f_c2(self):
+        """F-C2: list_referencing + delete_for_installation + delete
+        sobre PostgreSQL real (paridad con InMemory/SQLite)."""
+        _, pool = fresh_db(self)
+        conns, sess = PgConnectionStore(pool), PgSessionStore(pool)
+        txns, insts = PgOAuthTransactionStore(pool), PgInstallationStore(pool)
+        conns.save("inst-a", "youtube",
+                   {"account": {"provider_user_id": "UC9z"}})
+        conns.save("inst-b", "youtube",
+                   {"account": {"provider_user_id": "UC9z"}})
+        self.assertEqual(conns.list_referencing("youtube", "UC9z"),
+                         ["inst-a", "inst-b"])
+        sess.save_session("s-a", {"installation_id": "inst-a"})
+        sess.save_session("s-b", {"installation_id": "inst-b"})
+        self.assertEqual(sess.delete_for_installation("inst-a"), 1)
+        self.assertIsNotNone(sess.load_session("s-b"))
+        txns.save({"id": "t-a", "installation_id": "inst-a"})
+        self.assertEqual(txns.delete_for_installation("inst-a"), 1)
+        insts.create(Installation(id="inst-a"), "fk-s-9z")
+        insts.delete("inst-a")
+        self.assertIsNone(insts.load("inst-a"))
+
 
 class ProdWiringPgTest(unittest.TestCase):
     def test_production_wiring_over_postgres(self):

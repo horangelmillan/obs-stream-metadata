@@ -83,11 +83,11 @@ Migrations in `backend/migrations/` (reproducible schema):
 
 | Table | User-related content |
 |---|---|
-| `installations` | `id`, `created_at`, `revoked`, installation `secret` |
-| `sessions` | session payload (`token`, `installation_id`, issued/expiry) |
-| `transactions` | OAuth transaction incl. `code_verifier`, `state`, redirect |
-| `connections` | `(installation_id, provider)` → `{account: {provider_user_id, display_name, scopes}, obtained_at}` |
-| `tokens` | `(provider, provider_user_id)` → `access_token`, `refresh_token` (cifrados `v1:` Fernet, F-C1; legacy en claro solo hasta el backfill), `expires_in`, `scope` (en claro) |
+| `installations` | `id`, `created_at`, `revoked`, installation `secret` | deleted entirely by erase (row DELETE, not just flag) |
+| `sessions` | session payload (`token`, `installation_id`, issued/expiry) | deleted entirely by erase (`delete_for_installation`) |
+| `transactions` | OAuth transaction incl. `code_verifier`, `state`, redirect | deleted entirely by erase (`delete_for_installation`) |
+| `connections` | `(installation_id, provider)` → `{account: {provider_user_id, display_name, scopes}, obtained_at}` | deleted entirely by erase (all providers) |
+| `tokens` | `(provider, provider_user_id)` → `access_token`, `refresh_token` (cifrados `v1:` Fernet, F-C1; legacy en claro solo hasta el backfill), `expires_in`, `scope` (en claro) | deleted by erase **unless another installation still references the same account** (shared `(provider, provider_user_id)` row is kept; remote revoke is still attempted) |
 
 Provider secrets (`GOOGLE_/KICK_CLIENT_ID/SECRET`) live in Google
 Secret Manager as files consumed via `FileSecretStore`/
@@ -149,21 +149,58 @@ Real behavior (no invented periods):
   are rejected but not purged — no background eraser is implemented.
   Rows are replaced when a new session is issued under the same token
   id only if the flow overwrites them; otherwise they persist.
+  Erase (`POST /privacy/erase`, F-C2) deletes **all** sessions of the
+  installation outright.
 - OAuth transactions/nonces: TTL 600 s / 10 min window; consumed or
   expired entries are dropped on access; nonces are memory-only.
+  Erase deletes pending transactions of the installation outright.
 - Connections + tokens: persist **until Disconnect** (no automatic
-  expiry cleanup implemented).
+  expiry cleanup implemented). Erase deletes all connections of the
+  installation plus unshared token rows (shared rows are kept while
+  another installation references the same account, but remote revoke
+  is still attempted).
+- Installation row: persists until Erase, which DELETEs it (the local
+  installation secret becomes useless; reconnecting provisions a fresh
+  installation via bootstrap).
 - DPAPI file: persists until Disconnect (records rewritten without
-  disconnected entries) — no time-based deletion.
+  disconnected entries) — no time-based deletion. Erase clears the
+  Managed snapshots + local `backendInstall` record; Independent
+  records are untouched.
 - Logs: Cloud Run stdout retention is the platform default (operator
-  configurable, not app code).
+  configurable, not app code). Log lines carry event types,
+  platform/mode names, HTTP codes, redacted lengths, request IDs and
+  erase counts only — never tokens, secrets, user IDs, display names
+  or titles.
 
 ## 9. Revocation and Deletion
 
 - Backend `disconnect`: **always** deletes the `connections` row and
-  the `tokens` row; remote provider revoke is **best-effort**
-  (failures swallowed after local deletion, F-030). Verify
-  provider-side if in doubt.
+  the `tokens` row (unless another installation shares the same
+  account row, F-C2 guarded-delete); remote provider revoke is
+  **best-effort** (failures swallowed after local deletion, F-030).
+  Verify provider-side if in doubt.
+- Backend `POST /privacy/erase` (F-C2, "Borrar mis datos" button in
+  Managed mode): deletes **all** connections of the calling
+  installation (every provider) + unshared token rows + **all**
+  sessions + pending transactions + the installation row itself.
+  Local deletion happens first; remote revokes (access + refresh per
+  provider) are best-effort afterwards. Idempotent: erasing twice
+  returns zero counts. The bearer used for the call is revoked as a
+  side effect; `/status` then reports disconnected and reconnecting
+  requires a fresh OAuth flow. Response and logs carry counts only.
+- Provider-side meaning of "revoke" (verified against current docs,
+  2026-09-18):
+  - Google: `POST https://oauth2.googleapis.com/revoke` — revoking the
+    access token also revokes its paired refresh token.
+  - Twitch: `POST https://id.twitch.tv/oauth2/revoke`
+    (`client_id` + `token`; `200` = revoked, `400` = already invalid =
+    goal achieved). Verify with `GET /validate` (revoked → `401`).
+  - Kick: `POST https://id.kick.com/oauth/revoke`
+    (`?token=&token_hint_type=`). Verify with
+    `POST /oauth/token/introspect` (revoked → `active: false`).
+  A surviving shared-account installation gets `SESSION_EXPIRED` on
+  next use and must reconnect (documented limitation of shared grants:
+  an OAuth grant is per app+user, not per installation).
 - Plugin Disconnect: wipes local state first, then best-effort remote
   revoke (HTTP status logged, never tokens). Twitch may cache the
   authorization entry in its UI after a successful (HTTP 200) revoke.
@@ -181,9 +218,13 @@ The Windows uninstaller removes **only** the plugin payload
 - backend PostgreSQL rows (installation, connections, tokens),
 - provider-side authorizations (revoke via Disconnect first).
 
-To fully leave: Disconnect each account (revokes + deletes), then
+To fully leave: Disconnect each account (revokes + deletes), or use
+"Borrar mis datos (Managed)" for a one-shot backend wipe, then
 uninstall. Backend rows of an abandoned installation persist until
-explicitly revoked/disconnected (limitation, not a silent purge).
+explicitly revoked/disconnected/erased (limitation, not a silent purge).
+
+The uninstaller shows an informational notice to this effect on start
+(it never deletes `%APPDATA%` or backend rows by design).
 
 ## 11. Security Measures
 
@@ -213,11 +254,24 @@ timelines are promised.
 
 ## 14. User Requests / Contact
 
-No dedicated privacy contact channel exists yet (**to be completed
-by the operator**; do not use public issue trackers for sensitive
-reports). User controls available today: per-provider Disconnect
-(deletes local + backend rows, best-effort remote revoke), OBS
-restart persistence semantics (§8–§9), uninstall scope (§10).
+Privacy contact: `horangelmillan@gmail.com`. Do not use public issue
+trackers for sensitive reports. How to exercise erasure, fastest first:
+
+1. In OBS (Managed mode): "Borrar mis datos (Managed)" — one-shot
+   backend wipe (`POST /privacy/erase`), immediate, with per-provider
+   results in the dock.
+2. Per provider: Disconnect (deletes local + backend rows for that
+   connection, best-effort remote revoke).
+3. By email (`horangelmillan@gmail.com`): state the installation or
+   account concerned; backend rows are deleted manually by the
+   operator and provider grants revoked where the provider allows it.
+   Reply within one month (RGPD art. 12.3); no art. 17.3 exception
+   applies to OAuth tokens/connections (no legal retention duty).
+
+User controls available today: per-provider Disconnect
+(deletes local + backend rows, best-effort remote revoke), backend
+erase (above), OBS restart persistence semantics (§8–§9), uninstall
+scope (§10).
 
 ## 15. Changes to This Policy
 
@@ -234,10 +288,11 @@ fixed here, never by silently changing the system (T-060 rule).
 | installation id+secret | bootstrap | DPAPI (plugin) + PG `installations` | backend auth | until revoke/uninstall-independent | revoke/re-bootstrap |
 | `managedYoutube/managedKick` | `/status` | DPAPI file (plaintext) | reconnect labels | until Disconnect | snapshot omitted |
 | `connectionMode`, `backendBaseUrl` | local/backend | DPAPI file (plaintext) | context/binding | until overwrite | — |
-| session token record | `/auth/*` | PG `sessions` | bearer auth | 30 min TTL; **flagged, not deleted**, on revoke | new session / operator DB delete |
-| OAuth transaction | `/connect/*` | PG `transactions` | CSRF/PKCE/exchange | 600 s TTL, single-use | consume/expiry |
-| connection entry | callback | PG `connections` | status/reconnect | until Disconnect | disconnect |
-| user tokens | exchange/refresh | PG `tokens` (ciphertext `v1:` + metadata en claro) | API calls | until Disconnect | disconnect |
+| session token record | `/auth/*` | PG `sessions` | bearer auth | 30 min TTL; **flagged, not deleted**, on revoke | erase deletes all of the installation; else new session / operator DB delete |
+| OAuth transaction | `/connect/*` | PG `transactions` | CSRF/PKCE/exchange | 600 s TTL, single-use | consume/expiry; erase deletes pending of the installation |
+| connection entry | callback | PG `connections` | status/reconnect | until Disconnect/erase | disconnect (per provider) or erase (all) |
+| user tokens | exchange/refresh | PG `tokens` (ciphertext `v1:` + metadata en claro) | API calls | until Disconnect/erase (shared rows kept while referenced) | disconnect / erase (guarded) + best-effort provider revoke |
+| installation record | `/auth/bootstrap` | PG `installations` | backend auth | until erase | erase (row DELETE); revoke flags only |
 | provider client secrets | operator Secret Manager | Secret Manager → files | OAuth | managed externally | operator rotation |
 | `DATABASE_URL` | operator Secret Manager | Secret Manager env | DB access | managed externally | operator rotation |
 | title/description text | user typing | memory only (+ provider on Apply) | metadata update | transient | — |

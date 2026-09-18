@@ -327,6 +327,20 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 		&MetadataDock::onApply);
 	top->addWidget(applyButton_);
 
+	// F-C2: borrado total Managed. Visible solo en Managed (ver
+	// refreshModeUi); idempotente en el backend, seguro con cero
+	// conexiones. Independent intacto (su Disconnect por proveedor
+	// sigue siendo la vía para datos locales DPAPI).
+	eraseButton_ = new QPushButton(
+		tr("Borrar mis datos (Managed)"), this);
+	eraseButton_->setToolTip(
+		tr("Deletes all Managed connections, tokens, sessions and "
+		   "the installation itself from the backend. Independent "
+		   "accounts are untouched."));
+	connect(eraseButton_, &QPushButton::clicked, this,
+		&MetadataDock::onEraseManagedData);
+	top->addWidget(eraseButton_);
+
 	// Per-platform results live inside their card detail: no global
 	// RESULTS section. setStatus()/setResult() call sites unchanged.
 	twResult_ = new QLabel(QStringLiteral("Twitch —"), twDetail_);
@@ -428,6 +442,8 @@ void MetadataDock::refreshModeUi()
 	kkSecretEdit_->setVisible(!managed);
 	credNote_->setVisible(!managed);
 	managedNote_->setVisible(managed);
+	if (eraseButton_)
+		eraseButton_->setVisible(managed);
 	repaintModeStatuses();
 	updateAllCardStyles();
 	refreshContentVisibility();
@@ -1011,6 +1027,79 @@ void MetadataDock::onDisconnectManaged(meta::Platform p)
 						      providerSlug(p)),
 				      QJsonObject(),
 				      [](const backend_auth::Client::ApiReply &) {});
+	});
+}
+
+// --- F-C2: borrado total Managed ------------------------------------------
+// POST /privacy/erase (backend borra connections + tokens + sessions +
+// installation; revoke remoto best-effort). Aquí solo se limpian
+// snapshots Managed + backendInstall local; Independent intacto.
+void MetadataDock::onEraseManagedData()
+{
+	using P = meta::Platform;
+	if (!isManaged() || !eraseButton_)
+		return;
+	eraseButton_->setEnabled(false);
+	managedAuth_->ensureSession([this](backend_auth::Result r) {
+		if (r != backend_auth::Result::Ok) {
+			eraseButton_->setEnabled(true);
+			generalMsg_->setText(
+				tr("Data erasure failed: backend unreachable."));
+			return;
+		}
+		managedAuth_->apiPost(
+			QStringLiteral("/privacy/erase"), QJsonObject(),
+			[this](const backend_auth::Client::ApiReply &rep) {
+				eraseButton_->setEnabled(true);
+				if (rep.result !=
+				    backend_auth::Result::Ok) {
+					obs_log(LOG_WARNING,
+						"privacy erase failed: "
+						"result=%d http=%d",
+						static_cast<int>(rep.result),
+						rep.http);
+					generalMsg_->setText(
+						tr("Data erasure failed "
+						   "(retry or Disconnect "
+						   "each account)."));
+					return;
+				}
+				using P = meta::Platform;
+				for (P p :
+				     {P::Twitch, P::YouTube, P::Kick}) {
+					ManagedConn &m = managedAccount(p);
+					m.connected = false;
+					m.userId.clear();
+					m.display.clear();
+					setStatus(p, tr("Not connected"));
+					setResult(p, true,
+						  tr("data erased"));
+				}
+				broadcastCombo_->clear();
+				// La fila installation ya no existe en el
+				// backend: el secreto local queda huérfano y
+				// debe caer (próximo connect = bootstrap
+				// nuevo). Independent intacto por
+				// construcción (saveStore preserva sus
+				// records).
+				if (store_) {
+					secure::Data d;
+					store_->load(d);
+					d.backendInstall =
+						secure::Record{};
+					store_->save(d);
+				}
+				saveStore(); // drop snapshots
+				refreshContentVisibility();
+				// El bearer en memoria murió con sus
+				// sessions: olvidarlo sin revocar (el
+				// servidor ya lo borró).
+				managedAuth_->revokeSession(
+					[](backend_auth::Result) {});
+				generalMsg_->setText(
+					tr("All Managed data erased. "
+					   "Reconnect to use Managed again."));
+			});
 	});
 }
 

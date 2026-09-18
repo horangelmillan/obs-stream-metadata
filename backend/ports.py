@@ -80,6 +80,10 @@ class SessionStore(ABC):
     @abstractmethod
     def delete_session(self, session_id: str) -> None: ...
 
+    @abstractmethod
+    def delete_for_installation(self, installation_id: str) -> int:
+        """Borra las sesiones de una instalación (F-C2). Devuelve el conteo."""
+
 
 class SecretStore(ABC):
     """Credenciales de aplicación (app client_id/secret, signing keys).
@@ -121,6 +125,10 @@ class InstallationStore(ABC):
     @abstractmethod
     def revoke(self, installation_id: str) -> None: ...
 
+    @abstractmethod
+    def delete(self, installation_id: str) -> None:
+        """Borrado total de la fila (F-C2). Idempotente."""
+
 
 class OAuthTransactionStore(ABC):
     """Transacciones OAuth de un solo uso (T-045 §8).
@@ -145,6 +153,10 @@ class OAuthTransactionStore(ABC):
         """Localiza transacción vigente por state (callback). None si no hay
         coincidencia válida (state inválido, expirada o consumida)."""
 
+    @abstractmethod
+    def delete_for_installation(self, installation_id: str) -> int:
+        """Borra transacciones pendientes de una instalación (F-C2)."""
+
 
 class ConnectionStore(ABC):
     """Conexiones proveedor por instalación (T-045 §16).
@@ -161,3 +173,8 @@ class ConnectionStore(ABC):
 
     @abstractmethod
     def delete(self, installation_id: str, provider: str) -> None: ...
+
+    @abstractmethod
+    def list_referencing(self, provider: str,
+                         provider_user_id: str) -> list[str]:
+        """Instalaciones cuya conexión apunta a esta cuenta (F-C2)."""

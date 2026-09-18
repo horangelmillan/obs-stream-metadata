@@ -153,6 +153,13 @@ class SqliteInstallationStore(SqliteStore, InstallationStore):
                 (installation_id,))
             self._conn.commit()
 
+    def delete(self, installation_id: str) -> None:
+        """Borrado total de la fila (F-C2). Idempotente."""
+        with self._lock:
+            self._conn.execute("DELETE FROM installations WHERE id=?",
+                               (installation_id,))
+            self._conn.commit()
+
 
 class SqliteSessionStore(SqliteStore, SessionStore):
     def save_session(self, session_id: str, payload: dict) -> None:
@@ -174,6 +181,19 @@ class SqliteSessionStore(SqliteStore, SessionStore):
             self._conn.execute("DELETE FROM sessions WHERE id=?",
                                (session_id,))
             self._conn.commit()
+
+    def delete_for_installation(self, installation_id: str) -> int:
+        """Borra las sesiones de una instalación (F-C2). Devuelve el conteo."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, payload_json FROM sessions").fetchall()
+            doomed = [sid for sid, blob in rows
+                      if json.loads(blob).get("installation_id")
+                      == installation_id]
+            for sid in doomed:
+                self._conn.execute("DELETE FROM sessions WHERE id=?", (sid,))
+            self._conn.commit()
+            return len(doomed)
 
 
 class SqliteOAuthTransactionStore(SqliteStore):
@@ -230,6 +250,20 @@ class SqliteOAuthTransactionStore(SqliteStore):
                 return entry
         return None
 
+    def delete_for_installation(self, installation_id: str) -> int:
+        """Borra transacciones pendientes de una instalación (F-C2)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, entry_json FROM transactions").fetchall()
+            doomed = [tid for tid, blob in rows
+                      if json.loads(blob).get("installation_id")
+                      == installation_id]
+            for tid in doomed:
+                self._conn.execute("DELETE FROM transactions WHERE id=?",
+                                   (tid,))
+            self._conn.commit()
+            return len(doomed)
+
 
 class SqliteConnectionStore(SqliteStore):
     def save(self, installation_id: str, provider: str, entry: dict) -> None:
@@ -255,6 +289,17 @@ class SqliteConnectionStore(SqliteStore):
                 "WHERE installation_id=? AND provider=?",
                 (installation_id, provider))
             self._conn.commit()
+
+    def list_referencing(self, provider: str, provider_user_id: str) -> list:
+        """Instalaciones cuya conexión apunta a esta cuenta (F-C2)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT installation_id, provider, entry_json "
+                "FROM connections").fetchall()
+        return sorted(iid for iid, prov, blob in rows
+                      if prov == provider and json.loads(blob).get(
+                          "account", {}).get("provider_user_id")
+                      == provider_user_id)
 
 
 def _pair_to_row(account: Account, tokens: TokenPair) -> tuple:

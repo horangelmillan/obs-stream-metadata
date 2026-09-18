@@ -92,7 +92,9 @@ def create_app(secrets=None, sessions=None, limiter=None,
                       limiter=limiter,
                       ready_check=ready_check, auth_service=auth_service,
                       providers=providers,
-                      provider_redirects=redirects)
+                      provider_redirects=redirects,
+                      installations=installations,
+                      transactions=transactions)
 
 
 def _migrations_dir() -> str:

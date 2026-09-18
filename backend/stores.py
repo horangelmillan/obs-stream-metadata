@@ -70,6 +70,14 @@ class InMemorySessionStore(SessionStore):
     def delete_session(self, session_id: str) -> None:
         self._data.pop(session_id, None)
 
+    def delete_for_installation(self, installation_id: str) -> int:
+        """Borra las sesiones de una instalación (F-C2). Devuelve el conteo."""
+        doomed = [sid for sid, payload in self._data.items()
+                  if payload.get("installation_id") == installation_id]
+        for sid in doomed:
+            del self._data[sid]
+        return len(doomed)
+
 
 class AllowAllRateLimiter(RateLimiter):
     """Sin política real. Punto de integración para T-044+ (ver §20 del encargo).
@@ -130,6 +138,10 @@ class InMemoryInstallationStore(InstallationStore):
                              created_at=installation.created_at,
                              revoked=True), secret)
 
+    def delete(self, installation_id: str) -> None:
+        """Borrado total de la fila (F-C2). Idempotente."""
+        self._data.pop(installation_id, None)
+
 
 class InMemoryOAuthTransactionStore:
     """Development/tests: verifiers en memoria clara, un solo uso con TTL.
@@ -168,6 +180,14 @@ class InMemoryOAuthTransactionStore:
                 return dict(entry)
         return None
 
+    def delete_for_installation(self, installation_id: str) -> int:
+        """Borra transacciones pendientes de una instalación (F-C2)."""
+        doomed = [tid for tid, entry in self._data.items()
+                  if entry.get("installation_id") == installation_id]
+        for tid in doomed:
+            del self._data[tid]
+        return len(doomed)
+
 
 class InMemoryConnectionStore:
     """Development/tests: tokens en memoria clara. Producción: DB + cifrado
@@ -187,6 +207,12 @@ class InMemoryConnectionStore:
 
     def delete(self, installation_id: str, provider: str) -> None:
         self._data.pop((installation_id, provider), None)
+
+    def list_referencing(self, provider: str, provider_user_id: str) -> list:
+        """Instalaciones cuya conexión apunta a esta cuenta (F-C2, guarded-delete)."""
+        return sorted(iid for (iid, prov), entry in self._data.items()
+                      if prov == provider and entry.get("account", {}).get(
+                          "provider_user_id") == provider_user_id)
 
 
 # --- Redacción para logs/respuestas (guardrail, no única defensa) ---

@@ -137,6 +137,12 @@ SectionEnd
 ; --- uninstall --------------------------------------------------------------
 Function un.onInit
   SetRegView 64
+  ; F-C2: el uninstaller solo retira el payload (nunca %APPDATA% ni filas
+  ; del backend). Aviso informativo, sin abortar: para un borrado total,
+  ; usar antes "Borrar mis datos (Managed)" en el dock o Disconnect por
+  ; cuenta, y revocar grants en cada plataforma si se desea.
+  MessageBox MB_OK|MB_ICONINFORMATION \
+    "This uninstaller removes only the plugin files.$\n$\nYour OBS settings and any connected streaming accounts are kept. To erase all Managed backend data first, use 'Borrar mis datos (Managed)' in the dock (Managed mode) or Disconnect each account."
 FunctionEnd
 
 Section "Uninstall"

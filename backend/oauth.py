@@ -176,24 +176,35 @@ class ConnectService:
                 "result": result}
 
     # --- disconnect ---
+    def erase_local(self, installation_id: str):
+        """Borrado local de UNA conexión (F-C2).
+
+        Devuelve `(entry, tokens, row_deleted)` con los tokens copiados en
+        memoria para el revoke posterior (F-030: el borrado local ya
+        ocurrió). La fila de tokens se conserva (`row_deleted=False`) si
+        otra instalación aún la referencia (cuentas compartidas por
+        `provider_user_id`).
+        """
+        entry = self._connections.load(installation_id, self._provider.provider.value)
+        if entry is None:
+            return None, None, False
+        account_data = entry["account"]
+        account = Account(provider=self._provider.provider,
+                          provider_user_id=account_data["provider_user_id"],
+                          display_name=account_data["display_name"],
+                          scopes=tuple(account_data["scopes"]))
+        tokens = self._tokens.load(account)
+        self._connections.delete(installation_id, self._provider.provider.value)
+        row_deleted = False
+        if tokens is not None and not self._connections.list_referencing(
+                self._provider.provider.value, account.provider_user_id):
+            self._tokens.delete(account)
+            row_deleted = True
+        return entry, tokens, row_deleted
+
     def disconnect(self, installation_id: str, revoke_remote: bool = True) -> None:
         """Borrado local siempre; revoke remoto best-effort (F-030)."""
-        entry = self._connections.load(installation_id, self._provider.provider.value)
-        tokens = None
-        if entry is not None:
-            account_data = entry["account"]
-            tokens = self._tokens.load(Account(
-                provider=self._provider.provider,
-                provider_user_id=account_data["provider_user_id"],
-                display_name=account_data["display_name"],
-                scopes=tuple(account_data["scopes"])))
-        self._connections.delete(installation_id, self._provider.provider.value)
-        if entry is not None:
-            self._tokens.delete(Account(
-                provider=self._provider.provider,
-                provider_user_id=entry["account"]["provider_user_id"],
-                display_name=entry["account"]["display_name"],
-                scopes=tuple(entry["account"]["scopes"])))
+        _, tokens, _ = self.erase_local(installation_id)
         if revoke_remote and tokens is not None:
             for token in (tokens.access_token, tokens.refresh_token):
                 if token:
