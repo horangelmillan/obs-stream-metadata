@@ -36,9 +36,12 @@ class BackendApp:
                  ready_check=None, auth_service: AuthService | None = None,
                  limiters: dict | None = None, clock=None,
                  providers: dict | None = None,
-                 provider_redirects: dict | None = None) -> None:
+                 provider_redirects: dict | None = None,
+                 installations=None, transactions=None) -> None:
         self.settings = settings
         self.sessions = sessions
+        self.installations = installations
+        self.transactions = transactions
         self.limiter = limiter
         self._clock = clock or time.time
         self.auth = auth_service or AuthService(InMemoryInstallationStore(),
@@ -217,6 +220,21 @@ class _Handler(BaseHTTPRequestHandler):
             app._limited("auth_install", f"yt-disc:{record.installation_id}")
             service.disconnect(record.installation_id)
             return 200, {"provider": "youtube", "status": "disconnected"}
+        if path == "/privacy/erase":
+            # F-C2: borrado total por instalación (T-064). El bearer usado
+            # queda revocado como efecto (era una session de la instalación).
+            record = app.check_access(path, self.headers)
+            app._limited("auth_install", f"erase:{record.installation_id}")
+            if app.installations is None or app.transactions is None:
+                raise AppError(ErrorCode.INTERNAL, "erase not configured")
+            from backend import privacy as _privacy
+            payload = _privacy.erase_installation(
+                record.installation_id, app.providers, app.sessions,
+                app.transactions, app.installations)
+            app.log.info("privacy erase providers=%s erased=%s",
+                         sorted(app.providers), payload["erased"],
+                         extra={"requestId": request_id})
+            return 200, payload
         parts = path.split("/")
         # FASE 2.1-C: metadata Managed (tokens server-side; el plugin
         # envía solo sesión bearer + {broadcast_id,title,description}).

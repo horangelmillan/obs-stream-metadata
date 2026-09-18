@@ -112,6 +112,8 @@ private slots:
 	// Apply Managed Twitch via backend (solo título; Twitch no tiene
 	// descripción de stream equivalente). Independent DCF intacto.
 	void startManagedTwitchApply();
+	// F-C2: borrado total Managed (POST /privacy/erase + snapshots).
+	void onEraseManagedData();
 
 private:
 	// One request at a time; replies carry their Op in a property.
@@ -212,6 +214,8 @@ private:
 	QPushButton *refreshButton_ = nullptr;
 	QLabel *devicePrompt_ = nullptr;
 	QPushButton *applyButton_ = nullptr;
+	// F-C2: "Borrar mis datos" (solo Managed; Independent intacto).
+	QPushButton *eraseButton_ = nullptr;
 	QLabel *twResult_ = nullptr;
 	QLabel *ytResult_ = nullptr;
 	QLabel *kkResult_ = nullptr;

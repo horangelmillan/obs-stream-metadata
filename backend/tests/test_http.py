@@ -156,6 +156,23 @@ class HttpTest(unittest.TestCase):
                             {"Authorization": "Bearer " + token})
         self.assertNotEqual(status, 401)
 
+    def test_privacy_erase_route(self):
+        """F-C2: POST /privacy/erase borra la instalación; el bearer usado
+        queda revocado (segundo POST → 401); sin secretos en la respuesta."""
+        base = self._served_app()
+        token = self._session(base)
+        status, _, body = _post(base, "/privacy/erase", {},
+                                {"Authorization": "Bearer " + token})
+        self.assertEqual(status, 200)
+        payload = json.loads(body)
+        self.assertEqual(payload["erased"]["installation"], 1)
+        dump = json.dumps(payload).lower()
+        self.assertNotIn("installation_secret", dump)
+        self.assertNotIn("session_token", dump)
+        status, _, _ = _post(base, "/privacy/erase", {},
+                             {"Authorization": "Bearer " + token})
+        self.assertEqual(status, 401)
+
 
 if __name__ == "__main__":
     unittest.main()
