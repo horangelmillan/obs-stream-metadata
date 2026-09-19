@@ -1,7 +1,7 @@
 # tools/package.ps1 — T-067: unico punto de entrada para producir el instalador.
 #
 # Sabores (docs/notes/001-builds-por-comando-segun-destino.md):
-#   local            backend local (default CMake, sin flag) — desarrollo
+#   local            backend local (loopback explícito = default CMake) — desarrollo
 #   testing          ambiente test (-BackendUrl explicita, nunca prod)
 #   commercial       produccion (-BackendUrl https://<cloud-run-url>, BYO, nada empaquetado)
 #   prod-integrated  productivo puntual: como commercial + confirmacion + rastro en log
@@ -87,8 +87,13 @@ elseif ($Flavor -eq 'testing') {
   }
 }
 else {
-  # local: default sin flag; si se pasa URL, solo loopback.
-  if (($BackendUrl -ne '') -and (-not (Is-LoopbackUrl $BackendUrl))) {
+  # local: omitir el flag heredaría la caché del sabor anterior
+  # (contaminación nota 001: un local tras commercial llevaría prod) →
+  # forzar loopback explícito; si se pasa URL, solo loopback.
+  if ($BackendUrl -eq '') {
+    $BackendUrl = 'http://127.0.0.1:8080'
+  }
+  elseif (-not (Is-LoopbackUrl $BackendUrl)) {
     Fail 'local solo admite loopback (http://127.0.0.1 o http://localhost)'
   }
 }
