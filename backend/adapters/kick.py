@@ -72,6 +72,29 @@ def _api_get(url: str, token: str, transport=None) -> tuple[int, dict]:
             return e.code, {"error": "unknown"}
 
 
+def _patch_json(url: str, token: str, payload: dict,
+                transport=None) -> tuple[int, dict]:
+    """PATCH JSON con Bearer + UA de navegador (Cloudflare, F-022)."""
+    if transport is not None:
+        return transport("PATCH", url, {"token": token, "payload": payload})
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(url, data=data, method="PATCH")
+    req.add_header("Authorization", "Bearer " + token)
+    req.add_header("Content-Type", "application/json")
+    req.add_header("User-Agent", BROWSER_UA)
+    req.add_header("Accept", "application/json, text/plain, */*")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            raw = r.read().decode("utf-8", "replace")
+            return r.status, json.loads(raw) if raw.strip() else {}
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", "replace")
+        try:
+            return e.code, json.loads(raw) if raw.strip() else {"error": "unknown"}
+        except ValueError:
+            return e.code, {"error": "unknown"}
+
+
 def classify_kick_error(payload: dict, status: int) -> AppError:
     """Mapeo errores Kick → modelo backend (detalle solo en logs)."""
     error = str(payload.get("error", ""))
@@ -187,3 +210,29 @@ class KickProvider(OAuthProvider):
                        provider_user_id=str(item.get("broadcaster_user_id", "")),
                        display_name=str(item.get("slug", "")),
                        scopes=self.SCOPES)
+
+    # --- metadata Managed (Apply Kick T-068, contraparte T-062/Twitch) ---
+    def apply_metadata(self, access_token: str, data: dict) -> dict:
+        """PATCH `stream_title` con token Managed server-side.
+
+        Kick no tiene descripción de stream equivalente (AGENTS.md §2,
+        §14.6): `description` se acepta y se ignora; jamás se escribe
+        `channel_description`. Éxito = 204 sin body. Sin límite oficial
+        de título documentado: se exige no-vacío y el resto lo valida
+        el servidor (400 → INVALID_REQUEST).
+        """
+        title = str(data.get("title", "") or "").strip()
+        if not title:
+            raise AppError(ErrorCode.INVALID_REQUEST, "invalid title")
+        status, payload = _patch_json(CHANNELS_URL, access_token,
+                                      {"stream_title": title},
+                                      self._transport)
+        if status in (200, 204):
+            return {"title": title}
+        if status == 400:
+            raise AppError(ErrorCode.INVALID_REQUEST, "kick:invalid")
+        if status == 401:
+            raise AppError(ErrorCode.SESSION_EXPIRED, "kick:auth-expired")
+        if status == 403:
+            raise AppError(ErrorCode.AUTHORIZATION, "kick:forbidden")
+        raise classify_kick_error(payload, status)

@@ -9,6 +9,19 @@
 
 Toda afirmación "funciona" requiere evidencia (comando + salida). "Probablemente funciona" no es válido.
 
+## T-068 Apply Managed Kick (2026-09-19)
+
+```text
+BUILD:     PASS (preset windows-x64, RelWithDebInfo, 0 errores; DLL con startManagedKickApply)
+SELFCHECK: PASS 125/125, 0 FAIL · BACKEND: PASS 215/215 (10 skips PG por diseño; incluye MetadataKickTest + HttpMetadataKickTest nuevos)
+DEPLOY:    PASS rev-00027-jb9 (imagen master-bff522f-dirty, /health ok + /version production + /ready true) vía nuevo tools/deploy.ps1
+PACKAGE:   PASS commercial 49a3ac73… (prod verificado vivo) + local 71fda3e5… (loopback; distinto hash = sin contaminación)
+E2E:       PASS operador (install manual commercial → Managed Connect Kick → Apply título → ✓ + read-back en directo, F-023)
+SECRET:    PASS (patrón CI limpio en código+tests+scripts; sin tokens en respuestas/logs)
+TRACKING:  PASS (ruta /metadata/kick genérica, sin cambios de routing; Independent intacto)
+FINAL: T-068 PASS (cierra F-063)
+```
+
 ## T-062 cierre de facto por T-063 (2026-09-19)
 
 ```text

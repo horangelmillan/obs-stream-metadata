@@ -112,6 +112,10 @@ private slots:
 	// Apply Managed Twitch via backend (solo título; Twitch no tiene
 	// descripción de stream equivalente). Independent DCF intacto.
 	void startManagedTwitchApply();
+	// T-068: Apply Managed Kick via backend (solo título; Kick no tiene
+	// descripción de stream equivalente, jamás channel_description).
+	// Independent directo intacto.
+	void startManagedKickApply();
 	// F-C2: borrado total Managed (POST /privacy/erase + snapshots).
 	void onEraseManagedData();
 

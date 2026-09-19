@@ -111,10 +111,10 @@ class AdapterMetadataTest(unittest.TestCase):
         self.assertEqual(ctx.exception.code, ErrorCode.AUTHENTICATION)
 
     def test_other_providers_unsupported(self):
-        from backend.adapters.kick import KickProvider
+        # T-068: Kick implementa apply_metadata (ver MetadataKickTest);
+        # Twitch sin broadcaster_id sigue rechazado por validación.
         from backend.adapters.twitch import TwitchProvider
-        for provider in (KickProvider(FakeSecrets(), "http://localhost:0/cb"),
-                         TwitchProvider(FakeSecrets(), "http://127.0.0.1:0/cb")):
+        for provider in (TwitchProvider(FakeSecrets(), "http://127.0.0.1:0/cb"),):
             import time as _time
             svc = ConnectService(
                 provider, InMemoryOAuthTransactionStore(),
