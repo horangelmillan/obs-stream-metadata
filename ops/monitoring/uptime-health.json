@@ -5,7 +5,7 @@
     {
       "displayName": "uptime check failing for 10 minutes",
       "conditionThreshold": {
-        "filter": "metric.type=\"monitoring.googleapis.com/uptime_check/check_passed\" AND metric.label.check_id=\"OPERADOR-CHECK-ID\"",
+        "filter": "resource.type=\"uptime_url\" AND metric.type=\"monitoring.googleapis.com/uptime_check/check_passed\" AND metric.label.check_id=\"OPERADOR-CHECK-ID\"",
         "comparison": "COMPARISON_LT",
         "thresholdValue": 1,
         "duration": "600s",
