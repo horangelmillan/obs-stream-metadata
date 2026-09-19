@@ -117,7 +117,7 @@ Twitch Managed; multichat/multistream/categorías/tags/thumbnails/analytics/chat
 
 ## 18. How to Use This Document
 
-1. Lee este archivo; 2. lee `AGENTS.md`; 3. revisa `BACKLOG.md`; 4. revisa STATE/FINDINGS si el trabajo los afecta; 5. verifica Git; 6. no asumas historial de conversaciones. No reemplaza código ni docs normativas.
+1. Lee este archivo; 2. lee `AGENTS.md`; 3. revisa `BACKLOG.md`; 4. revisa STATE/FINDINGS si el trabajo los afecta; 5. revisa `docs/notes/` (ideas vivas de mejora; convención en su `README.md`; las notas nuevas van ahí numeradas, nunca en carpetas nuevas); 6. verifica Git; 7. no asumas historial de conversaciones. No reemplaza código ni docs normativas.
 
 ## 19. Context Recovery Protocol
 
