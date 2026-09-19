@@ -44,6 +44,11 @@ PENDIENTE / FALLIDO). Nada de esta sección afirma "production deployed".
 - PENDIENTE: `STREAM_META_BACKEND_PUBLIC_URL=https://<cloud-run-url>`
   (la URL real se conoce tras un despliegue exitoso; NO inventarla;
   prod exige `https://` por gate T-053).
+- DESPLEGADO (T-068, 2026-09-19): rev-00027-jb9 (100% tráfico; imagen
+  `master-bff522f-dirty`; `/health` ok + `/version` production +
+  `/ready` true) con `tools/deploy.ps1`. `PUBLIC_URL` =
+  `https://obs-stream-metadata-service-364043334054.us-east5.run.app`
+  (verificada viva antes de empaquetar commercial).
 
 ## Topología
 
@@ -342,6 +347,21 @@ sus límites: coste ~cero. Al superarlos, el uso factura por consumo y la
 arquitectura no cambia. Si conviene, Neon → Cloud SQL es migración de
 datos+config (ver arriba). Sin precios hardcodeados en código ni como
 garantía (límites y tarifas los fija cada proveedor).
+
+## Flujo de deploy (T-068, agente u operador)
+
+Un solo comando (sin secretos: la imagen no los lleva; el servicio conserva
+su env/secrets/SA y solo cambia la imagen):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/deploy.ps1 [-Tag <nombre>] [-AllowDirty] [-WhatIf]
+```
+
+Hace: prechequeos (gcloud, árbol limpio salvo `-AllowDirty`) → Cloud Build
+(`Dockerfile.backend`, tag default `master-<sha>[-dirty]`) → `run deploy`
+→ verifica `/health` + `/version` + `/ready` → imprime revisión. Rollback:
+`gcloud run services update-traffic <svc> --to-revisions <REV>=100
+--region us-east5` (revisión anterior conocida).
 
 ## Checklist operador (antes de declarar prod UP)
 

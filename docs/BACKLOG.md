@@ -51,5 +51,6 @@ Estados: pendiente / en-progreso / bloqueada / hecha / deuda / investigación / 
 | T-065 | hecha | 8 | [Commercial] F-C4 operativa mínima (purga programada, backups+restore, alertas) | 209 backend OK + PG reales; job con conteos + restore verificado + señales de alerta probadas (recepción en canal: pendiente operador) | docs/FASES-COMERCIAL.md, docs/superpowers/plans/2026-09-19-f-c4-operativa-minima.md |
 | T-066 | futuro | 8 | [Commercial] F-C3 firma del distribuible OV-IV (aparcada hasta tracción; ~$220–350/año) | signtool + publisher visible + payload firmado | docs/FASES-COMERCIAL.md |
 | T-067 | hecha | 7 | [Packaging] Carpeta `dist/` para distribuibles + flujo `tools/package.ps1 -Flavor` (cierra nota 001) | `dist/*.exe + .sha256` reproducible desde `build_x64/pkg/`; `dist/` ignorada; cero `.exe` trackeados; install/uninstall desde `dist/` PASS | docs/notes/001-builds-por-comando-segun-destino.md, docs/INSTALLER.md |
+| T-068 | hecha | 8 | [Managed] Apply Managed Kick (backend `/metadata/kick` + Apply server-side, contraparte de T-062) | E2E operador PASS (connect Managed → Apply título → read-back en directo); 215 backend OK + selfcheck 125/125; deploy rev-00027; `tools/deploy.ps1` + fix loopback explícito incluidos | docs/notes/007-portal-auth-managed-suscripciones.md |
 
 Regla: cada PR referencia su T-### y actualiza esta tabla + STATE.

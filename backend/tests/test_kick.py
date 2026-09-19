@@ -24,6 +24,9 @@ def make_service(transport, clock=None):
 
 
 def fake_kick_ok(method, url, fields):
+    if method == "PATCH" and "channels" in url:
+        assert fields.get("payload", {}).get("stream_title") == "Nuevo directo"
+        return 204, {}
     if url.endswith("/token") and fields.get("grant_type") == "authorization_code":
         assert "client_secret" in fields, "el secret debe viajar al token endpoint"
         return 200, {"access_token": "kat-1", "refresh_token": "krt-1",
@@ -211,6 +214,174 @@ class FlowTest(unittest.TestCase):
         svc.disconnect("inst-9")
         self.assertEqual(svc.status("inst-9")["status"], "disconnected")
         self.assertTrue(revoked)
+
+
+class MetadataKickTest(unittest.TestCase):
+    """Apply Managed Kick (T-068): PATCH stream_title server-side."""
+
+    def _connected(self):
+        svc, _ = make_service(fake_kick_ok)
+        started = svc.start("inst-9", "http://localhost:3000/cb")
+        txn = svc._transactions.load(started["transaction_id"])
+        result = svc.callback(txn["state"], "code-9")
+        self.assertEqual(result["status"], "connected")
+        return svc
+
+    def test_apply_title_204(self):
+        svc = self._connected()
+        out = svc.apply_metadata("inst-9", {"title": "Nuevo directo",
+                                            "description": "ignorada"})
+        self.assertEqual(out["status"], "updated")
+        self.assertEqual(out["provider"], "kick")
+        self.assertEqual(out["result"]["title"], "Nuevo directo")
+
+    def test_response_carries_no_tokens(self):
+        import json as _json
+        svc = self._connected()
+        out = svc.apply_metadata("inst-9", {"title": "Nuevo directo"})
+        dumped = _json.dumps(out)
+        self.assertNotIn("kat-1", dumped)
+        self.assertNotIn("krt-1", dumped)
+        self.assertNotIn("secret", dumped.lower())
+
+    def test_validation(self):
+        svc = self._connected()
+        for bad in ({"title": ""}, {"title": "   "}, {}):
+            with self.assertRaises(AppError) as ctx:
+                svc.apply_metadata("inst-9", bad)
+            self.assertEqual(ctx.exception.code, ErrorCode.INVALID_REQUEST)
+
+    def test_error_mapping(self):
+        cases = [({"message": "bad"}, 400, ErrorCode.INVALID_REQUEST),
+                 ({"message": "Unauthorized"}, 401, ErrorCode.SESSION_EXPIRED),
+                 ({"message": "Forbidden"}, 403, ErrorCode.AUTHORIZATION)]
+
+        for payload, status, code in cases:
+            def transport(method, url, fields, _p=payload, _s=status):
+                if method == "PATCH":
+                    return _s, _p
+                return fake_kick_ok(method, url, fields)
+
+            svc, _ = make_service(transport)
+            started = svc.start("inst-9", "http://localhost:3000/cb")
+            txn = svc._transactions.load(started["transaction_id"])
+            svc.callback(txn["state"], "code-9")
+            with self.assertRaises(AppError) as ctx:
+                svc.apply_metadata("inst-9", {"title": "Nuevo directo"})
+            self.assertEqual(ctx.exception.code, code)
+
+    def test_headers_on_real_path(self):
+        """Bearer viaja en header y método es PATCH (spy sobre urlopen)."""
+        import urllib.request
+        import backend.adapters.kick as kick_mod
+        captured = {}
+        real_urlopen = urllib.request.urlopen
+
+        class FakeResponse:
+            status = 204
+
+            def read(self):
+                return b""
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def spy(req, timeout=None):
+            headers = {k.lower(): v for k, v in req.header_items()}
+            captured["authorization"] = headers.get("authorization")
+            captured["content-type"] = headers.get("content-type")
+            captured["method"] = req.get_method()
+            captured["url"] = req.full_url
+            return FakeResponse()
+
+        urllib.request.urlopen = spy
+        try:
+            provider = KickProvider(FakeSecrets(), "http://x/cb")
+            out = provider.apply_metadata("at-real", {"title": "Nuevo directo"})
+        finally:
+            urllib.request.urlopen = real_urlopen
+        self.assertEqual(captured.get("authorization"), "Bearer at-real")
+        self.assertEqual(captured.get("method"), "PATCH")
+        self.assertIn("api.kick.com/public/v1/channels", captured.get("url"))
+        self.assertEqual(out["title"], "Nuevo directo")
+
+    def test_not_connected_is_authentication(self):
+        svc, _ = make_service(fake_kick_ok)
+        with self.assertRaises(AppError) as ctx:
+            svc.apply_metadata("nadie", {"title": "Nuevo directo"})
+        self.assertEqual(ctx.exception.code, ErrorCode.AUTHENTICATION)
+
+
+class HttpMetadataKickTest(unittest.TestCase):
+    """Despacho HTTP genérico /metadata/kick (sin cambios de routing)."""
+
+    @classmethod
+    def setUpClass(cls):
+        import threading
+        from backend.app import create_app
+        from backend.config import Settings
+        from backend.http_server import serve
+        settings = Settings(host="127.0.0.1", port=0,
+                            public_base_url="http://127.0.0.1:0")
+        provider = KickProvider(FakeSecrets(), "http://localhost:3000/cb",
+                                transport=fake_kick_ok)
+        svc = ConnectService(provider, InMemoryOAuthTransactionStore(),
+                             InMemoryConnectionStore(), InMemoryTokenStore())
+        cls.app = create_app(settings=settings, secrets=FakeSecrets(),
+                             providers={"kick": svc})
+        cls.server = serve(cls.app)
+        cls.port = cls.server.server_address[1]
+        cls.thread = threading.Thread(target=cls.server.serve_forever,
+                                      daemon=True)
+        cls.thread.start()
+        cls.base = f"http://127.0.0.1:{cls.port}"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def _connected_token(self):
+        import json as _json
+        import time as _time
+        import secrets as _secrets
+        import urllib.parse as _up
+        from backend.auth import sign_installation_secret
+        from backend.tests.test_http import _post
+        _, _, body = _post(self.base, "/auth/bootstrap", {})
+        creds = _json.loads(body)
+        ts = int(_time.time())
+        nonce = _secrets.token_hex(16)
+        sig = sign_installation_secret(creds["installation_secret"],
+                                       creds["installation_id"], ts, nonce)
+        _, _, body = _post(self.base, "/auth/session",
+                           {"installation_id": creds["installation_id"],
+                            "timestamp": ts, "nonce": nonce,
+                            "signature": sig})
+        tok = _json.loads(body)["session_token"]
+        h = {"Authorization": "Bearer " + tok}
+        s, _, body = _post(self.base, "/connect/kick", {}, headers=h)
+        self.assertEqual(s, 200)
+        query = _up.urlparse(_json.loads(body)["authorization_url"]).query
+        state = dict(_up.parse_qsl(query))["state"]
+        self.app.providers["kick"].callback(state, "code-h")
+        return h
+
+    def test_apply_roundtrip(self):
+        import json as _json
+        from backend.tests.test_http import _post
+        h = self._connected_token()
+        s, _, body = _post(self.base, "/metadata/kick",
+                           {"title": "Nuevo directo",
+                            "description": "ignorada"}, headers=h)
+        self.assertEqual(s, 200)
+        payload = _json.loads(body)
+        self.assertEqual(payload["status"], "updated")
+        self.assertEqual(payload["provider"], "kick")
+        self.assertNotIn("kat-1", body.decode())
 
 
 if __name__ == "__main__":

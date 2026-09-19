@@ -2093,11 +2093,11 @@ void MetadataDock::startApplyNext()
 		backoffCount_ = 0;
 	}
 	backoffResume_ = false;
-	// Managed Apply (backend token): YouTube (FASE 2.1-C) y Twitch.
-	// Cualquier otro provider×mode sigue con su cuenta Independent
-	// (Kick Managed no tiene Apply path).
+	// Managed Apply (backend token): YouTube (FASE 2.1-C), Twitch y
+	// Kick (T-068). Solo Independent usa su cuenta directa.
 	const bool authorized =
-		(isManaged() && (p == P::YouTube || p == P::Twitch))
+		(isManaged() && (p == P::YouTube || p == P::Twitch ||
+				 p == P::Kick))
 			? managedAccount(p).connected
 			: account(p).connected;
 	if (!authorized) {
@@ -2164,11 +2164,86 @@ void MetadataDock::startApplyNext()
 					      descEdit_->toPlainText()),
 			 Op::UpYt, yt_.access);
 	} else {
+		// T-068: Managed Apply va por el backend con el token
+		// server-side; Independent directo abajo, intacto.
+		if (isManaged()) {
+			startManagedKickApply();
+			return;
+		}
 		sendJson(QUrl(QStringLiteral(
 				 "https://api.kick.com/public/v1/channels")),
 			 QStringLiteral("PATCH"), meta::kickPayload(title),
 			 Op::UpKk, kk_.access, QString(), true);
 	}
+}
+
+// --- managed Kick apply (T-068) -------------------------------------------
+// Token server-side: el plugin envía solo sesión bearer + {title}.
+// Sin descripción: Kick no tiene equivalente (channel_description es del
+// canal y jamás se escribe como descripción del stream).
+
+void MetadataDock::startManagedKickApply()
+{
+	using P = meta::Platform;
+	const P p = P::Kick;
+	const ManagedConn &m = managedAccount(p);
+	if (!m.connected || m.userId.isEmpty()) {
+		finishPlatform(p, false,
+			       meta::userMessage(meta::Outcome::AuthRequired,
+						 p));
+		startApplyNext();
+		return;
+	}
+	setResult(p, true, tr("Updating…"));
+	QJsonObject body;
+	body[QStringLiteral("title")] = titleEdit_->text();
+	managedAuth_->apiPost(QStringLiteral("/metadata/kick"), body,
+			      [this, p](const backend_auth::Client::ApiReply &rep) {
+				      obs_log(LOG_INFO,
+					      "managed apply reply: result=%d "
+					      "http=%d",
+					      static_cast<int>(rep.result),
+					      rep.http);
+				      if (!isManaged())
+					      return; // user switched mode
+				      if (rep.result ==
+					  backend_auth::Result::Ok) {
+					      finishPlatform(
+						      p, true,
+						      meta::userMessage(
+							      meta::Outcome::Success,
+							      p));
+					      obs_log(LOG_INFO,
+						      "apply %s: ok (managed)",
+						      meta::platformName(p));
+					      startApplyNext();
+					      return;
+				      }
+				      const meta::Outcome oc =
+					      rep.result ==
+						      backend_auth::Result::
+							      NetworkError
+					      ? meta::Outcome::NetworkError
+					      : meta::classifyStatus(
+						      rep.http == 0 ? -1
+								    : rep.http);
+				      if (scheduleBackoff(p, oc, rep.http))
+					      return;
+				      if (oc == meta::Outcome::AuthRequired) {
+					      ManagedConn &mm =
+						      managedAccount(p);
+					      mm.connected = false;
+					      mm.userId.clear();
+					      mm.display.clear();
+					      setStatus(p,
+							tr("Needs reconnection."));
+					      saveStore(); // drop the stale snapshot
+				      }
+				      finishPlatform(
+					      p, false,
+					      meta::userMessage(oc, p));
+				      startApplyNext();
+			      });
 }
 
 void MetadataDock::finishPlatform(meta::Platform p, bool ok,
