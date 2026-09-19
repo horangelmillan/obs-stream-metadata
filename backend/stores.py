@@ -78,6 +78,19 @@ class InMemorySessionStore(SessionStore):
             del self._data[sid]
         return len(doomed)
 
+    def purge_expired(self, now: float) -> dict:
+        """Borra sesiones expiradas o revocadas (F-C4). Conteos disjuntos."""
+        expired = revoked = 0
+        for sid in [sid for sid, payload in self._data.items()
+                    if payload.get("expires_at", 0) <= now
+                    or payload.get("revoked")]:
+            payload = self._data.pop(sid)
+            if payload.get("expires_at", 0) <= now:
+                expired += 1
+            else:
+                revoked += 1
+        return {"expired": expired, "revoked": revoked}
+
 
 class AllowAllRateLimiter(RateLimiter):
     """Sin política real. Punto de integración para T-044+ (ver §20 del encargo).
@@ -187,6 +200,19 @@ class InMemoryOAuthTransactionStore:
         for tid in doomed:
             del self._data[tid]
         return len(doomed)
+
+    def purge_expired(self, now: float) -> dict:
+        """Borra transacciones expiradas o consumidas (F-C4). Disjuntos."""
+        expired = consumed = 0
+        for tid in [tid for tid, entry in self._data.items()
+                    if entry.get("expires_at", 0) <= now
+                    or entry.get("consumed")]:
+            entry = self._data.pop(tid)
+            if entry.get("expires_at", 0) <= now:
+                expired += 1
+            else:
+                consumed += 1
+        return {"expired": expired, "consumed": consumed}
 
 
 class InMemoryConnectionStore:

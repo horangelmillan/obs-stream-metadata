@@ -1,0 +1,29 @@
+{
+  "displayName": "obs-stream-metadata: p99 latency > 5s durante 5 min",
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "p99 request latency above 5000ms for 5 minutes",
+      "conditionThreshold": {
+        "filter": "resource.type=\"cloud_run_revision\" AND metric.type=\"run.googleapis.com/request_latencies\" AND resource.labels.service_name=\"obs-stream-metadata-service\"",
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 5000,
+        "duration": "300s",
+        "aggregations": [
+          {
+            "alignmentPeriod": "60s",
+            "perSeriesAligner": "ALIGN_PERCENTILE_99",
+            "crossSeriesReducer": "REDUCE_PERCENTILE_99",
+            "groupByFields": ["resource.labels.service_name"]
+          }
+        ]
+      }
+    }
+  ],
+  "notificationChannels": ["projects/obs-stream-metadata/notificationChannels/OPERADOR-CANAL-ID"],
+  "documentation": {
+    "content": "p99 > 5 s durante 5 min (timeout del servicio 300 s; 5 s ya degrada el OAuth interactivo). Revisar Cloud Trace + instancia/arranques en frio. Runbook: docs/DEPLOYMENT.md.",
+    "mimeType": "text/markdown"
+  },
+  "alertStrategy": {"autoClose": "86400s"}
+}

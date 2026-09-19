@@ -3,7 +3,8 @@ import threading
 import unittest
 import urllib.parse
 
-from backend.adapters.youtube import YouTubeProvider, classify_token_error
+from backend.adapters.youtube import (YouTubeProvider, classify_broadcast_error,
+                                       classify_token_error)
 from backend.errors import AppError, ErrorCode
 from backend.kernel import Account, Provider
 from backend.oauth import ConnectService
@@ -57,6 +58,16 @@ class AdapterTest(unittest.TestCase):
                          ErrorCode.AUTHORIZATION)
         self.assertEqual(classify_token_error({"error": "x"}, 429).code,
                          ErrorCode.PROVIDER_RATE_LIMITED)
+
+    def test_quota_exceeded_maps_to_rate_limited_google_rate(self):
+        # F-C4 (T-065): la alerta A3 consume `detail=google:rate` en logs.
+        quota = {"error": {"code": 403, "message": "The request cannot be "
+                            "completed because you have exceeded your quota.",
+                            "errors": [{"reason": "quotaExceeded"}]}}
+        err = classify_broadcast_error(quota, 403)
+        self.assertEqual(err.code, ErrorCode.PROVIDER_RATE_LIMITED)
+        self.assertEqual(err.detail, "google:rate")
+        self.assertEqual(err.http_status(), 429)
         self.assertEqual(classify_token_error({"error": "x"}, 500).code,
                          ErrorCode.PROVIDER_UNAVAILABLE)
 

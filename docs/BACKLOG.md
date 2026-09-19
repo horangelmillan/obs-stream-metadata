@@ -48,7 +48,7 @@ Estados: pendiente / en-progreso / bloqueada / hecha / deuda / investigación / 
 | T-062 | pendiente | 8 | [Commercial] FASE 2.1-C.1 + Apply Managed Twitch (diagnóstico incompatibleParameters, mapper robusto, endpoints metadata twitch/youtube, .exe FASE21D) | E2E humano YouTube/Twitch con efecto real | docs/FASES-COMERCIAL.md |
 | T-063 | hecha | 8 | [Commercial] F-C1 cifrado de tokens en reposo (AEAD Fernet + Secret Manager + migración 002 + backfill, sin romper sesiones) | 190 backend OK; dump solo `v1:`; deploy rev-00016 dual-read; sonda prod Apply YT/Kick/Twitch OK 2026-09-17 | docs/FASES-COMERCIAL.md, docs/superpowers/plans/2026-09-17-f-c1-token-encryption.md |
 | T-064 | hecha | 8 | [Commercial] F-C2 borrado real de datos + privacidad operativa (endpoint, UI, uninstaller, contacto) | 198 backend OK + 14 PG reales; erase PG: conteos a cero + `disconnected` + bearer rechazado; selfcheck OK; secret-scan limpio | docs/FASES-COMERCIAL.md, docs/superpowers/plans/2026-09-18-f-c2-borrado-total.md |
-| T-065 | pendiente | 8 | [Commercial] F-C4 operativa mínima (purga programada, backups+restore, alertas) | job con conteos + restore + alerta de prueba | docs/FASES-COMERCIAL.md |
+| T-065 | hecha | 8 | [Commercial] F-C4 operativa mínima (purga programada, backups+restore, alertas) | 209 backend OK + PG reales; job con conteos + restore verificado + señales de alerta probadas (recepción en canal: pendiente operador) | docs/FASES-COMERCIAL.md, docs/superpowers/plans/2026-09-19-f-c4-operativa-minima.md |
 | T-066 | futuro | 8 | [Commercial] F-C3 firma del distribuible OV-IV (aparcada hasta tracción; ~$220–350/año) | signtool + publisher visible + payload firmado | docs/FASES-COMERCIAL.md |
 
 Regla: cada PR referencia su T-### y actualiza esta tabla + STATE.

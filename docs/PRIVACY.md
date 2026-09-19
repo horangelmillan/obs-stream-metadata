@@ -146,14 +146,19 @@ Real behavior (no invented periods):
 
 - Sessions: 30 min TTL, enforced on access; revocation **flags**
   the row (`revoked=true`) rather than deleting it, and expired rows
-  are rejected but not purged — no background eraser is implemented.
+  are rejected on access. A daily purge job (`POST /ops/purge` via
+  Cloud Scheduler, F-C4) physically deletes sessions that are expired
+  or revoked — effective retention ≤ ~25 h after issue/revocation.
   Rows are replaced when a new session is issued under the same token
-  id only if the flow overwrites them; otherwise they persist.
-  Erase (`POST /privacy/erase`, F-C2) deletes **all** sessions of the
-  installation outright.
+  id only if the flow overwrites them; otherwise they persist until
+  the purge. Erase (`POST /privacy/erase`, F-C2) deletes **all**
+  sessions of the installation outright.
 - OAuth transactions/nonces: TTL 600 s / 10 min window; consumed or
-  expired entries are dropped on access; nonces are memory-only.
-  Erase deletes pending transactions of the installation outright.
+  expired entries are dropped on access; nonces are memory-only. The
+  same daily purge deletes transactions that are expired or consumed
+  (including `code_verifier`s) — effective retention ≤ ~24 h after
+  expiry/use. Erase deletes pending transactions of the installation
+  outright.
 - Connections + tokens: persist **until Disconnect** (no automatic
   expiry cleanup implemented). Erase deletes all connections of the
   installation plus unshared token rows (shared rows are kept while
@@ -288,7 +293,7 @@ fixed here, never by silently changing the system (T-060 rule).
 | installation id+secret | bootstrap | DPAPI (plugin) + PG `installations` | backend auth | until revoke/uninstall-independent | revoke/re-bootstrap |
 | `managedYoutube/managedKick` | `/status` | DPAPI file (plaintext) | reconnect labels | until Disconnect | snapshot omitted |
 | `connectionMode`, `backendBaseUrl` | local/backend | DPAPI file (plaintext) | context/binding | until overwrite | — |
-| session token record | `/auth/*` | PG `sessions` | bearer auth | 30 min TTL; **flagged, not deleted**, on revoke | erase deletes all of the installation; else new session / operator DB delete |
+| session token record | `/auth/*` | PG `sessions` | bearer auth | 30 min access TTL; flagged on revoke, physically deleted by the daily F-C4 purge (≤ ~25 h) | purge (expired/revoked) or erase deletes all of the installation |
 | OAuth transaction | `/connect/*` | PG `transactions` | CSRF/PKCE/exchange | 600 s TTL, single-use | consume/expiry; erase deletes pending of the installation |
 | connection entry | callback | PG `connections` | status/reconnect | until Disconnect/erase | disconnect (per provider) or erase (all) |
 | user tokens | exchange/refresh | PG `tokens` (ciphertext `v1:` + metadata en claro) | API calls | until Disconnect/erase (shared rows kept while referenced) | disconnect / erase (guarded) + best-effort provider revoke |
