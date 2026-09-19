@@ -125,12 +125,27 @@ if ($WhatIf) {
   exit 0
 }
 
-# --- 4. Herramientas ---
-foreach ($tool in @('cmake', 'makensis')) {
-  if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
-    Fail "herramienta no encontrada en PATH: $tool"
+# --- 4. Herramientas (auto-descubrimiento: PATH primero, rutas típicas después) ---
+function Find-Tool([string]$name, [string[]]$candidates) {
+  $cmd = Get-Command $name -ErrorAction SilentlyContinue
+  if ($cmd) { return $cmd.Source }
+  foreach ($p in $candidates) {
+    if (Test-Path -LiteralPath $p) { return $p }
   }
+  return $null
 }
+$cmakeExe = Find-Tool 'cmake' @(
+  'C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe',
+  'C:\Program Files\Microsoft Visual Studio\2022\Professional\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe',
+  'C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe',
+  'C:\Program Files\CMake\bin\cmake.exe'
+)
+if (-not $cmakeExe) { Fail 'cmake no encontrado (ni en PATH ni en rutas típicas de VS/CMake)' }
+$makensisExe = Find-Tool 'makensis' @(
+  'C:\Program Files (x86)\NSIS\makensis.exe',
+  'C:\Program Files\NSIS\makensis.exe'
+)
+if (-not $makensisExe) { Fail 'makensis no encontrado (ni en PATH ni en NSIS típico): instala NSIS 3.x' }
 
 # --- 5. Confirmacion prod-integrated (nota 001: interactiva + rastro) ---
 if ($Flavor -eq 'prod-integrated') {
@@ -141,11 +156,11 @@ if ($Flavor -eq 'prod-integrated') {
 }
 
 # --- 6. Secuencia configure -> build -> install -> makensis ---
-& cmake @configureArgs
+& $cmakeExe @configureArgs
 if ($LASTEXITCODE -ne 0) { Fail "cmake configure fallo (exit $LASTEXITCODE)" }
-& cmake --build $BuildDirAbs --config RelWithDebInfo
+& $cmakeExe --build $BuildDirAbs --config RelWithDebInfo
 if ($LASTEXITCODE -ne 0) { Fail "cmake build fallo (exit $LASTEXITCODE)" }
-& cmake --install $BuildDirAbs --config RelWithDebInfo --prefix $StagingAbs --component obs-package
+& $cmakeExe --install $BuildDirAbs --config RelWithDebInfo --prefix $StagingAbs --component obs-package
 if ($LASTEXITCODE -ne 0) { Fail "cmake install fallo (exit $LASTEXITCODE)" }
 
 # --- 7. Verifica payload: solo .dll + en-US.ini + qschannelbackend.dll ---
@@ -167,7 +182,7 @@ if ($bad) {
   Fail ('staging con ficheros dev no permitidos: ' + (($bad | ForEach-Object { $_.Name }) -join ', '))
 }
 
-& makensis "/DPKG_BIN=$StagingAbs\$PluginName\obs-plugins\64bit" "/DPKG_DATA=$StagingAbs\$PluginName\data\obs-plugins\$PluginName" "/DOUTDIR=$PkgDirAbs" $nsiFile
+& $makensisExe "/DPKG_BIN=$StagingAbs\$PluginName\obs-plugins\64bit" "/DPKG_DATA=$StagingAbs\$PluginName\data\obs-plugins\$PluginName" "/DOUTDIR=$PkgDirAbs" $nsiFile
 if ($LASTEXITCODE -ne 0) { Fail "makensis fallo (exit $LASTEXITCODE)" }
 
 # --- 8. Copia a dist/ con sabor en el nombre + SHA256 ---
