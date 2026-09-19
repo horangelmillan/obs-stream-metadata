@@ -7,6 +7,9 @@ build_arm64/
 .deps/
 cmake/.CMakeBuildNumber
 out/
+# Distribuibles (T-067): solo Release attachments, nunca trackeados
+dist/
+*.sha256
 cmake-build-*/
 CMakeCache.txt
 CMakeFiles/

@@ -50,5 +50,6 @@ Estados: pendiente / en-progreso / bloqueada / hecha / deuda / investigación / 
 | T-064 | hecha | 8 | [Commercial] F-C2 borrado real de datos + privacidad operativa (endpoint, UI, uninstaller, contacto) | 198 backend OK + 14 PG reales; erase PG: conteos a cero + `disconnected` + bearer rechazado; selfcheck OK; secret-scan limpio | docs/FASES-COMERCIAL.md, docs/superpowers/plans/2026-09-18-f-c2-borrado-total.md |
 | T-065 | hecha | 8 | [Commercial] F-C4 operativa mínima (purga programada, backups+restore, alertas) | 209 backend OK + PG reales; job con conteos + restore verificado + señales de alerta probadas (recepción en canal: pendiente operador) | docs/FASES-COMERCIAL.md, docs/superpowers/plans/2026-09-19-f-c4-operativa-minima.md |
 | T-066 | futuro | 8 | [Commercial] F-C3 firma del distribuible OV-IV (aparcada hasta tracción; ~$220–350/año) | signtool + publisher visible + payload firmado | docs/FASES-COMERCIAL.md |
+| T-067 | hecha | 7 | [Packaging] Carpeta `dist/` para distribuibles + flujo `tools/package.ps1 -Flavor` (cierra nota 001) | `dist/*.exe + .sha256` reproducible desde `build_x64/pkg/`; `dist/` ignorada; cero `.exe` trackeados; install/uninstall desde `dist/` PASS | docs/notes/001-builds-por-comando-segun-destino.md, docs/INSTALLER.md |
 
 Regla: cada PR referencia su T-### y actualiza esta tabla + STATE.
