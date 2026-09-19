@@ -107,6 +107,27 @@ class PgSessionStore(SessionStore):
             conn.commit()
             return len(doomed)
 
+    def purge_expired(self, now: float) -> dict:
+        """Borra sesiones expiradas o revocadas (F-C4). Conteos disjuntos."""
+        with self._pool as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id, payload_json FROM sessions")
+                rows = cur.fetchall()
+                expired = revoked = 0
+                for sid, blob in rows:
+                    payload = json.loads(blob)
+                    if payload.get("expires_at", 0) <= now:
+                        doomed, expired = True, expired + 1
+                    elif payload.get("revoked"):
+                        doomed, revoked = True, revoked + 1
+                    else:
+                        doomed = False
+                    if doomed:
+                        cur.execute("DELETE FROM sessions WHERE id=%s",
+                                    (sid,))
+            conn.commit()
+            return {"expired": expired, "revoked": revoked}
+
 
 class PgOAuthTransactionStore:
     """Mismo port que InMemoryOAuthTransactionStore (T-045 §8)."""
@@ -179,6 +200,27 @@ class PgOAuthTransactionStore:
                                 (tid,))
             conn.commit()
             return len(doomed)
+
+    def purge_expired(self, now: float) -> dict:
+        """Borra transacciones expiradas o consumidas (F-C4). Disjuntos."""
+        with self._pool as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id, entry_json FROM transactions")
+                rows = cur.fetchall()
+                expired = consumed = 0
+                for tid, blob in rows:
+                    entry = json.loads(blob)
+                    if entry.get("expires_at", 0) <= now:
+                        doomed, expired = True, expired + 1
+                    elif entry.get("consumed"):
+                        doomed, consumed = True, consumed + 1
+                    else:
+                        doomed = False
+                    if doomed:
+                        cur.execute("DELETE FROM transactions WHERE id=%s",
+                                    (tid,))
+            conn.commit()
+            return {"expired": expired, "consumed": consumed}
 
 
 class PgConnectionStore:

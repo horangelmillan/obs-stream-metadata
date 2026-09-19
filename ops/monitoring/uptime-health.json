@@ -1,0 +1,29 @@
+{
+  "displayName": "obs-stream-metadata: uptime /health failing",
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "uptime check failing for 10 minutes",
+      "conditionThreshold": {
+        "filter": "metric.type=\"monitoring.googleapis.com/uptime_check/check_passed\" AND metric.label.check_id=\"OPERADOR-CHECK-ID\"",
+        "comparison": "COMPARISON_LT",
+        "thresholdValue": 1,
+        "duration": "600s",
+        "aggregations": [
+          {
+            "alignmentPeriod": "1200s",
+            "perSeriesAligner": "ALIGN_NEXT_OLDER",
+            "crossSeriesReducer": "REDUCE_COUNT_FALSE",
+            "groupByFields": ["resource.label.*"]
+          }
+        ]
+      }
+    }
+  ],
+  "notificationChannels": ["projects/obs-stream-metadata/notificationChannels/OPERADOR-CANAL-ID"],
+  "documentation": {
+    "content": "El uptime check contra /health falla 10 min (contenedor caido, revision rota o red). Revisar Cloud Run > Revisiones y Logs. NOTA: /ready hoy es (True,ok) por defecto tambien en prod (no verifica DB): limitacion conocida, cubierta indirectamente por A1/A4.",
+    "mimeType": "text/markdown"
+  },
+  "alertStrategy": {"autoClose": "86400s"}
+}

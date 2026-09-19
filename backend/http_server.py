@@ -30,6 +30,11 @@ from backend.logging_setup import API_VERSION, BACKEND_NAME, BACKEND_VERSION, ge
 from backend.ports import RateLimiter
 from backend.stores import FixedWindowRateLimiter, InMemoryInstallationStore
 
+# F-C4: purga de operador (job diario + manual ocasional). 10/min sobra
+# y mantiene el endpoint anti-abuso sin interferir con el Scheduler.
+OPS_LIMIT = 10
+OPS_WINDOW_S = 60
+
 
 class BackendApp:
     def __init__(self, settings: Settings, sessions, limiter: RateLimiter,
@@ -37,11 +42,13 @@ class BackendApp:
                  limiters: dict | None = None, clock=None,
                  providers: dict | None = None,
                  provider_redirects: dict | None = None,
-                 installations=None, transactions=None) -> None:
+                 installations=None, transactions=None,
+                 secrets=None) -> None:
         self.settings = settings
         self.sessions = sessions
         self.installations = installations
         self.transactions = transactions
+        self.secrets = secrets
         self.limiter = limiter
         self._clock = clock or time.time
         self.auth = auth_service or AuthService(InMemoryInstallationStore(),
@@ -57,8 +64,12 @@ class BackendApp:
                                                    AUTH_PER_INSTALL_WINDOW_S,
                                                    clock=self._clock),
             "auth_ip": FixedWindowRateLimiter(AUTH_PER_IP_LIMIT,
-                                              AUTH_PER_IP_WINDOW_S,
-                                              clock=self._clock),
+                                               AUTH_PER_IP_WINDOW_S,
+                                               clock=self._clock),
+            # F-C4: purga de operador (Scheduler diario + manual).
+            # 10/min sobra para un job diario; es solo anti-abuso.
+            "ops": FixedWindowRateLimiter(OPS_LIMIT, OPS_WINDOW_S,
+                                          clock=self._clock),
         }
         self._ready_check = ready_check or (lambda: (True, "ok"))
         self.started_at = time.time()
@@ -112,6 +123,32 @@ class BackendApp:
     def _limited(self, name: str, key: str) -> None:
         if not self.limiters[name].allow(key):
             raise AppError(ErrorCode.RATE_LIMITED, f"{name} limit")
+
+    def ops_purge_token(self) -> str | None:
+        """Bearer de operador para /ops/purge (F-C4). Solo el nombre viaja
+        en errores: el valor jamás sale del SecretStore ni entra en logs."""
+        if self.secrets is None:
+            return None
+        return self.secrets.get("OPS_PURGE_TOKEN")
+
+    def ops_purge(self, bearer: str) -> dict:
+        """Purga F-C4 con auth de operador. Solo conteos en salida."""
+        import hmac as _hmac
+        expected = self.ops_purge_token()
+        if not expected:
+            raise AppError(ErrorCode.INTERNAL, "purge not configured")
+        if not bearer or not _hmac.compare_digest(bearer, expected):
+            raise AppError(ErrorCode.AUTHENTICATION, "bad ops token")
+        self._limited("ops", "ops:purge")
+        if self.transactions is None:
+            raise AppError(ErrorCode.INTERNAL, "purge not configured")
+        from backend import maintenance as _maintenance
+        result = _maintenance.purge_expired(self.sessions,
+                                            self.transactions, self._clock)
+        self.log.info("ops purge sessions=%s transactions=%s",
+                      result["sessions"], result["transactions"],
+                      extra={"requestId": "-"})
+        return {"purged": result}
 
 
 def _json_body(handler: BaseHTTPRequestHandler, limit: int) -> dict:
@@ -220,6 +257,13 @@ class _Handler(BaseHTTPRequestHandler):
             app._limited("auth_install", f"yt-disc:{record.installation_id}")
             service.disconnect(record.installation_id)
             return 200, {"provider": "youtube", "status": "disconnected"}
+        if path == "/ops/purge":
+            # F-C4: purga programada (T-065). Auth propia de operador
+            # (bearer OPS_PURGE_TOKEN), no sesión de instalación: el
+            # Scheduler no es un plugin y no tiene installation_id.
+            return 200, app.ops_purge(
+                auth_boundary.extract_bearer(
+                    self.headers.get("Authorization", "")) or "")
         if path == "/privacy/erase":
             # F-C2: borrado total por instalación (T-064). El bearer usado
             # queda revocado como efecto (era una session de la instalación).

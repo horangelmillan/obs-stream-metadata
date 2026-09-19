@@ -84,6 +84,13 @@ class SessionStore(ABC):
     def delete_for_installation(self, installation_id: str) -> int:
         """Borra las sesiones de una instalación (F-C2). Devuelve el conteo."""
 
+    @abstractmethod
+    def purge_expired(self, now: float) -> dict:
+        """Borra sesiones inutilizables: expiradas o revocadas (F-C4).
+
+        Devuelve {"expired": n, "revoked": n} disjuntos (expirada gana).
+        Idempotente y re-ejecutable."""
+
 
 class SecretStore(ABC):
     """Credenciales de aplicación (app client_id/secret, signing keys).
@@ -156,6 +163,13 @@ class OAuthTransactionStore(ABC):
     @abstractmethod
     def delete_for_installation(self, installation_id: str) -> int:
         """Borra transacciones pendientes de una instalación (F-C2)."""
+
+    @abstractmethod
+    def purge_expired(self, now: float) -> dict:
+        """Borra transacciones inutilizables: expiradas o consumidas (F-C4).
+
+        Devuelve {"expired": n, "consumed": n} disjuntos (expirada gana).
+        Idempotente y re-ejecutable."""
 
 
 class ConnectionStore(ABC):

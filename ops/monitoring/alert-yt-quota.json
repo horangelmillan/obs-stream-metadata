@@ -1,0 +1,28 @@
+{
+  "displayName": "obs-stream-metadata: rechazo YouTube rate/quota (detail=google:rate)",
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "any provider_rate_limited google:rate in 5 minutes",
+      "conditionThreshold": {
+        "filter": "metric.type=\"logging.googleapis.com/user/yt-quota-rejects\" AND resource.type=\"global\"",
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 0,
+        "duration": "300s",
+        "aggregations": [
+          {
+            "alignmentPeriod": "60s",
+            "perSeriesAligner": "ALIGN_SUM",
+            "crossSeriesReducer": "REDUCE_SUM"
+          }
+        ]
+      }
+    }
+  ],
+  "notificationChannels": ["projects/obs-stream-metadata/notificationChannels/OPERADOR-CANAL-ID"],
+  "documentation": {
+    "content": "El backend registro un rechazo YouTube por rate/quota (`request error code=provider_rate_limited detail=google:rate`, ver `classify_broadcast_error`). Revisar cuota consumida en API Console (YouTube Data API v3 > Quotas) y bajar ritmo de Apply/listados. Complemento manual: alerta al 80 % del cupo diario en Console (pasos en ops/monitoring/README.md).",
+    "mimeType": "text/markdown"
+  },
+  "alertStrategy": {"autoClose": "86400s"}
+}

@@ -1,0 +1,29 @@
+{
+  "displayName": "obs-stream-metadata: 5xx Cloud Run > 3 en 5 min",
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "5xx count above 3 for 5 minutes",
+      "conditionThreshold": {
+        "filter": "resource.type=\"cloud_run_revision\" AND metric.type=\"run.googleapis.com/request_count\" AND resource.labels.service_name=\"obs-stream-metadata-service\" AND metric.labels.response_code_class=\"5xx\"",
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 3,
+        "duration": "300s",
+        "aggregations": [
+          {
+            "alignmentPeriod": "60s",
+            "perSeriesAligner": "ALIGN_SUM",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "groupByFields": ["resource.labels.service_name"]
+          }
+        ]
+      }
+    }
+  ],
+  "notificationChannels": ["projects/obs-stream-metadata/notificationChannels/OPERADOR-CANAL-ID"],
+  "documentation": {
+    "content": "Mas de 3 respuestas 5xx en 5 min en obs-stream-metadata-service (traer baseline ~0: cualquier 5xx sostenido es anomalo). Ver Logs Explorer (resource cloud_run_revision) y ultimos deploys. Runbook: docs/DEPLOYMENT.md.",
+    "mimeType": "text/markdown"
+  },
+  "alertStrategy": {"autoClose": "86400s"}
+}

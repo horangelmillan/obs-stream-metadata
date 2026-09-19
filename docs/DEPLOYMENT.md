@@ -186,6 +186,68 @@ nombre, nunca el valor). Reglas:
   re-desplegar. Detalle del descarte de alternativas (KMS/pgcrypto) en
   `docs/superpowers/plans/2026-09-17-f-c1-token-encryption.md`.
 
+## Purga programada F-C4 (T-065)
+
+Sesiones expiradas/revocadas y transacciones expiradas/consumidas se
+borran a diario vía `POST /ops/purge` (idempotente, re-ejecutable; solo
+conteos en logs/respuestas). Connections/tokens/installations NO se
+purgan (viven hasta Disconnect/erase, F-C2).
+
+```text
+# 1. Generar el bearer de operador (una vez; nunca en repo/logs):
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+# 2. Guardarlo en Secret Manager:
+printf '%s' '<TOKEN>' | gcloud secrets create OPS_PURGE_TOKEN --data-file=- --project=obs-stream-metadata
+# 3. Montarlo (un secreto por directorio; se suma a SECRET_DIRS):
+--set-secrets=/run/secrets/ops-purge-token/OPS_PURGE_TOKEN=OPS_PURGE_TOKEN:1
+--set-env-vars=STREAM_META_BACKEND_SECRET_DIRS=...:/run/secrets/ops-purge-token
+# 4. Job diario (misma region que el servicio; URL = PUBLIC_URL real):
+gcloud scheduler jobs create http obs-stream-metadata-purge \
+  --location=us-east5 \
+  --schedule="0 3 * * *" \
+  --time-zone="America/New_York" \
+  --uri="https://obs-stream-metadata-service-364043334054.us-east5.run.app/ops/purge" \
+  --http-method=POST \
+  --headers="Content-Type=application/json" \
+  --message-body="{}" \
+  --attempt-deadline=120s \
+  --max-retry-attempts=3 \
+  --project=obs-stream-metadata
+```
+
+El header `Authorization: Bearer <TOKEN>` se configura en el job tras
+crearlo (Console → Cloud Scheduler → job → Edit → Headers; el valor
+queda guardado como parte del job: es un secreto de un solo proposito,
+rotable regenerando el secreto y editando el job). Sin `OPS_PURGE_TOKEN`
+montado, el endpoint responde `500 purge not configured` (fail-closed).
+Rate-limit propio `ops: 10/min`. Ejecución manual (solo DBs de prueba o
+ventana de mantenimiento, nunca prod en caliente):
+
+```text
+$env:STREAM_META_BACKEND_DATABASE_URL = 'postgresql://...'
+python tools/purge_expired.py   # solo conteos en salida
+```
+
+Rotación del bearer: generar nuevo → nueva versión del secreto →
+editar el job → verificar un `200` manual → retirar versión vieja.
+
+## Alertas F-C4 (T-065)
+
+Definiciones versionadas en `ops/monitoring/` (el operador las crea;
+paso a paso en `ops/monitoring/README.md`):
+
+| ID | Señal | Umbral inicial |
+|---|---|---|
+| A1 | `run.googleapis.com/request_count` 5xx | > 3 en 5 min |
+| A2 | `request_latencies` p99 | > 5000 ms 5 min |
+| A3 | log-based `yt-quota-rejects` (`detail=google:rate`) | > 0 en 5 min |
+| A4 | uptime check `GET /health` 5 min | falla 10 min |
+
+Más alerta manual al 80 % del cupo YouTube (10 000 u/día) en API
+Console. Canal mínimo: email del operador. Limitación conocida: `/ready`
+es `(True,ok)` por defecto también en prod (no verifica DB); A1/A4 la
+cubren indirectamente (ENDURECIDO: no se cambia el wiring en F-C4).
+
 ## Arranque / salud / parada (Cloud Run)
 
 - Arranque: migrations al inicio (falla antes de escuchar si el esquema
@@ -224,6 +286,22 @@ producción lo rechaza). Destruir/recrear: `DROP DATABASE` + `CREATE`.
   permite migrar de proveedor.
 - MVP: backup manual antes de cada cambio de esquema; automatizar
   (schedule) al crecer. Probar la restauración, no solo el dump.
+- Restore probado F-C4 (T-065, 2026-09-19, PG 18 local): `pg_dump -Fc`
+  → `pg_restore -d NUEVA_DB` con conteos idénticos antes/después por
+  tabla (`sessions`, `transactions`, `schema_migrations`) + lectura
+  representativa. Procedimiento operador contra Neon:
+  1. Dashboard Neon → Connect → desactivar pooling (URL directa, p. ej.
+     host sin `-pooler`; con pooler el dump falla — exigencia Neon).
+  2. `pg_dump -Fc -v -d "<URL-directa>" -f backup-AAAAMMDD.dump`
+     (credenciales por entorno, fichero fuera de la instancia).
+  3. `createdb <restore_check>` + `pg_restore -v -d "<restore_check>"`
+     + `SELECT count(*)` por tabla en origen y destino (iguales) +
+     lectura puntual (`/connect/*/status` tras re-apuntar si aplica).
+- RPO/RTO honestos (plan Free): RPO = último dump manual o 6 h de
+  history Neon (1 GB, PITR/instant restore); RTO = restore manual
+  (minutos-horas según tamaño); sin SLA en Free. 1 snapshot manual
+  disponible; snapshots programados requieren plan de pago (decisión
+  del operador, no de F-C4).
 
 ## Migración Neon → Cloud SQL (§14-15 T-055, obligatoria documentada)
 
