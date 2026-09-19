@@ -231,6 +231,23 @@ python tools/purge_expired.py   # solo conteos en salida
 Rotación del bearer: generar nuevo → nueva versión del secreto →
 editar el job → verificar un `200` manual → retirar versión vieja.
 
+> Estado operativo 2026-09-19 (ejecutado con CLI, proyecto
+> `obs-stream-metadata`): `OPS_PURGE_TOKEN` v4 viva (v1–v3
+> deshabilitadas tras exponer v1 en un error del CLI y generar v2/v3
+> en UTF-16 por la redirección `>` de PowerShell — el secreto debe
+> guardarse en bytes UTF-8 sin BOM); montaje en
+> `/run/secrets/ops-purge-token` sumado a `SECRET_DIRS`; imagen
+> `:master-27288a9` (`sha256:c69bbf8c…`, build Cloud Build del master
+> mergeado) en revisión `00026-4wr` al 100 %; job
+> `obs-stream-metadata-purge` (`us-east1`, verificado con dos
+> ejecuciones OK; primera purga real: 12 sesiones + 28 transacciones).
+> Lección: `--set-secrets` **reemplaza** todos los montajes y bindings
+> de secretos (tumbó revisiones intermedias al quitar `DATABASE_URL` y
+> los 7 mounts) — toda actualización debe llevar la lista completa
+> (env `DATABASE_URL` + 9 volúmenes). Alertas A1–A4 + canal + métrica
+> creados (IDs en `ops/monitoring/README.md`); prueba A1 disparada
+> (6×502) pendiente de confirmación en el email del operador.
+
 ## Alertas F-C4 (T-065)
 
 Definiciones versionadas en `ops/monitoring/` (el operador las crea;

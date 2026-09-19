@@ -5,7 +5,7 @@
     {
       "displayName": "any provider_rate_limited google:rate in 5 minutes",
       "conditionThreshold": {
-        "filter": "metric.type=\"logging.googleapis.com/user/yt-quota-rejects\" AND resource.type=\"global\"",
+        "filter": "metric.type=\"logging.googleapis.com/user/yt-quota-rejects\" AND resource.type=\"cloud_run_revision\"",
         "comparison": "COMPARISON_GT",
         "thresholdValue": 0,
         "duration": "300s",
