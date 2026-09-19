@@ -9,6 +9,16 @@
 
 Toda afirmación "funciona" requiere evidencia (comando + salida). "Probablemente funciona" no es válido.
 
+## T-062 cierre de facto por T-063 (2026-09-19)
+
+```text
+IMPLEMENTACIÓN: DONE en PR #32 (commit 18e236a: Apply Twitch server-side PATCH Helix,
+                diagnóstico 2.1-C.1, mapper robusto, FASES-COMERCIAL.md + filas T-062…T-066)
+E2E HUMANO:     SATISFECHO DE FACTO por T-063 (sonda prod Apply YT/Kick/Twitch OK 2026-09-17,
+                con efecto real; precedente T-034/T-061)
+FINAL: T-062 HECHA (de facto; sin E2E dedicado adicional)
+```
+
 ## T-067 carpeta dist/ + package.ps1 (2026-09-19)
 
 ```text
