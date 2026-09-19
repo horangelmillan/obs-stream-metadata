@@ -21,6 +21,19 @@ cmake --install build_x64 --config RelWithDebInfo --prefix '<staging>' --compone
 makensis /DPKG_BIN='<staging>\obs-stream-metadata\obs-plugins\64bit' /DPKG_DATA='<staging>\obs-stream-metadata\data\obs-plugins\obs-stream-metadata' /DOUTDIR='<outdir>' build_x64\windows-installer.nsi
 ```
 
+## Destino canónico `dist/` (T-067)
+
+El `.exe` final se copia a `dist/` con su `.sha256`:
+
+| Sabor | Backend | Nombre |
+|---|---|---|
+| `commercial` | producción (`-DSTREAM_META_BACKEND_URL=https://<cloud-run-url>`) | `obs-stream-metadata-<versión>-windows-x64-commercial.exe` |
+| `testing` | ambiente test | `...-testing.exe` |
+| `local` | `http://127.0.0.1:8080` (default, sin flag) | `...-local.exe` |
+
+Comando: `powershell -ExecutionPolicy Bypass -File tools/package.ps1 -Flavor commercial`
+`dist/` está ignorada por git; la publicación es GitHub Release (nunca commit del binario).
+
 ## Payload
 
 ```text

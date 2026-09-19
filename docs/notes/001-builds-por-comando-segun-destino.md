@@ -1,6 +1,6 @@
 # 001 — Builds por comando según destino
 
-- Estado: idea
+- Estado: aceptada→BACKLOG (T-067, 2026-09-19; plan en `docs/superpowers/plans/2026-09-19-dist-carpeta-distribuibles.md`; destino canónico `dist/` ignorada, publicación por GitHub Release)
 - Contexto: al regenerar el instalador quedó claro que hoy solo existe
   "el build de desarrollo" y hay que recordar flags a mano. Distintos
   destinos necesitan distinta configuración y mezclarlos es fuente de

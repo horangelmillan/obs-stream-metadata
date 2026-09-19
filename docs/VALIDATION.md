@@ -9,6 +9,24 @@
 
 Toda afirmación "funciona" requiere evidencia (comando + salida). "Probablemente funciona" no es válido.
 
+## T-067 carpeta dist/ + package.ps1 (2026-09-19)
+
+```text
+BUILD:     PASS (preset windows-x64, RelWithDebInfo, 0 errores; dll + selfcheck vigentes)
+PACKAGE:   PASS (tools/package.ps1 -Flavor local → dist/*-local.exe + .sha256, hash coincide)
+INSTALL:   PASS (desde dist/, OBS normal: carga en log; uninstall retira solo payload)
+SECRET:    PASS (patrón CI limpio; dist/ ignorada; sin dev.env/productivos en el sabor)
+TRACKING:  PASS (git ls-files sin .exe; dist/ con check-ignore)
+FINAL: T-067 PASS
+```
+
+Evidencia: `dist/obs-stream-metadata-0.1.0-windows-x64-local.exe` (239309 bytes,
+sha256 `e3d4919a…62e2` recalculado == `.sha256`); log OBS
+`[obs-stream-metadata] plugin loaded successfully (version 0.1.0)` + `dock shown` +
+cierre limpio (`dock removed`, `plugin unloaded`); tras uninstall, OBS abre sin el
+plugin en el log. Nota: un `-Include` de PS 5.1 en el gate de payload del script
+listaba todo el staging (falso positivo); corregido con `Where-Object` por extensión.
+
 ## T-048 Managed wiring (2026-09-09, `managed-link-test.exe`, cliente C++ real)
 
 ```text
