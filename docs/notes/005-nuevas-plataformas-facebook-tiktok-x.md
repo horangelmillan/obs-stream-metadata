@@ -36,4 +36,7 @@ choca con el alcance vigente: multistream es no-objetivo explícito
 
 ## Estado
 
-`idea`
+`aceptada→BACKLOG` parcial 2026-09-20: solo Facebook (T-069…T-073, plan en
+`docs/superpowers/plans/2026-09-20-facebook-metadata-livestatus.md`);
+TikTok/X siguen en `idea`, fuera de este ciclo. Alcance: metadata +
+estado on/off investigado (sin multistream/RTMP, §51).

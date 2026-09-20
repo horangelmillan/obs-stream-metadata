@@ -52,5 +52,10 @@ Estados: pendiente / en-progreso / bloqueada / hecha / deuda / investigación / 
 | T-066 | futuro | 8 | [Commercial] F-C3 firma del distribuible OV-IV (aparcada hasta tracción; ~$220–350/año) | signtool + publisher visible + payload firmado | docs/FASES-COMERCIAL.md |
 | T-067 | hecha | 7 | [Packaging] Carpeta `dist/` para distribuibles + flujo `tools/package.ps1 -Flavor` (cierra nota 001) | `dist/*.exe + .sha256` reproducible desde `build_x64/pkg/`; `dist/` ignorada; cero `.exe` trackeados; install/uninstall desde `dist/` PASS | docs/notes/001-builds-por-comando-segun-destino.md, docs/INSTALLER.md |
 | T-068 | hecha | 8 | [Managed] Apply Managed Kick (backend `/metadata/kick` + Apply server-side, contraparte de T-062) | E2E operador PASS (connect Managed → Apply título → read-back en directo); 215 backend OK + selfcheck 125/125; deploy rev-00027; `tools/deploy.ps1` + fix loopback explícito incluidos | docs/notes/007-portal-auth-managed-suscripciones.md |
+| T-069 | pendiente | 9 | [Facebook] FB-0 Investigación sin código (OAuth, endpoints, go-live/stop+Aitum, tokens, errores, E2E viable) | brief + decisiones aprobadas (on/off viable Y/N, E2E por dónde) | docs/superpowers/plans/2026-09-20-facebook-metadata-livestatus.md |
+| T-070 | pendiente | 9 | [Facebook] FB-1 PoC offline + sondas manuales (estilo T-030) | validadores + triple LIVE PASS con read-back (o parcial documentado) | docs/superpowers/plans/2026-09-20-facebook-metadata-livestatus.md |
+| T-071 | pendiente | 9 | [Facebook] FB-2 Independent (dock directo BYO-app) | build + selfchecks + E2E manual operador | docs/superpowers/plans/2026-09-20-facebook-metadata-livestatus.md |
+| T-072 | pendiente | 9 | [Facebook] FB-3 Managed (adapter + endpoint + dock) | suite verde + deploy + E2E operador | docs/superpowers/plans/2026-09-20-facebook-metadata-livestatus.md |
+| T-073 | pendiente | 9 | [Facebook] FB-4 UI y cierre (indicador+on/off si avalado, warnings, packaging, ADR) | gate completo + PR mergeado | docs/superpowers/plans/2026-09-20-facebook-metadata-livestatus.md |
 
 Regla: cada PR referencia su T-### y actualiza esta tabla + STATE.
