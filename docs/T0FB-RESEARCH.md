@@ -284,6 +284,7 @@ error codes"); resto: referencia `user/permissions` + taxonomía del proyecto.
 | D8 | `TokenStore` sin refresh clásico (re-exchange + `SESSION_EXPIRED`) | `TokenStore` `backend/ports.py:58-68`; `ensure_fresh_token` `backend/oauth.py:125-161`; `SESSION_EXPIRED` `backend/errors.py:17` | long-lived guide 2026-06-30 (60 días user, page sin expiración) |
 | D9 | E2E por perfil (60 d OK); Page real pendiente de Page 100+ | Runners redactados patrón `tools/t030_live_*.py`; revoke `revokeEndpoint` `src/metadata.h:130` | elegibilidad 2024-06-10 (help center + 1363120/1363144); test users doc |
 | D10 | Cero toques Aitum/RTMP/keys; revoke `DELETE /permissions` en Disconnect | Boundary `backend_auth` + borrado+revoke `backend/oauth.py:205-214` | permissions reference v26.0 (`DELETE /{user-id}/permissions`) |
+| D14 | El producto no exige empresa: sin registro de autónomo el techo es Independent BYO-app (D4, título+desc+audiencia+publicar por usuario); Managed-terceros tras autónomo + verificación + review | Patrón BYO `src/secure_store.h:34-42` + app-modes `backend/app.py:107-177` | blog Meta 2023-02-01 (fin individual verification) + flujo Sole Proprietor + Help Centre `159334372093366` |
 
 ### 9) Estado de la cuenta del operador (2026-09-20) y acciones
 
