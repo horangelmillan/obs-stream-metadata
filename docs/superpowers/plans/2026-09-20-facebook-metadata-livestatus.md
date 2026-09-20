@@ -44,15 +44,15 @@ E2E HOY:  cuenta 60+ días OK ; sin page 100+ ; Meta app por crear → FB-0 defi
 ### FB-0: Investigación (sin código)
 
 **Files:** ninguno de producto. Produce: brief en este plan o `docs/T0FB-RESEARCH.md` si el volumen lo exige + decisiones.
-**Skills/MCP:** `context7` (Meta docs), `websearch`/`webfetch` (docs oficiales fechadas).
+**Skills/MCP:** `context7` (Meta docs), `websearch`/`webfetch` (docs oficiales fechadas), `codebase-memory` (grafo del proyecto).
 
-- [ ] **Step 1: OAuth distribuido** — Login flow manual desktop, app secret obligatorio, política redirect localhost/HTTPS, scopes mínimos Page+perfil, app review standard vs advanced, test users, revocación (deauthorize/permissions).
+- [ ] **Step 0: Inventario exhaustivo del proyecto (primero, sin omitir nada)** — leer TODOS los archivos y código del repo (`src/`, `backend/`, `cmake/`, `tools/`, raíz, config, tests) y las docs normativas (`AGENTS.md`, `ARCHITECTURE-BACKEND.md`, `PROJECT_CONTEXT.md`, `BACKLOG.md`, `STATE.md`, `FINDINGS.md`, `VALIDATION.md`, ADRs, `DEPLOYMENT.md`, `SECURITY.md`, notas). Apoyarse en `codebase-memory` (`get_architecture`, `search_graph`, `trace_path`) para el mapa real de módulos, el patrón por proveedor (adapter/puertos/`ConnectService`/ruta genérica), la matriz Independent×Managed y los boundaries (`backend_auth`, secretos, `TokenStore`). Producir mapa escrito (módulos, flujos OAuth/metadata por proveedor y modo, límites conocidos, deuda) y usarlo para alinear cada step 1–7 con la realidad del código; toda discrepancia doc-vs-código va a `FINDINGS.md` como candidata. Gate del step: mapa completo + cero archivos sin leer (verificable por lista).
 - [ ] **Step 2: Endpoints** — update/list/read confirmados en docs vigentes; params update en vivo (cuidado `LIVE_VIDEO__EDIT_API_NOT_ALLOWED`); lifecycle `status`.
 - [ ] **Step 3: Go-live/stop + Aitum** — ¿encender por API con ingesta RTMP externa activa? ¿apagar exige reconectar/reconfigurar en Aitum? Vía recomendada sin reprocesos; si no existe, alternativas; si no hay, se descarta sin forzar.
 - [ ] **Step 4: Tokens** — expiración user/page, canje long-lived, estrategia sin refresh para `TokenStore`.
 - [ ] **Step 5: Errores** — catálogo (elegibilidad, permisos, 429, 5xx) → mensajes UI propuestos.
 - [ ] **Step 6: E2E viable** — camino con activos actuales + qué falta (page/app/review).
-- [ ] **Step 7: Decisiones** — on/off viable Y/N, Page+perfil confirmado, Independent/Managed confirmado, brief aprobado por el operador (gate).
+- [ ] **Step 7: Decisiones** — on/off viable Y/N, Page+perfil confirmado, Independent/Managed confirmado, brief aprobado por el operador (gate). El brief debe citar para cada decisión el archivo/línea del proyecto que la sustenta (del Step 0) + la fuente Meta con fecha.
 
 ### FB-1: PoC offline + sondas manuales (estilo T-030)
 
