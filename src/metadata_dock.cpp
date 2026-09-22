@@ -47,6 +47,13 @@ const char *kBrowserUa =
 const char *kTwScope = "channel:manage:broadcast";
 const char *kYtScope = "https://www.googleapis.com/auth/youtube.force-ssl";
 const char *kKkScope = "channel:write channel:read"; // read: identity label
+// T-071 FB-2: perfil primero (D9, F-072). Las pages_* son invalid scope
+// en apps tipo Consumer: solo publish_video. Page queda diferido hasta
+// decidir tipo de app (None/Business) o App Review. Jamas groups/email.
+const char *kFbScope = "publish_video";
+const char *kFbGraph = "https://graph.facebook.com/v26.0";
+const quint16 kFbPort = 3001; // fijo como Kick: debe registrarse exacto
+const char *kFbCbPath = "/fb-cb";
 
 QString field(QLineEdit *edit)
 {
@@ -71,6 +78,8 @@ QString platformIcon(meta::Platform p)
 		return QString::fromUtf8("\xF0\x9F\x8E\xAE"); // gamepad
 	if (p == meta::Platform::YouTube)
 		return QString::fromUtf8("\xE2\x96\xB6\xEF\xB8\x8F"); // play
+	if (p == meta::Platform::Facebook)
+		return QString::fromLatin1("f"); // facebook badge (ascii-safe)
 	return QString::fromUtf8("\xF0\x9F\x9F\xA2"); // green circle
 }
 
@@ -120,6 +129,7 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 	QVBoxLayout *twDetailLayout = nullptr;
 	QVBoxLayout *ytDetailLayout = nullptr;
 	QVBoxLayout *kkDetailLayout = nullptr;
+	QVBoxLayout *fbDetailLayout = nullptr;
 	auto addCard = [&](meta::Platform p, const QString &name) {
 		QFrame *card = new QFrame(this);
 		card->setFrameShape(QFrame::StyledPanel);
@@ -192,6 +202,19 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 				&MetadataDock::onConnectYouTube);
 			connect(disc, &QPushButton::clicked, this,
 				&MetadataDock::onDisconnectYouTube);
+		} else if (p == meta::Platform::Facebook) {
+			fbCard_ = card;
+			fbHeader_ = header;
+			fbDetail_ = detail;
+			fbDetailLayout = detailLayout;
+			fbCheck_ = check;
+			fbStatus_ = status;
+			fbConnect_ = connBtn;
+			fbDisconnect_ = disc;
+			connect(connBtn, &QPushButton::clicked, this,
+				&MetadataDock::onConnectFacebook);
+			connect(disc, &QPushButton::clicked, this,
+				&MetadataDock::onDisconnectFacebook);
 		} else {
 			kkCard_ = card;
 			kkHeader_ = header;
@@ -210,6 +233,7 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 	addCard(meta::Platform::Twitch, QStringLiteral("Twitch"));
 	addCard(meta::Platform::YouTube, QStringLiteral("YouTube"));
 	addCard(meta::Platform::Kick, QStringLiteral("Kick"));
+	addCard(meta::Platform::Facebook, QStringLiteral("Facebook"));
 
 	QLabel *credTitle =
 		new QLabel(tr("App credentials (register your own app per "
@@ -244,6 +268,17 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 	kkSecretEdit_->setPlaceholderText(tr("Kick Client Secret"));
 	kkSecretEdit_->setEchoMode(QLineEdit::Password);
 	kkDetailLayout->addWidget(kkSecretEdit_);
+	// T-071 FB-2: BYO-app. Solo el App ID es obligatorio (PKCE sin
+	// secret, F-065); el App Secret es opcional y solo se usa para el
+	// canje a long-lived (DPAPI, jamas en la URL ni en logs).
+	fbIdEdit_ = new QLineEdit(fbDetail_);
+	fbIdEdit_->setPlaceholderText(tr("Facebook App ID"));
+	fbDetailLayout->addWidget(fbIdEdit_);
+	fbSecretEdit_ = new QLineEdit(fbDetail_);
+	fbSecretEdit_->setPlaceholderText(
+		tr("Facebook App Secret (optional, for long-lived token)"));
+	fbSecretEdit_->setEchoMode(QLineEdit::Password);
+	fbDetailLayout->addWidget(fbSecretEdit_);
 	QLabel *credNote = new QLabel(
 		tr("Typed once: kept in memory and stored encrypted on this "
 		   "PC (DPAPI). Never logged, never shared."),
@@ -271,15 +306,15 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 	QLabel *descLabel = new QLabel(tr("Description"), this);
 	descEdit_ = new QPlainTextEdit(this);
 	descEdit_->setPlaceholderText(
-		tr("YouTube only — Twitch and Kick have no equivalent "
-		   "stream description."));
+		tr("YouTube and Facebook only — Twitch and Kick have no "
+		   "equivalent stream description."));
 	descLabel->setBuddy(descEdit_);
 	descLabel_ = descLabel;
 	top->addWidget(descLabel);
 	top->addWidget(descEdit_);
 	QLabel *descCaps = new QLabel(
-		tr("YouTube: supported · Twitch: not available · Kick: not "
-		   "available"),
+		tr("YouTube: supported · Facebook: supported · Twitch: not "
+		   "available · Kick: not available"),
 		this);
 	descCaps->setWordWrap(true);
 	descCaps_ = descCaps;
@@ -297,6 +332,34 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 	ytDetailLayout->addWidget(bcLabel);
 	ytDetailLayout->addWidget(broadcastCombo_);
 	ytDetailLayout->addWidget(refreshButton_);
+
+	// T-071 FB-2: selector Page/perfil + live videos propios (D3/D9).
+	// Patron broadcast persistente (F-067): jamas el preview web (H1).
+	QLabel *fbTargetLabel = new QLabel(tr("Facebook target"), fbDetail_);
+	fbTargetLabel_ = fbTargetLabel;
+	fbTargetCombo_ = new QComboBox(fbDetail_);
+	fbTargetLabel->setBuddy(fbTargetCombo_);
+	connect(fbTargetCombo_,
+		static_cast<void (QComboBox::*)(int)>(
+			&QComboBox::currentIndexChanged),
+		this, &MetadataDock::onFacebookTargetChanged);
+	QLabel *fbLiveLabel = new QLabel(tr("Facebook live video"), fbDetail_);
+	fbLiveLabel_ = fbLiveLabel;
+	fbLiveCombo_ = new QComboBox(fbDetail_);
+	// F-074: /me/live_videos puede devolver vacio aunque el objeto
+	// exista (legible directo por ID). Editable: pegar el ID vale.
+	fbLiveCombo_->setEditable(true);
+	fbLiveCombo_->setPlaceholderText(tr("Select or paste live-video ID"));
+	fbLiveLabel->setBuddy(fbLiveCombo_);
+	fbRefreshButton_ =
+		new QPushButton(tr("Refresh Facebook videos"), fbDetail_);
+	connect(fbRefreshButton_, &QPushButton::clicked, this,
+		&MetadataDock::onRefreshFacebook);
+	fbDetailLayout->addWidget(fbTargetLabel);
+	fbDetailLayout->addWidget(fbTargetCombo_);
+	fbDetailLayout->addWidget(fbLiveLabel);
+	fbDetailLayout->addWidget(fbLiveCombo_);
+	fbDetailLayout->addWidget(fbRefreshButton_);
 
 	// Twitch device-flow prompt lives inside the Twitch card detail
 	// (same show/hide call sites as before).
@@ -346,12 +409,15 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 	twResult_ = new QLabel(QStringLiteral("Twitch —"), twDetail_);
 	ytResult_ = new QLabel(QStringLiteral("YouTube —"), ytDetail_);
 	kkResult_ = new QLabel(QStringLiteral("Kick —"), kkDetail_);
+	fbResult_ = new QLabel(QStringLiteral("Facebook —"), fbDetail_);
 	twResult_->setWordWrap(true);
 	ytResult_->setWordWrap(true);
 	kkResult_->setWordWrap(true);
+	fbResult_->setWordWrap(true);
 	twDetailLayout->addWidget(twResult_);
 	ytDetailLayout->addWidget(ytResult_);
 	kkDetailLayout->addWidget(kkResult_);
+	fbDetailLayout->addWidget(fbResult_);
 	// generalMsg_ stays global on purpose: validation messages and
 	// broadcast counts have no single owning platform, and the UX
 	// definitions require no invented mapping.
@@ -440,6 +506,8 @@ void MetadataDock::refreshModeUi()
 	ytSecretEdit_->setVisible(!managed);
 	kkIdEdit_->setVisible(!managed);
 	kkSecretEdit_->setVisible(!managed);
+	fbIdEdit_->setVisible(!managed);
+	fbSecretEdit_->setVisible(!managed);
 	credNote_->setVisible(!managed);
 	managedNote_->setVisible(managed);
 	if (eraseButton_)
@@ -457,6 +525,8 @@ QFrame *MetadataDock::cardFor(meta::Platform p) const
 		return twCard_;
 	if (p == meta::Platform::YouTube)
 		return ytCard_;
+	if (p == meta::Platform::Facebook)
+		return fbCard_;
 	return kkCard_;
 }
 
@@ -466,6 +536,8 @@ QWidget *MetadataDock::detailFor(meta::Platform p) const
 		return twDetail_;
 	if (p == meta::Platform::YouTube)
 		return ytDetail_;
+	if (p == meta::Platform::Facebook)
+		return fbDetail_;
 	return kkDetail_;
 }
 
@@ -475,6 +547,8 @@ QPushButton *MetadataDock::headerFor(meta::Platform p) const
 		return twHeader_;
 	if (p == meta::Platform::YouTube)
 		return ytHeader_;
+	if (p == meta::Platform::Facebook)
+		return fbHeader_;
 	return kkHeader_;
 }
 
@@ -484,6 +558,8 @@ QCheckBox *MetadataDock::checkFor(meta::Platform p) const
 		return twCheck_;
 	if (p == meta::Platform::YouTube)
 		return ytCheck_;
+	if (p == meta::Platform::Facebook)
+		return fbCheck_;
 	return kkCheck_;
 }
 
@@ -493,6 +569,8 @@ QLabel *MetadataDock::statusFor(meta::Platform p) const
 		return twStatus_;
 	if (p == meta::Platform::YouTube)
 		return ytStatus_;
+	if (p == meta::Platform::Facebook)
+		return fbStatus_;
 	return kkStatus_;
 }
 
@@ -502,6 +580,8 @@ QLabel *MetadataDock::resultFor(meta::Platform p) const
 		return twResult_;
 	if (p == meta::Platform::YouTube)
 		return ytResult_;
+	if (p == meta::Platform::Facebook)
+		return fbResult_;
 	return kkResult_;
 }
 
@@ -520,7 +600,7 @@ void MetadataDock::toggleCard(meta::Platform p)
 void MetadataDock::updateCardVisibility()
 {
 	using P = meta::Platform;
-	for (P p : {P::Twitch, P::YouTube, P::Kick}) {
+	for (P p : {P::Twitch, P::YouTube, P::Kick, P::Facebook}) {
 		const bool open =
 			expanded_.has_value() && *expanded_ == p;
 		if (detailFor(p))
@@ -557,7 +637,7 @@ bool MetadataDock::anyUsable()
 {
 	using P = meta::Platform;
 	return platformUsable(P::Twitch) || platformUsable(P::YouTube) ||
-	       platformUsable(P::Kick);
+	       platformUsable(P::Kick) || platformUsable(P::Facebook);
 }
 
 void MetadataDock::refreshContentVisibility()
@@ -580,6 +660,18 @@ void MetadataDock::refreshContentVisibility()
 		bcLabel_->setVisible(yt);
 	broadcastCombo_->setVisible(yt);
 	refreshButton_->setVisible(yt);
+	// T-071 FB-2: Facebook target/videos follow the same rule.
+	const bool fb = platformUsable(meta::Platform::Facebook);
+	if (fbTargetLabel_)
+		fbTargetLabel_->setVisible(fb);
+	if (fbTargetCombo_)
+		fbTargetCombo_->setVisible(fb);
+	if (fbLiveLabel_)
+		fbLiveLabel_->setVisible(fb);
+	if (fbLiveCombo_)
+		fbLiveCombo_->setVisible(fb);
+	if (fbRefreshButton_)
+		fbRefreshButton_->setVisible(fb);
 	// FASE 2: Twitch connects/disconnects in Managed like the other
 	// platforms (own ManagedConn state, no shared Independent account).
 	// The legacy "not available" note stays hidden.
@@ -617,6 +709,9 @@ void MetadataDock::updateCardStyle(meta::Platform p)
 	} else if (p == meta::Platform::YouTube) {
 		brand = "#FF0000";
 		tint = "rgba(255, 0, 0, 28)";
+	} else if (p == meta::Platform::Facebook) {
+		brand = "#1877F2";
+		tint = "rgba(24, 119, 242, 30)";
 	} else {
 		brand = "#35c759";
 		tint = "rgba(53, 199, 89, 30)";
@@ -639,7 +734,7 @@ void MetadataDock::updateCardStyle(meta::Platform p)
 void MetadataDock::updateAllCardStyles()
 {
 	using P = meta::Platform;
-	for (P p : {P::Twitch, P::YouTube, P::Kick})
+	for (P p : {P::Twitch, P::YouTube, P::Kick, P::Facebook})
 		updateCardStyle(p);
 }
 
@@ -654,6 +749,9 @@ bool MetadataDock::eventFilter(QObject *watched, QEvent *event)
 		isCard = true;
 	} else if (watched == ytCard_) {
 		p = meta::Platform::YouTube;
+		isCard = true;
+	} else if (watched == fbCard_) {
+		p = meta::Platform::Facebook;
 		isCard = true;
 	} else if (watched == kkCard_) {
 		p = meta::Platform::Kick;
@@ -699,6 +797,12 @@ void MetadataDock::cancelPendingForModeSwitch()
 	case Op::YtChannels:
 	case Op::KkExchange:
 	case Op::KkChannels:
+	case Op::FbExchange:
+	case Op::FbLongLived:
+	case Op::FbIdentity:
+	case Op::FbTargets:
+	case Op::FbList:
+	case Op::FbRead:
 		pending_ = Op::None;
 		devicePrompt_->setVisible(false);
 		// Repaint from the real state: a finished connection was
@@ -732,13 +836,18 @@ QString providerSlug(meta::Platform p)
 		return QStringLiteral("youtube");
 	if (p == meta::Platform::Kick)
 		return QStringLiteral("kick");
+	if (p == meta::Platform::Facebook)
+		return QStringLiteral("facebook");
 	return QStringLiteral("twitch");
 }
 
 // Backend-backed providers: YouTube (T-045), Kick (T-046), Twitch FASE 2
 // (auth-code via backend; Independent DCF untouched).
+// Facebook Managed llega en FB-3 (T-072): aqui false, sin fallback.
 bool managedSupported(meta::Platform p)
 {
+	if (p == meta::Platform::Facebook)
+		return false;
 	return p == meta::Platform::YouTube || p == meta::Platform::Kick ||
 	       p == meta::Platform::Twitch;
 }
@@ -769,6 +878,8 @@ MetadataDock::MetadataDock::ManagedConn &MetadataDock::managedAccount(meta::Plat
 		return mYt_;
 	if (p == meta::Platform::Kick)
 		return mKk_;
+	if (p == meta::Platform::Facebook)
+		return mFb_; // FB-3 lo cablea; aqui siempre desconectado
 	return mTw_;
 }
 
@@ -779,7 +890,7 @@ void MetadataDock::repaintModeStatuses()
 	if (isManaged()) {
 		for (meta::Platform p :
 		     {meta::Platform::Twitch, meta::Platform::YouTube,
-		      meta::Platform::Kick}) {
+		      meta::Platform::Kick, meta::Platform::Facebook}) {
 			const ManagedConn &m = managedAccount(p);
 			if (m.connected && !m.display.isEmpty())
 				setStatus(p, tr("Connected as %1").arg(m.display));
@@ -790,7 +901,7 @@ void MetadataDock::repaintModeStatuses()
 	}
 	for (meta::Platform p :
 	     {meta::Platform::Twitch, meta::Platform::YouTube,
-	      meta::Platform::Kick}) {
+	      meta::Platform::Kick, meta::Platform::Facebook}) {
 		const Account &a = account(p);
 		if (a.connected && !a.display.isEmpty())
 			setStatus(p, tr("Connected as %1").arg(a.display));
@@ -802,9 +913,14 @@ void MetadataDock::repaintModeStatuses()
 void MetadataDock::onConnectManaged(meta::Platform p)
 {
 	if (!managedSupported(p)) {
-		setResult(p, false,
-			  tr("Managed Twitch is not available yet "
-			     "(direct only)."));
+		if (p == meta::Platform::Facebook)
+			setResult(p, false,
+				  tr("Facebook Managed arrives with FB-3 "
+				     "(Independent only for now)."));
+		else
+			setResult(p, false,
+				  tr("Managed Twitch is not available yet "
+				     "(direct only)."));
 		return;
 	}
 	startConnectBusy(p);
@@ -1356,6 +1472,8 @@ void MetadataDock::setStatus(meta::Platform p, const QString &text)
 		twStatus_->setText(text);
 	else if (p == meta::Platform::YouTube)
 		ytStatus_->setText(text);
+	else if (p == meta::Platform::Facebook)
+		fbStatus_->setText(text);
 	else
 		kkStatus_->setText(text);
 	updateCardStyle(p); // card border/color follows the same state
@@ -1373,6 +1491,8 @@ void MetadataDock::setResult(meta::Platform p, bool ok, const QString &text)
 		twResult_->setText(line);
 	else if (p == meta::Platform::YouTube)
 		ytResult_->setText(line);
+	else if (p == meta::Platform::Facebook)
+		fbResult_->setText(line);
 	else
 		kkResult_->setText(line);
 	updateCardStyle(p); // e.g. Apply failure shows a red card border
@@ -1385,6 +1505,8 @@ MetadataDock::Account &MetadataDock::account(meta::Platform p)
 		return tw_;
 	if (p == meta::Platform::YouTube)
 		return yt_;
+	if (p == meta::Platform::Facebook)
+		return fb_;
 	return kk_;
 }
 
@@ -1566,6 +1688,7 @@ void MetadataDock::saveStore()
 	fill(tw_, d.twitch);
 	fill(yt_, d.youtube);
 	fill(kk_, d.kick);
+	fill(fb_, d.facebook);
 	// T-051: Managed snapshots (identity labels only; the structs
 	// cannot hold secrets by construction). Omitted when disconnected.
 	auto fillManaged = [](const ManagedConn &m,
@@ -1625,6 +1748,7 @@ void MetadataDock::loadStore()
 	restore(tw_, d.twitch);
 	restore(yt_, d.youtube);
 	restore(kk_, d.kick);
+	restore(fb_, d.facebook);
 	// T-051: Managed snapshots restore memory-only state (identity
 	// labels, no secrets). Revalidation happens on user action via
 	// /status (onConnectManaged); nothing is auto-fetched at startup.
@@ -1652,9 +1776,13 @@ void MetadataDock::loadStore()
 		kkIdEdit_->setText(kk_.clientId);
 		kkSecretEdit_->setText(kk_.secret);
 	}
+	if (fb_.connected) {
+		fbIdEdit_->setText(fb_.clientId);
+		fbSecretEdit_->setText(fb_.secret);
+	}
 	for (meta::Platform p :
 	     {meta::Platform::Twitch, meta::Platform::YouTube,
-	      meta::Platform::Kick}) {
+	      meta::Platform::Kick, meta::Platform::Facebook}) {
 		if (!account(p).connected)
 			continue;
 		setStatus(p, tr("Connected as %1").arg(account(p).display));
@@ -1692,6 +1820,16 @@ void MetadataDock::sendNextRevoke()
 		op = Op::RevYt;
 	else if (revokeFor_ == meta::Platform::Kick)
 		op = Op::RevKk;
+	else if (revokeFor_ == meta::Platform::Facebook)
+		op = Op::RevFb;
+	if (revokeFor_ == meta::Platform::Facebook) {
+		// D10: DELETE /me/permissions con bearer (desautorizacion
+		// total, invalida tokens). Best-effort: el borrado local ya
+		// ocurrio; solo el codigo va al log.
+		sendJson(QUrl(QString::fromLatin1(ep.url)),
+			 QStringLiteral("DELETE"), QString(), op, tok);
+		return;
+	}
 	QUrl url(QString::fromLatin1(ep.url));
 	QUrlQuery q;
 	if (ep.tokenField[0] == QLatin1Char('\0')) {
@@ -1712,6 +1850,12 @@ void MetadataDock::wipeLocal(meta::Platform p)
 	account(p).clear();
 	if (p == meta::Platform::YouTube)
 		broadcastCombo_->clear();
+	if (p == meta::Platform::Facebook) {
+		fbLiveCombo_->clear();
+		fbTargetCombo_->clear();
+		fbPageTokens_.clear();
+		fbTarget_.clear();
+	}
 	setStatus(p, tr("Not connected"));
 	setResult(p, true, tr("disconnected"));
 	saveStore(); // drop the record; survivors stay encrypted
@@ -1788,20 +1932,28 @@ bool MetadataDock::listenCallback(quint16 &port, bool kick)
 	callbackServer_ = new QTcpServer(this);
 	connect(callbackServer_, &QTcpServer::newConnection, this,
 		&MetadataDock::onCallbackConnection);
-	QHostAddress host = kick ? QHostAddress::LocalHost
+	// T-071 FB-2: Facebook usa localhost fijo como Kick (Strict Mode +
+	// localhost dev auto-permitido): puerto 3001 + path /fb-cb, debe
+	// estar registrado exacto en el dashboard (D4).
+	const bool fb = (callbackFor_ == meta::Platform::Facebook);
+	QHostAddress host = (kick || fb) ? QHostAddress::LocalHost
 				 : QHostAddress(QStringLiteral("127.0.0.1"));
-	// Kick requires the EXACT registered redirect (F-017), so the
-	// documented fixed port is used. Loopback ports need no
-	// pre-registration for Google installed apps: ephemeral is fine.
-	if (!callbackServer_->listen(host, kick ? port : 0))
+	// Kick exige el redirect EXACTO registrado (F-017); Facebook igual
+	// en modo desarrollo (D4). Loopback Google admite efimero.
+	if (!callbackServer_->listen(host, (kick || fb) ? port : 0))
 		return false;
 	port = callbackServer_->serverPort();
+	QString hostName = (kick || fb) ? QStringLiteral("localhost")
+				       : QStringLiteral("127.0.0.1");
+	QString cbPath = QStringLiteral("/");
+	if (kick)
+		cbPath = QStringLiteral("/cb");
+	else if (fb)
+		cbPath = QString::fromLatin1(kFbCbPath);
 	redirect_ = QStringLiteral("http://%1:%2%3")
-			    .arg(kick ? QStringLiteral("localhost")
-				      : QStringLiteral("127.0.0.1"))
+			    .arg(hostName)
 			    .arg(port)
-			    .arg(kick ? QStringLiteral("/cb")
-				      : QStringLiteral("/"));
+			    .arg(cbPath);
 	return true;
 }
 
@@ -1835,6 +1987,8 @@ void MetadataDock::handleCallbackData(const QByteArray &request)
 	// Ignore anything but the callback path itself (e.g. /favicon.ico).
 	const QString expected = callbackFor_ == meta::Platform::Kick
 					 ? QStringLiteral("/cb")
+				 : callbackFor_ == meta::Platform::Facebook
+					 ? QString::fromLatin1(kFbCbPath)
 					 : QStringLiteral("/");
 	if (path != expected)
 		return;
@@ -1859,6 +2013,8 @@ void MetadataDock::handleCallbackData(const QByteArray &request)
 	callbackDone_ = true; // first callback wins; ignore later requests
 	if (callbackFor_ == meta::Platform::YouTube)
 		startYouTubeExchange(code);
+	else if (callbackFor_ == meta::Platform::Facebook)
+		startFacebookExchange(code);
 	else
 		startKickExchange(code);
 }
@@ -2020,6 +2176,103 @@ void MetadataDock::onDisconnectKick()
 	startRevoke(meta::Platform::Kick, snap);
 }
 
+// --- connect: Facebook PKCE directo BYO-app (T-071 FB-2, D4) -------------
+// App Nativa/Desktop: el secret NUNCA viaja en el code exchange (F-065:
+// 400 "configured as a desktop app"); solo PKCE S256 + state. El secret
+// BYO (DPAPI) solo se usa, si existe, para el canje a long-lived (D8).
+
+void MetadataDock::onConnectFacebook()
+{
+	if (isManaged()) {
+		// FB-3 (T-072) aun no existe: mensaje explicito, sin red,
+		// sin fallback al Independent (ADR-012).
+		finishConnectError(meta::Platform::Facebook,
+				   tr("Facebook Managed arrives with FB-3. "
+				      "Use Independent mode for now."));
+		return;
+	}
+	Account &a = fb_;
+	a.clear();
+	fbPageTokens_.clear();
+	fbTarget_.clear();
+	const QString id = field(fbIdEdit_);
+	if (id.isEmpty()) {
+		finishConnectError(meta::Platform::Facebook,
+				   tr("Enter your Facebook App ID first. "
+				      "Register http://localhost:3001/fb-cb "
+				      "in the app dashboard."));
+		return;
+	}
+	quint16 port = kFbPort; // debe coincidir con el redirect registrado
+	callbackFor_ = meta::Platform::Facebook;
+	callbackDone_ = false;
+	if (!listenCallback(port, false)) {
+		finishConnectError(meta::Platform::Facebook,
+				   tr("Port localhost:3001 is busy or blocked. "
+				      "Free it: the redirect must match the "
+				      "registered one."));
+		return;
+	}
+	a.clientId = id;
+	a.secret = field(fbSecretEdit_); // opcional, solo long-lived (D8)
+	a.verifier = randomUrlSafe(64);
+	a.state = QUuid::createUuid().toString(QUuid::WithoutBraces)
+			  .remove(QLatin1Char('-'))
+			  .left(32);
+	startConnectBusy(meta::Platform::Facebook);
+	const QString url = meta::facebookAuthUrl(
+		id, redirect_, a.state,
+		QString::fromLatin1(kFbScope), pkceChallenge(a.verifier));
+	pending_ = Op::FbExchange; // waiting for the browser callback
+	openBrowser(url);
+}
+
+void MetadataDock::startFacebookExchange(const QString &code)
+{
+	Account &a = fb_;
+	QUrlQuery q;
+	q.addQueryItem(QStringLiteral("client_id"), a.clientId);
+	q.addQueryItem(QStringLiteral("redirect_uri"), redirect_);
+	q.addQueryItem(QStringLiteral("code"), code);
+	// PKCE, sin client_secret en apps Nativa/Desktop (F-065).
+	q.addQueryItem(QStringLiteral("code_verifier"), a.verifier);
+	sendForm(QUrl(QString::fromLatin1(kFbGraph) +
+		      QStringLiteral("/oauth/access_token")),
+		 q.toString(QUrl::FullyEncoded), Op::FbExchange);
+}
+
+void MetadataDock::startFacebookLongLived()
+{
+	// D8: corto (horas) -> long-lived ~60d via fb_exchange_token.
+	// Lleva app secret: solo si el usuario lo aporto (BYO DPAPI);
+	// sin secret se conserva el corto y se sigue (best-effort).
+	Account &a = fb_;
+	if (a.secret.isEmpty() || a.access.isEmpty()) {
+		fetchFacebookTargets();
+		return;
+	}
+	QUrlQuery q;
+	q.addQueryItem(QStringLiteral("grant_type"),
+		       QStringLiteral("fb_exchange_token"));
+	q.addQueryItem(QStringLiteral("client_id"), a.clientId);
+	q.addQueryItem(QStringLiteral("client_secret"), a.secret);
+	q.addQueryItem(QStringLiteral("fb_exchange_token"), a.access);
+	sendForm(QUrl(QString::fromLatin1(kFbGraph) +
+		      QStringLiteral("/oauth/access_token")),
+		 q.toString(QUrl::FullyEncoded), Op::FbLongLived);
+}
+
+void MetadataDock::onDisconnectFacebook()
+{
+	if (isManaged()) {
+		onDisconnectManaged(meta::Platform::Facebook);
+		return;
+	}
+	const Account snap = fb_; // revoke necesita el token borrado
+	wipeLocal(meta::Platform::Facebook);
+	startRevoke(meta::Platform::Facebook, snap);
+}
+
 void MetadataDock::onRefreshBroadcasts()
 {
 	// FASE 2.1-C: in Managed the list comes from the backend (tokens
@@ -2053,13 +2306,106 @@ void MetadataDock::onRefreshBroadcasts()
 	sendGet(url, Op::YtList, yt_.access);
 }
 
+// --- facebook targets + live videos (T-071 FB-2, D3/D9) -------------------
+// Perfil primero (E2E viable sin Page 100+); Pages via /me/accounts con
+// page tokens en memoria (jamas persistidos). Objetos propios unicamente:
+// jamas el preview web de herramientas externas (H1 refutada, F-065/066).
+
+void MetadataDock::fetchFacebookTargets()
+{
+	if (!fb_.connected) {
+		generalMsg_->setText(meta::userMessage(
+			meta::Outcome::AuthRequired,
+			meta::Platform::Facebook));
+		return;
+	}
+	fbTargetCombo_->clear();
+	fbLiveCombo_->clear();
+	fbPageTokens_.clear();
+	// Perfil siempre presente; las Pages llegan con /me/accounts.
+	fbTargetCombo_->addItem(tr("Profile"), QStringLiteral("me"));
+	fbTarget_ = QStringLiteral("me");
+	QUrl url(QString::fromLatin1(kFbGraph) +
+		 QStringLiteral("/me/accounts"));
+	QUrlQuery q;
+	q.addQueryItem(QStringLiteral("fields"),
+		       QStringLiteral("id,name,access_token"));
+	q.addQueryItem(QStringLiteral("limit"), QStringLiteral("25"));
+	url.setQuery(q);
+	fbRefreshButton_->setEnabled(false);
+	sendGet(url, Op::FbTargets, fb_.access);
+}
+
+void MetadataDock::fetchFacebookVideos()
+{
+	if (!fb_.connected) {
+		generalMsg_->setText(meta::userMessage(
+			meta::Outcome::AuthRequired,
+			meta::Platform::Facebook));
+		return;
+	}
+	fbLiveCombo_->clear();
+	const QString target =
+		fbTarget_.isEmpty() ? QStringLiteral("me") : fbTarget_;
+	QString token = fb_.access;
+	if (target != QStringLiteral("me")) {
+		if (!fbPageTokens_.contains(target)) {
+			finishPlatform(meta::Platform::Facebook, false,
+				       meta::userMessage(
+					       meta::Outcome::AuthRequired,
+					       meta::Platform::Facebook));
+			startApplyNext();
+			return;
+		}
+		token = fbPageTokens_.value(target);
+	}
+	QUrl url(QString::fromLatin1(kFbGraph) + QStringLiteral("/") +
+		 target + QStringLiteral("/live_videos"));
+	QUrlQuery q;
+	q.addQueryItem(QStringLiteral("fields"),
+		       QStringLiteral("id,title,description,status"));
+	q.addQueryItem(QStringLiteral("limit"), QStringLiteral("25"));
+	url.setQuery(q);
+	fbRefreshButton_->setEnabled(false);
+	sendGet(url, Op::FbList, token);
+}
+
+void MetadataDock::onRefreshFacebook()
+{
+	if (isManaged()) {
+		finishPlatform(meta::Platform::Facebook, false,
+			       tr("Facebook Managed arrives with FB-3."));
+		return;
+	}
+	if (!fb_.connected) {
+		generalMsg_->setText(meta::userMessage(
+			meta::Outcome::AuthRequired,
+			meta::Platform::Facebook));
+		return;
+	}
+	applyAfterList_ = false;
+	fetchFacebookTargets();
+}
+
+void MetadataDock::onFacebookTargetChanged(int index)
+{
+	if (index < 0 || !fbTargetCombo_ || !fb_.connected)
+		return;
+	const QString target = fbTargetCombo_->itemData(index).toString();
+	if (target.isEmpty() || target == fbTarget_)
+		return;
+	fbTarget_ = target;
+	applyAfterList_ = false;
+	fetchFacebookVideos();
+}
+
 // --- apply -------------------------------------------------------------
 
 void MetadataDock::onApply()
 {
 	meta::Metadata m{titleEdit_->text(), descEdit_->toPlainText()};
 	meta::Selection s{twCheck_->isChecked(), ytCheck_->isChecked(),
-			  kkCheck_->isChecked()};
+			  kkCheck_->isChecked(), fbCheck_->isChecked()};
 	const QString err = meta::validate(m, s);
 	if (!err.isEmpty()) {
 		generalMsg_->setText(err);
@@ -2073,6 +2419,8 @@ void MetadataDock::onApply()
 		applyQueue_ << meta::Platform::YouTube;
 	if (s.kick)
 		applyQueue_ << meta::Platform::Kick;
+	if (s.facebook)
+		applyQueue_ << meta::Platform::Facebook;
 	applyButton_->setEnabled(false);
 	applyButton_->setText(tr("Applying…"));
 	startApplyNext();
@@ -2163,7 +2511,7 @@ void MetadataDock::startApplyNext()
 			 meta::youTubePayload(item, title,
 					      descEdit_->toPlainText()),
 			 Op::UpYt, yt_.access);
-	} else {
+	} else if (p == P::Kick) {
 		// T-068: Managed Apply va por el backend con el token
 		// server-side; Independent directo abajo, intacto.
 		if (isManaged()) {
@@ -2174,6 +2522,49 @@ void MetadataDock::startApplyNext()
 				 "https://api.kick.com/public/v1/channels")),
 			 QStringLiteral("PATCH"), meta::kickPayload(title),
 			 Op::UpKk, kk_.access, QString(), true);
+	} else if (p == P::Facebook) {
+		// T-071 FB-2: solo Independent directo. Managed llega en
+		// FB-3 (T-072): mensaje explicito, sin red ni fallback.
+		if (isManaged()) {
+			finishPlatform(
+				p, false,
+				tr("Facebook Managed arrives with FB-3."));
+			startApplyNext();
+			return;
+		}
+		// F-074: vale el item listado o un ID pegado a mano.
+		QString liveId = fbLiveCombo_->currentData().toString();
+		if (liveId.isEmpty())
+			liveId = fbLiveCombo_->currentText().trimmed();
+		if (liveId.isEmpty()) {
+			// Fetch targets+list first, then retry this platform.
+			applyQueue_.prepend(p);
+			applyAfterList_ = true;
+			fetchFacebookTargets();
+			return;
+		}
+		const QString target =
+			fbTarget_.isEmpty() ? QStringLiteral("me")
+					    : fbTarget_;
+		QString token = fb_.access;
+		if (target != QStringLiteral("me"))
+			token = fbPageTokens_.value(target, token);
+		QUrl url(QString::fromLatin1(kFbGraph) +
+			 QStringLiteral("/") + liveId);
+		// D1/D11: title+desc (+privacy EVERYONE validada en B').
+		QJsonObject body;
+		body[QStringLiteral("title")] = title;
+		const QString desc = descEdit_->toPlainText();
+		if (!desc.isEmpty())
+			body[QStringLiteral("description")] = desc;
+		QJsonObject privacy;
+		privacy[QStringLiteral("value")] =
+			QStringLiteral("EVERYONE");
+		body[QStringLiteral("privacy")] = privacy;
+		sendJson(url, QStringLiteral("POST"),
+			 QString::fromUtf8(QJsonDocument(body).toJson(
+				 QJsonDocument::Compact)),
+			 Op::UpFb, token);
 	}
 }
 
@@ -2290,6 +2681,17 @@ void MetadataDock::onBackoffTimeout()
 
 void MetadataDock::refreshWithToken(meta::Platform p, Op resumeOp)
 {
+	// T-071 FB-2: Facebook sin refresh_token clasico (D8): el 401/190
+	// exige reconexion; este camino nunca se usa para FB.
+	if (p == meta::Platform::Facebook) {
+		fb_.connected = false;
+		setStatus(p, tr("Needs reconnection."));
+		finishPlatform(p, false,
+			       meta::userMessage(meta::Outcome::AuthRequired,
+						 p));
+		startApplyNext();
+		return;
+	}
 	Account &a = account(p);
 	QUrlQuery q;
 	q.addQueryItem(QStringLiteral("grant_type"),
@@ -2343,6 +2745,10 @@ void MetadataDock::onReply(QNetworkReply *reply)
 	case Op::YtChannels:
 	case Op::KkExchange:
 	case Op::KkChannels:
+	case Op::FbExchange:
+	case Op::FbLongLived:
+	case Op::FbIdentity:
+	case Op::FbTargets:
 		if (isManaged())
 			return;
 		break;
@@ -2536,6 +2942,222 @@ void MetadataDock::onReply(QNetworkReply *reply)
 			}
 		}
 		finishConnectOk(P::Kick, label);
+		return;
+	}
+
+	case Op::FbExchange: {
+		// Code exchange PKCE sin secret (F-065). Con secret en app
+		// Nativa/Desktop Graph responde 400: el usuario debe quitar
+		// el tipo Business o usar PKCE (aqui ya sin secret).
+		if (netFail || http != 200) {
+			connectHttpError(P::Facebook, "exchange", http,
+					 netFail);
+			return;
+		}
+		const QJsonObject o = replyJson(reply);
+		fb_.access = o.value(QStringLiteral("access_token"))
+				     .toString();
+		fb_.refresh.clear(); // FB sin refresh_token clasico (D8)
+		if (fb_.access.isEmpty()) {
+			fail(P::Facebook, tr("No access token returned."));
+			return;
+		}
+		QUrl url(QString::fromLatin1(kFbGraph) +
+			 QStringLiteral("/me"));
+		QUrlQuery q;
+		q.addQueryItem(QStringLiteral("fields"),
+			       QStringLiteral("id,name"));
+		url.setQuery(q);
+		sendGet(url, Op::FbIdentity, fb_.access);
+		return;
+	}
+
+	case Op::FbIdentity: {
+		QString label = tr("connected");
+		QString uid;
+		if (!netFail && http == 200) {
+			const QJsonObject o = replyJson(reply);
+			uid = o.value(QStringLiteral("id")).toString();
+			const QString name =
+				o.value(QStringLiteral("name")).toString();
+			if (!name.isEmpty())
+				label = name;
+		}
+		if (uid.isEmpty()) {
+			fail(P::Facebook, tr("Could not read profile."));
+			return;
+		}
+		fb_.broadcaster = uid; // etiqueta no sensible (igual que TW)
+		finishConnectOk(P::Facebook, label);
+		startFacebookLongLived(); // best-effort; sin secret sigue igual
+		return;
+	}
+
+	case Op::FbLongLived: {
+		// Best-effort (D8): con secret BYO el corto se cambia por
+		// ~60d; sin secret o con fallo se conserva el corto.
+		// Solo el codigo va al log; el token jamas.
+		if (!netFail && http == 200) {
+			const QString lt = replyJson(reply)
+						   .value(QStringLiteral(
+							   "access_token"))
+						   .toString();
+			if (!lt.isEmpty()) {
+				fb_.access = lt;
+				saveStore();
+				obs_log(LOG_INFO,
+					"facebook long-lived exchanged");
+			}
+		} else {
+			obs_log(LOG_WARNING,
+				"facebook long-lived skipped http %d", http);
+		}
+		fetchFacebookTargets();
+		return;
+	}
+
+	case Op::FbTargets: {
+		fbRefreshButton_->setEnabled(true);
+		if (netFail || http != 200) {
+			// F-072: sin pages_show_list (/me/accounts 403) se
+			// sigue solo con perfil (D9); el error real sale en
+			// FbList si el token tampoco vale para /me.
+			obs_log(LOG_WARNING,
+				"facebook targets http %d, profile-only",
+				http);
+			// applyAfterList_ se mantiene: FbList continuara el
+			// Apply con los videos del perfil.
+			fetchFacebookVideos();
+			return;
+		}
+		const QJsonArray items = replyJson(reply)
+						 .value(QStringLiteral("data"))
+						 .toArray();
+		for (const auto &v : items) {
+			const QJsonObject it = v.toObject();
+			const QString pid =
+				it.value(QStringLiteral("id")).toString();
+			const QString pname =
+				it.value(QStringLiteral("name")).toString();
+			const QString ptoken = it.value(QStringLiteral(
+								"access_token"))
+						       .toString();
+			if (pid.isEmpty() || ptoken.isEmpty())
+				continue;
+			fbPageTokens_.insert(pid, ptoken);
+			fbTargetCombo_->addItem(
+				tr("Page: %1").arg(
+					pname.isEmpty() ? pid : pname),
+				pid);
+		}
+		fetchFacebookVideos();
+		return;
+	}
+
+	case Op::FbList: {
+		fbRefreshButton_->setEnabled(true);
+		auto fbCode = [&]() {
+			const QJsonObject err = replyJson(reply)
+							    .value(QStringLiteral(
+								    "error"))
+							    .toObject();
+			int code = err.value(QStringLiteral("code"))
+					   .toInt(0);
+			if (code == 0)
+				code = err.value(QStringLiteral(
+							 "error_subcode"))
+					       .toInt(0);
+			return code;
+		};
+		if (netFail || http != 200) {
+			const meta::Outcome oc =
+				meta::classifyFb(http, fbCode());
+			if (applyAfterList_) {
+				applyAfterList_ = false;
+				const P p = applyQueue_.takeFirst();
+				finishPlatform(p, false,
+					       meta::userMessage(oc, p));
+				startApplyNext();
+			} else {
+				generalMsg_->setText(meta::userMessage(
+					oc, P::Facebook));
+			}
+			return;
+		}
+		fbLiveCombo_->clear();
+		const QJsonArray items = replyJson(reply)
+						 .value(QStringLiteral("data"))
+						 .toArray();
+		for (const auto &v : items) {
+			const QJsonObject it = v.toObject();
+			const QString id =
+				it.value(QStringLiteral("id")).toString();
+			const QString title =
+				it.value(QStringLiteral("title")).toString();
+			const QString status =
+				it.value(QStringLiteral("status")).toString();
+			if (id.isEmpty())
+				continue;
+			fbLiveCombo_->addItem(
+				QStringLiteral("%1 (%2)").arg(
+					title.isEmpty() ? id : title, status),
+				id);
+		}
+		if (applyAfterList_) {
+			applyAfterList_ = false;
+			if (fbLiveCombo_->count() == 0 &&
+			    !applyQueue_.isEmpty()) {
+				const P p = applyQueue_.takeFirst();
+				finishPlatform(p, false,
+					       meta::userMessage(
+						       meta::Outcome::NotFound,
+						       p));
+			}
+			startApplyNext();
+		} else {
+			generalMsg_->setText(
+				tr("Facebook videos loaded (%1).")
+					.arg(fbLiveCombo_->count()));
+		}
+		return;
+	}
+
+	case Op::FbRead: {
+		// Read-back manual (E2E/sondas): informa, no decide Apply.
+		if (netFail || http != 200)
+			generalMsg_->setText(meta::userMessage(
+				meta::classifyFb(http, 0), P::Facebook));
+		else
+			generalMsg_->setText(tr("Facebook video read OK."));
+		return;
+	}
+
+	case Op::UpFb:
+	case Op::UpFbRetry: {
+		const P p = P::Facebook;
+		const QJsonObject err = replyJson(reply)
+						    .value(QStringLiteral(
+							    "error"))
+						    .toObject();
+		int code =
+			err.value(QStringLiteral("code")).toInt(0);
+		if (code == 0)
+			code = err.value(QStringLiteral("error_subcode"))
+				       .toInt(0);
+		const meta::Outcome oc = netFail
+						 ? meta::Outcome::NetworkError
+						 : meta::classifyFb(http, code);
+		// FB sin refresh_token clasico (D8): 401/190 exige
+		// reconexion; jamas reintento de refresh ni loop.
+		if (scheduleBackoff(p, oc, http))
+			return;
+		if (oc == meta::Outcome::AuthRequired) {
+			fb_.connected = false;
+			setStatus(p, tr("Needs reconnection."));
+		}
+		finishPlatform(p, oc == meta::Outcome::Success,
+			       meta::userMessage(oc, p));
+		startApplyNext();
 		return;
 	}
 
@@ -2761,7 +3383,8 @@ void MetadataDock::onReply(QNetworkReply *reply)
 
 	case Op::RevTw:
 	case Op::RevYt:
-	case Op::RevKk: {
+	case Op::RevKk:
+	case Op::RevFb: {
 		// Best-effort revoke: local state is already wiped; the
 		// code is the only thing worth logging. Chain the next
 		// token (refresh) if any.

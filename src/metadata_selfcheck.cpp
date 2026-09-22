@@ -644,6 +644,163 @@ int main(int argc, char **argv)
 		      "twpoll-netfail");
 	}
 
+	// T-071 FB-2 Independent: Facebook metadata core (D1/D2/D3/D8/D10).
+	// Title 1-254, description SI existe (a diferencia de Twitch/Kick),
+	// payload POST /{live-video-id} solo title/description, jamas
+	// channel_description/stream_title/snippet. Clasificacion §28+§5
+	// (190/1363120/1363144/10/613) y scopes sin groups/email.
+	{
+		CHECK(meta::kFacebookTitleMax == 254, "fb-title-max");
+		CHECK(QString::fromLatin1(meta::platformName(
+						  meta::Platform::Facebook)) ==
+			      QStringLiteral("Facebook"),
+		      "fb-name");
+		CHECK(meta::supportsDescription(meta::Platform::Facebook),
+		      "fb-desc-supported");
+		CHECK(!meta::supportsDescription(meta::Platform::Twitch),
+		      "fb-tw-still-no-desc");
+		CHECK(!meta::supportsDescription(meta::Platform::Kick),
+		      "fb-kk-still-no-desc");
+		meta::Selection fb{};
+		fb.facebook = true;
+		CHECK(!meta::validate(meta::Metadata{QString(), QString()}, fb)
+			       .isEmpty(),
+		      "fb-empty-title");
+		CHECK(meta::validate(
+			      meta::Metadata{QString(254, QLatin1Char('x')),
+					     QString()},
+			      fb)
+			      .isEmpty(),
+		      "fb-254-ok");
+		CHECK(!meta::validate(
+			       meta::Metadata{QString(255, QLatin1Char('x')),
+					      QString()},
+			       fb)
+			       .isEmpty(),
+		      "fb-255-rejected");
+		CHECK(meta::validate(
+			      meta::Metadata{QStringLiteral("T"),
+					     QStringLiteral("D")},
+			      fb)
+			      .isEmpty(),
+		      "fb-title-desc-ok");
+		const QString fbp = meta::facebookPayload(
+			QStringLiteral("T"), QStringLiteral("D"));
+		const QJsonObject fbo =
+			QJsonDocument::fromJson(fbp.toUtf8()).object();
+		CHECK(fbo.value(QStringLiteral("title")).toString() ==
+			      QStringLiteral("T"),
+		      "fb-payload-title");
+		CHECK(fbo.value(QStringLiteral("description")).toString() ==
+			      QStringLiteral("D"),
+		      "fb-payload-desc");
+		CHECK(!fbo.contains(QStringLiteral("channel_description")) &&
+			      !fbo.contains(QStringLiteral("stream_title")) &&
+			      !fbo.contains(QStringLiteral("snippet")),
+		      "fb-payload-no-foreign");
+		CHECK(meta::classifyFb(200, 0) == meta::Outcome::Success,
+		      "fb-200-ok");
+		CHECK(meta::classifyFb(400, 0) == meta::Outcome::BadRequest,
+		      "fb-400-invalid");
+		CHECK(meta::classifyFb(401, 0) ==
+			      meta::Outcome::AuthRequired,
+		      "fb-401-auth");
+		CHECK(meta::classifyFb(200, 190) ==
+			      meta::Outcome::AuthRequired,
+		      "fb-190-expired");
+		CHECK(meta::classifyFb(200, 1363120) ==
+			      meta::Outcome::Forbidden,
+		      "fb-eligibility-60d");
+		CHECK(meta::classifyFb(200, 1363144) ==
+			      meta::Outcome::Forbidden,
+		      "fb-eligibility-100");
+		CHECK(meta::classifyFb(200, 10) == meta::Outcome::Forbidden,
+		      "fb-10-auth");
+		CHECK(meta::classifyFb(429, 0) ==
+			      meta::Outcome::RateLimited,
+		      "fb-429-limited");
+		CHECK(meta::classifyFb(200, 613) ==
+			      meta::Outcome::RateLimited,
+		      "fb-613-limited");
+		CHECK(meta::classifyFb(500, 0) ==
+			      meta::Outcome::ServerRetry,
+		      "fb-5xx-retry");
+		const QStringList prof = meta::fbRequiredScopes(false);
+		CHECK(prof.contains(QStringLiteral("publish_video")) &&
+			      !prof.join(QStringLiteral(","))
+				       .contains(QStringLiteral("groups")) &&
+			      !prof.join(QStringLiteral(","))
+				       .contains(QStringLiteral("email")),
+		      "fb-scopes-profile");
+		const QStringList page = meta::fbRequiredScopes(true);
+		CHECK(page.contains(QStringLiteral("pages_manage_posts")) &&
+			      page.contains(
+				      QStringLiteral("pages_read_engagement")) &&
+			      page.contains(
+				      QStringLiteral("pages_show_list")),
+		      "fb-scopes-page");
+		const QString fauth = meta::facebookAuthUrl(
+			QStringLiteral("123"), QStringLiteral("http://localhost:9/cb"),
+			QStringLiteral("st8"), QStringLiteral("publish_video"),
+			QStringLiteral("ch4llenge"));
+		CHECK(fauth.contains(
+			      QStringLiteral("facebook.com/v26.0/dialog/oauth")) &&
+			      fauth.contains(QStringLiteral("client_id=123")) &&
+			      !fauth.contains(QStringLiteral("client_secret")),
+		      "fb-auth-url-no-secret");
+		CHECK(meta::userMessage(meta::Outcome::Forbidden,
+					meta::Platform::Facebook)
+			      .contains(QStringLiteral("permissions")) ||
+			      meta::userMessage(meta::Outcome::Forbidden,
+						meta::Platform::Facebook)
+				      .contains(QStringLiteral("60")) ||
+			      meta::userMessage(meta::Outcome::Forbidden,
+						meta::Platform::Facebook)
+				      .contains(QStringLiteral("100")),
+		      "fb-msg-403");
+	}
+
+#ifdef Q_OS_WIN
+	// T-071 FB-2: custodia DPAPI Facebook (BYO-app, igual que YT/Kick).
+	{
+		QTemporaryDir tmp;
+		CHECK(tmp.isValid(), "fb-store-tmpdir");
+		const QString path =
+			tmp.filePath(QStringLiteral("accounts.json"));
+		secure::Store store(path);
+		secure::Data d;
+		d.facebook.connected = true;
+		d.facebook.display = QStringLiteral("fb-user-9z");
+		d.facebook.access = QStringLiteral("fk-fb-4cc3ss-9z");
+		d.facebook.clientId = QStringLiteral("fk-fb-app-9z");
+		CHECK(store.save(d), "fb-store-save");
+		QFile raw(path);
+		CHECK(raw.open(QIODevice::ReadOnly), "fb-store-raw");
+		const QByteArray bytes = raw.readAll();
+		raw.close();
+		CHECK(!bytes.contains("fk-fb-4cc3ss-9z"),
+		      "fb-store-no-plaintext-access");
+		CHECK(!bytes.contains("fk-fb-app-9z"),
+		      "fb-store-no-plaintext-client");
+		CHECK(bytes.contains("fb-user-9z"),
+		      "fb-store-label-plaintext");
+		secure::Data back;
+		CHECK(store.load(back) && back.facebook.connected &&
+			      back.facebook.access ==
+				      QStringLiteral("fk-fb-4cc3ss-9z") &&
+			      back.facebook.clientId ==
+				      QStringLiteral("fk-fb-app-9z") &&
+			      back.facebook.display ==
+				      QStringLiteral("fb-user-9z") &&
+			      !back.youtube.connected &&
+			      !back.kick.connected &&
+			      !back.twitch.connected,
+		      "fb-store-roundtrip");
+		CHECK(store.clear() && !QFile::exists(path),
+		      "fb-store-clear");
+	}
+#endif
+
 	std::printf("SELFCHECK OK\n");
 	return 0;
 }

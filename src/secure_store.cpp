@@ -225,11 +225,12 @@ bool Store::save(const Data &d)
 	if (filePath_.isEmpty())
 		return false;
 	QDir().mkpath(QFileInfo(filePath_).absolutePath());
-	const Record *recs[4] = {&d.twitch, &d.youtube, &d.kick,
-				 &d.backendInstall};
-	const char *keys[4] = {"twitch", "youtube", "kick", "backend"};
+	const Record *recs[5] = {&d.twitch, &d.youtube, &d.kick,
+				 &d.facebook, &d.backendInstall};
+	const char *keys[5] = {"twitch", "youtube", "kick", "facebook",
+			       "backend"};
 	QJsonObject root;
-	for (int i = 0; i < 4; ++i) {
+	for (int i = 0; i < 5; ++i) {
 		if (!recs[i]->connected)
 			continue;
 		const QJsonObject o = recordToJson(*recs[i]);
@@ -297,6 +298,9 @@ bool Store::load(Data &d)
 			      d.youtube);
 	any |= recordFromJson(root.value(QStringLiteral("kick")).toObject(),
 			      d.kick);
+	any |= recordFromJson(root.value(QStringLiteral("facebook"))
+				      .toObject(),
+			      d.facebook);
 	// Missing "backend" key in pre-T-044 files: installFromJson on an
 	// empty object returns false, existing behavior unchanged. The
 	// installation identity is preserved even when no provider is

@@ -45,6 +45,9 @@ struct Data {
 	Record twitch;
 	Record youtube;
 	Record kick;
+	// T-071 FB-2: cuenta Independent Facebook BYO-app (DPAPI igual que
+	// YT/Kick: App ID + tokens; secret opcional para long-lived).
+	Record facebook;
 	// T-044: backend installation identity. clientId = installation_id,
 	// secret = installation_secret (both DPAPI blobs); access stays empty.
 	// Never a provider credential; never shown in UI.
@@ -66,7 +69,7 @@ struct Data {
 	bool anyConnected() const
 	{
 		return twitch.connected || youtube.connected ||
-		       kick.connected;
+		       kick.connected || facebook.connected;
 	}
 	bool anyManaged() const
 	{
