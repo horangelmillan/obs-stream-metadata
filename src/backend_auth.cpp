@@ -99,30 +99,35 @@ void Client::post(const QString &path, const QJsonObject &body,
 	timer->setInterval(kTimeoutMs);
 	connect(timer, &QTimer::timeout, reply, [reply]() { reply->abort(); });
 	timer->start();
-	connect(reply, &QNetworkReply::finished, this,
-		[this, reply, timer, cb]() {
-			timer->stop();
-			timer->deleteLater();
-			const int http = reply->attribute(
-				QNetworkRequest::HttpStatusCodeAttribute)
+		connect(reply, &QNetworkReply::finished, this,
+			[this, reply, timer, cb]() {
+				timer->stop();
+				timer->deleteLater();
+				const int http = reply->attribute(
+					QNetworkRequest::HttpStatusCodeAttribute)
 						 .toInt();
 			const QByteArray raw = reply->readAll();
 			const int err = static_cast<int>(reply->error());
+			const QJsonObject o =
+				QJsonDocument::fromJson(raw).object();
 			reply->deleteLater();
+			// Qt also reports error() for answered HTTP error
+			// statuses (e.g. 401 AuthenticationRequiredError):
+			// only http==0 (or timeout/abort) means the
+			// backend was never reached. Anything answered
+			// maps by status so callers can recover (401 ->
+			// fresh session) and the UI never reports
+			// "network" for a reachable backend.
 			if (err == static_cast<int>(
 					    QNetworkReply::OperationCanceledError) ||
-			    reply->error() == QNetworkReply::TimeoutError) {
+			    err == static_cast<int>(
+					    QNetworkReply::TimeoutError) ||
+			    (err != static_cast<int>(
+					     QNetworkReply::NoError) &&
+			     http == 0)) {
 				cb(Result::NetworkError, {});
 				return;
 			}
-			if (reply->error() != QNetworkReply::NoError) {
-				cb(http == 429 ? Result::RateLimited :
-						 Result::NetworkError,
-				   {});
-				return;
-			}
-			const QJsonObject o =
-				QJsonDocument::fromJson(raw).object();
 			if (http == 401) {
 				cb(Result::Unauthorized, o);
 				return;
@@ -329,39 +334,39 @@ void Client::apiSend(const QString &verb, const QString &path,
 					QNetworkRequest::HttpStatusCodeAttribute)
 							 .toInt();
 				const QByteArray raw = reply->readAll();
-				const QNetworkReply::NetworkError netErr =
-					reply->error();
-				reply->deleteLater();
-				const bool failed =
-					netErr != QNetworkReply::NoError;
-				if (!failed && http == 401) {
-					// Sesión revocada en servidor:
-					// olvidarla para forzar re-autenticar.
-					sessionToken_.clear();
-				}
-				Result res = Result::Ok;
-				QJsonObject o;
-				if (netErr == QNetworkReply::TimeoutError ||
-				    netErr ==
-					    QNetworkReply::OperationCanceledError) {
-					res = Result::NetworkError;
-				} else if (failed) {
-					res = (http == 429)
-						      ? Result::RateLimited
-						      : Result::NetworkError;
-				} else {
-					o = QJsonDocument::fromJson(raw)
-						    .object();
-					if (http == 401)
-						res = Result::Unauthorized;
-					else if (http == 429)
-						res = Result::RateLimited;
-					else if (http < 200 || http >= 300)
-						res = (http >= 500)
-							      ? Result::ServerError
-							      : Result::InvalidResponse;
-				}
-				cb(ApiReply{res, http, o});
+			const QNetworkReply::NetworkError netErr =
+				reply->error();
+			const QJsonObject o =
+				QJsonDocument::fromJson(raw).object();
+			reply->deleteLater();
+			// Same rule as post(): Qt flags error() for
+			// answered HTTP statuses too; only http==0 (or
+			// timeout/abort) is a transport failure. This
+			// keeps 401 visible so the dock can mark
+			// "Needs reconnection" instead of "network".
+			const bool transportFail =
+				netErr == QNetworkReply::TimeoutError ||
+				netErr ==
+					QNetworkReply::OperationCanceledError ||
+				(netErr != QNetworkReply::NoError &&
+				 http == 0);
+			if (http == 401) {
+				// Sesión revocada en servidor:
+				// olvidarla para forzar re-autenticar.
+				sessionToken_.clear();
+			}
+			Result res = Result::Ok;
+			if (transportFail) {
+				res = Result::NetworkError;
+			} else if (http == 401) {
+				res = Result::Unauthorized;
+			} else if (http == 429) {
+				res = Result::RateLimited;
+			} else if (http < 200 || http >= 300) {
+				res = (http >= 500) ? Result::ServerError :
+						      Result::InvalidResponse;
+			}
+			cb(ApiReply{res, http, o});
 			});
 	});
 }

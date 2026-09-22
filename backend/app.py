@@ -163,8 +163,19 @@ def _production_wiring(settings):
         raise ProdstoresError(
             "production provider secrets missing: " + ", ".join(missing))
     pool = PgPool(settings.database_url, max_size=settings.db_pool_max,
-                  acquire_timeout_s=settings.db_pool_timeout_s)
+                   acquire_timeout_s=settings.db_pool_timeout_s)
     run_migrations(pool, _migrations_dir())
+
+    def _ready_check() -> tuple[bool, str]:
+        # /ready de verdad: si el pool está agotado o la DB caída, la
+        # instancia se marca no-lista en vez de atender fallando (antes
+        # era (True, ok) siempre y el 500 del pool pilló a todos).
+        try:
+            with pool as conn:
+                conn.execute("SELECT 1")
+            return True, "ok"
+        except Exception:
+            return False, "db"
     return {
         "secrets": secrets,
         "sessions": PgSessionStore(pool),
@@ -174,6 +185,7 @@ def _production_wiring(settings):
         "tokens": EncryptedTokenStore(PgTokenStore(pool), cipher),
         "limiter": FixedWindowRateLimiter(settings.global_limit,
                                           settings.global_window_s),
+        "ready_check": _ready_check,
     }
 
 
@@ -196,6 +208,7 @@ def main() -> None:
                          connections=wiring["connections"],
                          tokens=wiring["tokens"],
                           limiter=wiring["limiter"],
+                          ready_check=wiring["ready_check"],
                           enable_youtube="youtube" in wanted,
                           enable_kick="kick" in wanted,
                           enable_twitch="twitch" in wanted)

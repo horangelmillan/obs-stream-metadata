@@ -57,5 +57,6 @@ Estados: pendiente / en-progreso / bloqueada / hecha / deuda / investigación / 
 | T-071 | pendiente | 9 | [Facebook] FB-2 Independent (dock directo BYO-app) | build + selfchecks + E2E manual operador | docs/superpowers/plans/2026-09-20-facebook-metadata-livestatus.md |
 | T-072 | pendiente | 9 | [Facebook] FB-3 Managed (adapter + endpoint + dock) | suite verde + deploy + E2E operador | docs/superpowers/plans/2026-09-20-facebook-metadata-livestatus.md |
 | T-073 | pendiente | 9 | [Facebook] FB-4 UI y cierre (indicador+on/off si avalado, warnings, packaging, ADR) | gate completo + PR mergeado | docs/superpowers/plans/2026-09-20-facebook-metadata-livestatus.md |
+| T-074 | hecha | 7 | Outage Managed 20–22/09: fuga pool (`self._released` compartido) + cliente que clasificaba 401/500 como network + `/ready` sin DB | test concurrencia rojo→verde, 218 backend OK, deploy rev-00028 + sesión real OK, commercial re-empaquetado, prueba viva operador OK | F-068, F-069, F-070 |
 
 Regla: cada PR referencia su T-### y actualiza esta tabla + STATE.
