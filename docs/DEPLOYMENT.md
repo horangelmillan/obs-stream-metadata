@@ -49,6 +49,11 @@ PENDIENTE / FALLIDO). Nada de esta sección afirma "production deployed".
   `/ready` true) con `tools/deploy.ps1`. `PUBLIC_URL` =
   `https://obs-stream-metadata-service-364043334054.us-east5.run.app`
   (verificada viva antes de empaquetar commercial).
+- DESPLEGADO (T-074, 2026-09-22): rev-00028-zml (100% tráfico; imagen
+  `master-398c949-dirty`) con fix de fuga del pool (`backend/db.py`,
+  pila por-hilo) + `/ready` con ping real a DB + fix cliente 401/500
+  (F-068/F-069). Verificado: `/health` + `/version` production +
+  `/ready true` (ahora con DB) + `ensureSession` real OK contra prod.
 
 ## Topología
 
@@ -266,9 +271,10 @@ paso a paso en `ops/monitoring/README.md`):
 | A4 | uptime check `GET /health` 5 min | falla 10 min |
 
 Más alerta manual al 80 % del cupo YouTube (10 000 u/día) en API
-Console. Canal mínimo: email del operador. Limitación conocida: `/ready`
-es `(True,ok)` por defecto también en prod (no verifica DB); A1/A4 la
-cubren indirectamente (ENDURECIDO: no se cambia el wiring en F-C4).
+Console. Canal mínimo: email del operador. Desde T-074, `/ready` hace
+ping real a la DB (`SELECT 1` vía pool): una instancia con el pool
+agotado o la DB caída responde 503 y sale del tráfico (antes era
+`(True,ok)` siempre — esa limitación queda cerrada).
 
 ## Arranque / salud / parada (Cloud Run)
 

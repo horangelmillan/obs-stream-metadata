@@ -1,5 +1,47 @@
 # TROUBLESHOOTING — resolución de problemas
 
+## T-074 — outage Managed 20–22/09/2026 (todo en rojo con "network")
+
+Síntoma: `Error: Could not reach the managed backend (network).` en
+las tres plataformas a la vez (conectar, aplicar y borrar fallan
+juntos), con backend `/health` verde y la red del equipo bien (curl
+200 en <1 s). No es internet ni TLS (`tls backend ready: yes` en log).
+
+Causas encontradas (dos, compuestas):
+
+1. **Pool Postgres agotado en prod** (`postgres pool exhausted (10)` →
+   `POST /auth/session` 500 tras 10 s). Origen: `PgPool` guardaba la
+   adquisición en `self._released` (compartido entre hilos); dos `with`
+   solapados liberaban dos veces la misma conexión y la otra se fugaba.
+   Horas/días de uso normal bastan para vaciar el pool de 10.
+2. **Cliente que mentía**: `backend_auth` clasificaba como `NetworkError`
+   cualquier HTTP con error Qt (401 → `AuthenticationRequiredError`,
+   500 → `ProtocolFailure`), así que un 401/500 se veía como "sin red"
+   y el refresh-401 jamás reintentaba sesión fresca (Managed muerto
+   permanente).
+
+Diagnóstico (no adivinar):
+
+```powershell
+# ¿Llega la red? (debe dar 200 rápido; si falla aquí, es tu red)
+curl.exe -s -o NUL -w "http=%{http_code} time=%{time_total}s`n" --max-time 20 https://obs-stream-metadata-service-364043334054.us-east5.run.app/health
+# ¿Responde la parte autenticada? (401 = bien, es la firma basura; 500 = backend mal; timeout = red)
+curl.exe -s --max-time 20 -X POST https://obs-stream-metadata-service-364043334054.us-east5.run.app/auth/session -H "Content-Type: application/json" -d '{"installation_id":"probe","timestamp":1,"nonce":"probe","signature":"probe"}'
+# ¿El pool? (operador, con gcloud autenticado)
+gcloud run services logs read obs-stream-metadata-service --region us-east5 --project obs-stream-metadata --limit 50 | Select-String "pool exhausted|DatabaseError"
+```
+
+Fix aplicado: pila por-hilo en `backend/db.py` + test
+`test_db_pool_concurrency.py` + `/ready` con ping DB + clasificación
+por código HTTP en `src/backend_auth.cpp` (solo `http==0`/timeout es
+network). Deploy rev `00028-zml`; `commercial` re-empaquetado.
+Detalle: F-068/F-069/F-070.
+
+Ojo operativo: no borrar `%APPDATA%\obs-studio\plugin_config\
+obs-stream-metadata\accounts.json` para "arreglar" un error de red —
+ahí vive el secreto de instalación; sin él hay que re-bootstrap
+(limitado a 5/hora/IP) y el backend conserva tus datos igualmente.
+
 Flujo obligatorio:
 
 ```text

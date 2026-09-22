@@ -24,7 +24,7 @@ para cada una.
 
 ## Estado del proyecto
 
-MVP **cerrado y verificado** (backend 209 tests OK, selfcheck OK, CI verde).
+MVP **cerrado y verificado** (backend 218 tests OK, selfcheck OK, CI verde).
 
 | Fase | Estado |
 |---|---|
@@ -33,7 +33,10 @@ MVP **cerrado y verificado** (backend 209 tests OK, selfcheck OK, CI verde).
 | F-C2 borrado real + privacidad operativa | Hecha |
 | F-C4 operativa mínima (purga, backups, alertas) | Hecha |
 | F-C3 firma del instalador | **Aparcada** (sin financiación para el certificado) |
-| T-062 (E2E humano) / T-066 (firma, futuro) | Pendientes |
+| T-062 (Apply Managed Twitch) | Hecha (Twitch Managed soportado) |
+| T-066 (firma, futuro) | Pendiente |
+| T-074 (outage Managed 20–22/09: fuga del pool + errores honestos) | Hecha (prod rev `00028-zml`, `commercial` re-empaquetado) |
+| Facebook Live | Solo PoC (FB-1 offline + sondas vivas hechas; FB-2/3/4 pendientes, no es producto aún) |
 
 Detalle vivo: [`docs/STATE.md`](docs/STATE.md). Tareas: [`docs/BACKLOG.md`](docs/BACKLOG.md).
 
@@ -71,7 +74,8 @@ Título ✓ en las tres; Descripción ✓ solo en YouTube.
 |---|---|---|---|
 | YouTube | Soportado | Soportado | scope `youtube.force-ssl`; requiere elegir `liveBroadcast` |
 | Kick | Soportado | Soportado | scopes `channel:write channel:read`; redirect exacto |
-| Twitch | Soportado | **No soportado** | Device Flow, sin secret; Client ID vía build |
+| Twitch | Soportado | Soportado | Independiente: Device Flow sin secret (Client ID vía build); Administrado: auth-code vía backend |
+| Facebook Live | No | No | Solo PoC investigativa (`poc/f0fb/`); sin producto ni fechas |
 
 - **Independiente:** tus credenciales viven solo en tu equipo (cifradas
   con DPAPI), jamás salen al backend.
@@ -113,7 +117,7 @@ cmake --build build_x64 --config RelWithDebInfo
 
 ```powershell
 python -m backend.app                 # 127.0.0.1:8080, in-memory sin DATABASE_URL
-python -m unittest discover -s backend/tests   # 209 OK (skips PG sin servidor por diseño)
+python -m unittest discover -s backend/tests   # 218 OK (skips PG sin servidor por diseño)
 ```
 
 Con PostgreSQL local, los tests PG corren de verdad con
