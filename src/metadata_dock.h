@@ -27,6 +27,7 @@ Managed behavior are untouched.
 #include "backend_auth.h"
 #include "metadata.h"
 #include "secure_store.h"
+#include <QMap>
 #include <QWidget>
 
 class QCheckBox;
@@ -64,7 +65,12 @@ private slots:
 	void onDisconnectYouTube();
 	void onConnectKick();
 	void onDisconnectKick();
+	// T-071 FB-2: Facebook Independent directo (BYO-app, PKCE sin secret).
+	void onConnectFacebook();
+	void onDisconnectFacebook();
 	void onRefreshBroadcasts();
+	void onRefreshFacebook();
+	void onFacebookTargetChanged(int index);
 	void onReply(QNetworkReply *reply);
 	void onTwitchPollTimeout();
 	void onBackoffTimeout();
@@ -116,6 +122,12 @@ private slots:
 	// descripción de stream equivalente, jamás channel_description).
 	// Independent directo intacto.
 	void startManagedKickApply();
+	// T-071 FB-2: Facebook Independent (OAuth PKCE + list + update).
+	// Managed Facebook llega en FB-3 (T-072): aqui solo Independent.
+	void startFacebookExchange(const QString &code);
+	void startFacebookLongLived();
+	void fetchFacebookVideos();
+	void fetchFacebookTargets();
 	// F-C2: borrado total Managed (POST /privacy/erase + snapshots).
 	void onEraseManagedData();
 
@@ -134,6 +146,14 @@ private:
 		KkExchange,
 		KkRefresh,
 		KkChannels,
+		FbExchange,
+		FbLongLived,
+		FbIdentity,
+		FbTargets,
+		FbList,
+		FbRead,
+		UpFb,
+		UpFbRetry,
 		UpTw,
 		UpTwRetry,
 		UpYt,
@@ -143,6 +163,7 @@ private:
 		RevTw, // fire-and-forget revoke on Disconnect (best effort)
 		RevYt,
 		RevKk,
+		RevFb,
 	};
 
 	struct Account {
@@ -176,6 +197,13 @@ private:
 	Account tw_;
 	Account yt_;
 	Account kk_;
+	// T-071 FB-2: cuenta Independent Facebook (BYO-app, PKCE sin secret
+	// en el exchange; secret opcional DPAPI solo para long-lived).
+	Account fb_;
+	// T-071 FB-2: page tokens en memoria (de /me/accounts), jamas
+	// persistidos ni logueados. Clave = page id.
+	QMap<QString, QString> fbPageTokens_;
+	QString fbTarget_;
 	QTcpServer *callbackServer_ = nullptr;
 	meta::Platform callbackFor_ = meta::Platform::YouTube;
 	bool callbackDone_ = false; // first callback wins (favicon guard)
@@ -200,22 +228,33 @@ private:
 	QLineEdit *ytSecretEdit_ = nullptr;
 	QLineEdit *kkIdEdit_ = nullptr;
 	QLineEdit *kkSecretEdit_ = nullptr;
+	QLineEdit *fbIdEdit_ = nullptr;
+	QLineEdit *fbSecretEdit_ = nullptr;
 	QCheckBox *twCheck_ = nullptr;
 	QCheckBox *ytCheck_ = nullptr;
 	QCheckBox *kkCheck_ = nullptr;
+	QCheckBox *fbCheck_ = nullptr;
 	QLabel *twStatus_ = nullptr;
 	QLabel *ytStatus_ = nullptr;
 	QLabel *kkStatus_ = nullptr;
+	QLabel *fbStatus_ = nullptr;
 	QPushButton *twConnect_ = nullptr;
 	QPushButton *ytConnect_ = nullptr;
 	QPushButton *kkConnect_ = nullptr;
+	QPushButton *fbConnect_ = nullptr;
 	QPushButton *twDisconnect_ = nullptr;
 	QPushButton *ytDisconnect_ = nullptr;
 	QPushButton *kkDisconnect_ = nullptr;
+	QPushButton *fbDisconnect_ = nullptr;
 	QLineEdit *titleEdit_ = nullptr;
 	QPlainTextEdit *descEdit_ = nullptr;
 	QComboBox *broadcastCombo_ = nullptr;
 	QPushButton *refreshButton_ = nullptr;
+	QComboBox *fbTargetCombo_ = nullptr;
+	QComboBox *fbLiveCombo_ = nullptr;
+	QPushButton *fbRefreshButton_ = nullptr;
+	QLabel *fbTargetLabel_ = nullptr;
+	QLabel *fbLiveLabel_ = nullptr;
 	QLabel *devicePrompt_ = nullptr;
 	QPushButton *applyButton_ = nullptr;
 	// F-C2: "Borrar mis datos" (solo Managed; Independent intacto).
@@ -223,18 +262,22 @@ private:
 	QLabel *twResult_ = nullptr;
 	QLabel *ytResult_ = nullptr;
 	QLabel *kkResult_ = nullptr;
+	QLabel *fbResult_ = nullptr;
 	QLabel *generalMsg_ = nullptr;
 	// UX FASE 1 (Modelo B): one card per platform. The functional
 	// widgets above are reparented into these containers; no new state.
 	QFrame *twCard_ = nullptr;
 	QFrame *ytCard_ = nullptr;
 	QFrame *kkCard_ = nullptr;
+	QFrame *fbCard_ = nullptr;
 	QWidget *twDetail_ = nullptr;
 	QWidget *ytDetail_ = nullptr;
 	QWidget *kkDetail_ = nullptr;
+	QWidget *fbDetail_ = nullptr;
 	QPushButton *twHeader_ = nullptr;
 	QPushButton *ytHeader_ = nullptr;
 	QPushButton *kkHeader_ = nullptr;
+	QPushButton *fbHeader_ = nullptr;
 	// FASE 1.2: no separate close buttons. The header alone expands /
 	// collapses (chevron shows the state); the Apply check stays an
 	// independent control so header-click and check-click never mix.
@@ -267,6 +310,9 @@ private:
 	ManagedConn mYt_;
 	ManagedConn mKk_;
 	ManagedConn mTw_;
+	// T-071 FB-2: placeholder Managed Facebook (FB-3 lo cablea).
+	// Siempre desconectado aqui: sin snapshot, sin red, sin fallback.
+	ManagedConn mFb_;
 	QTimer *managedPollTimer_ = nullptr;
 	meta::Platform managedPollFor_ = meta::Platform::YouTube;
 	int managedPollsLeft_ = 0;

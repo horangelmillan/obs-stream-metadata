@@ -1,5 +1,57 @@
 # VALIDATION — estrategia progresiva
 
+## T-071 FB-2 Independent (2026-09-22, rama `feat/T-071-fb-2-independent`)
+
+```text
+BUILD:     PASS (preset windows-x64, RelWithDebInfo; obs-stream-metadata.dll + metadata-selfcheck.exe, 0 errores)
+SELFCHECK: PASS (exit 0, 0 FAIL: fb-title-max/name/desc/254/255/payload/classify 190-1363120-1363144-10-613-429-5xx/scopes/auth-url + fb-store-* DPAPI; regresion TW/YT/KK intacta)
+BACKEND:   PASS 218 OK (10 skips PG por diseno; sin cambios de backend, sin regresion)
+SECRET:    PASS (motor CI GNU grep: producto limpio; tracked limpio; hits solo en .deps/ ignorado por .gitignore, no accionable)
+E2E:       PASS OPERADOR 2026-09-22:
+               Connect PKCE OK (`Connected as Horangel Millan`, callback
+               localhost:3001 + Authorized; diálogo muestra permiso
+               "Publicar un vídeo en tu biografía" = publish_video) +
+               update+read-back PASS (objeto 28266780719650968 creado en
+               Explorer → dock Apply título+desc+privacy → Explorer
+               read-back idéntico `FB-2 E2E/FB-2 E2E/LIVE`) +
+               restart PASS (sesión DPAPI restaura sola) +
+               Disconnect PASS (`disconnected`, revoke DELETE /permissions,
+               reconexión exigida) + limpieza PASS (end_live_video →
+               LIVE_STOPPED, DELETE ×2 → true/true).
+               Negativas vivas no ejercitadas (401/429): cubiertas offline
+               en selfcheck (`fb-401-auth/fb-190-expired/fb-429-limited`)
+               + camino de código (sin refresh clásico, §D8); long-lived
+               con secret no probado en vivo (secret vacío en E2E).
+               Page diferida (F-072); listado descartado (F-074/F-075).
+FINAL: T-071 PASS — mergeable con PR (sin FB-3: cero backend/Managed FB).
+FINAL: T-071 PARCIAL — no avanzar a FB-3 ni mergear sin E2E del operador
+```
+
+E2E operador (perfil; Page real pendiente de Page 100+, D9):
+
+```text
+Pre:   app `manage-streams` (Consumer) en Development + rol propio;
+       registrar http://localhost:3001/fb-cb en Valid OAuth Redirect URIs;
+       cuenta real solo via perfil (60+ dias).
+1. Connect:    Facebook card → App ID (+ secret opcional) → Connect →
+               consent (publish_video; pages_* diferidas por F-072 en apps
+               Consumer) → callback localhost:3001 OK →
+               `Connected as <nombre>` (long-lived best-effort en log).
+2. Lista:      Refresh Facebook videos → targets (Profile; Pages diferidas
+               F-072) + videos. NOTA F-074: el edge puede devolver 0 aunque
+               existan objetos (legibles directo por ID): el combo acepta
+               pegar el ID a mano; la lista es best-effort.
+3. Apply:      seleccionar target + video, titulo 1-254 + desc → Apply →
+               `Facebook ✓ updated`; verificar titulo/desc en Live Producer o
+               GET /{id}?fields=id,title,description,status.
+4. Restart:    reiniciar OBS → sesion restaurada (DPAPI) → Apply de nuevo OK.
+5. Disconnect: Disconnect → DELETE /me/permissions → `disconnected`;
+               reconexion exigida despues.
+Negativas: titulo vacio/255 bloquea local; 190/401 → Needs reconnection;
+           1363120/1363144 → mensajes elegibilidad; revoke en web → 401.
+Criterio de parada: sonda en rojo → parar, registrar en FINDINGS, preguntar.
+```
+
 1. **Estática:** Markdown/CI Phase 0, revisión diff, secret-scan. Sin código aún.
 2. **Compilación:** Phase 1+ con toolchain fijado (VS2022/CMake/Qt6/OBS SDK). Registrar comando + salida.
 3. **Tests:** unitarios donde aplique; negativos obligatorios `AGENTS.md` §40.

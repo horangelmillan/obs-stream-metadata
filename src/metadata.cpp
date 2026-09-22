@@ -6,6 +6,7 @@ T-031: product metadata core. QtCore only, no I/O, no network, no secrets.
 
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QUrl>
 
 namespace meta {
 
@@ -13,6 +14,7 @@ const int kTwitchTitleMax = 140;
 const int kYouTubeTitleMin = 1;
 const int kYouTubeTitleMax = 100;
 const int kYouTubeDescMax = 5000;
+const int kFacebookTitleMax = 254;
 
 const char *platformName(Platform p)
 {
@@ -23,6 +25,8 @@ const char *platformName(Platform p)
 		return "YouTube";
 	case Platform::Kick:
 		return "Kick";
+	case Platform::Facebook:
+		return "Facebook";
 	}
 	return "?";
 }
@@ -56,7 +60,7 @@ std::optional<ConnectionMode> parseConnectionMode(const QString &s)
 
 bool supportsDescription(Platform p)
 {
-	return p == Platform::YouTube;
+	return p == Platform::YouTube || p == Platform::Facebook;
 }
 
 QString validate(const Metadata &m, const Selection &s)
@@ -71,6 +75,8 @@ QString validate(const Metadata &m, const Selection &s)
 		maxTitle = kYouTubeTitleMax;
 	else if (s.twitch)
 		maxTitle = kTwitchTitleMax;
+	else if (s.facebook)
+		maxTitle = kFacebookTitleMax;
 	if (maxTitle > 0 && m.title.size() > maxTitle)
 		return QStringLiteral("Title too long for the selected "
 				      "platforms (max %1 characters).")
@@ -78,6 +84,7 @@ QString validate(const Metadata &m, const Selection &s)
 	if (s.youtube && m.description.size() > kYouTubeDescMax)
 		return QStringLiteral("Description too long (max %1 characters).")
 			.arg(kYouTubeDescMax);
+	// Facebook description: SI existe, sin limite inventado (D2).
 	return QString();
 }
 
@@ -111,6 +118,63 @@ QString youTubePayload(const QString &fetchedJson, const QString &title,
 	out[QStringLiteral("snippet")] = snippet;
 	return QString::fromUtf8(
 		QJsonDocument(out).toJson(QJsonDocument::Compact));
+}
+
+// T-071 FB-2: POST /{live-video-id} minimo (D1). Titulo 1-254 + descripcion
+// opcional. Sin channel_description (canal, no stream), sin stream_title,
+// sin snippet (AGENTS §47, F-001).
+QString facebookPayload(const QString &title, const QString &desc)
+{
+	QJsonObject o;
+	o[QStringLiteral("title")] = title;
+	if (!desc.isEmpty())
+		o[QStringLiteral("description")] = desc;
+	return QString::fromUtf8(
+		QJsonDocument(o).toJson(QJsonDocument::Compact));
+}
+
+// T-071 FB-2: taxonomia §28 + tabla brief §5. metaCode = Graph `code`
+// (190, 1363120/1363144 elegibilidad, 10, 613/4/17 rate). httpStatus =
+// HTTP real. Los codigos Meta mandan sobre el HTTP 200.
+Outcome classifyFb(int httpStatus, int metaCode)
+{
+	if (metaCode == 1363120 || metaCode == 1363144 || metaCode == 10)
+		return Outcome::Forbidden;
+	if (metaCode == 190)
+		return Outcome::AuthRequired;
+	if (metaCode == 613 || metaCode == 4 || metaCode == 17)
+		return Outcome::RateLimited;
+	return classifyStatus(httpStatus);
+}
+
+QStringList fbRequiredScopes(bool page)
+{
+	if (page)
+		return QStringList{QStringLiteral("pages_manage_posts"),
+				   QStringLiteral("pages_read_engagement"),
+				   QStringLiteral("pages_show_list")};
+	return QStringList{QStringLiteral("publish_video")};
+}
+
+QString facebookAuthUrl(const QString &clientId, const QString &redirectUri,
+			const QString &state, const QString &scope,
+			const QString &challenge)
+{
+	QStringList parts;
+	parts << QStringLiteral("client_id=") +
+			 QUrl::toPercentEncoding(clientId);
+	parts << QStringLiteral("redirect_uri=") +
+			 QUrl::toPercentEncoding(redirectUri);
+	parts << QStringLiteral("state=") +
+			 QUrl::toPercentEncoding(state);
+	parts << QStringLiteral("scope=") + QUrl::toPercentEncoding(scope);
+	parts << QStringLiteral("response_type=code");
+	parts << QStringLiteral("code_challenge=") +
+			 QUrl::toPercentEncoding(challenge);
+	parts << QStringLiteral("code_challenge_method=S256");
+	return QStringLiteral(
+		       "https://www.facebook.com/v26.0/dialog/oauth?") +
+	       parts.join(QLatin1Char('&'));
 }
 
 Outcome classifyStatus(int code)
@@ -158,6 +222,11 @@ RevokeEndpoint revokeEndpoint(Platform p)
 			false};
 	case Platform::Kick:
 		return {"https://id.kick.com/oauth/revoke", "token", true};
+	case Platform::Facebook:
+		// D10: DELETE /{user-id}/permissions (aqui via /me) con bearer.
+		// El dock envia DELETE, no form (tokenField "DELETE" = sentinel).
+		return {"https://graph.facebook.com/v26.0/me/permissions",
+			"DELETE", false};
 	}
 	return {"", "", false};
 }
@@ -172,13 +241,26 @@ QString userMessage(Outcome o, Platform p)
 			return QStringLiteral(
 				"YouTube rejected the input (title 1-100, "
 				"description up to 5000).");
+		if (p == Platform::Facebook)
+			return QStringLiteral(
+				"Facebook rejected the input (title 1-254).");
 		return QStringLiteral("%1 rejected the title.").arg(
 			platformName(p));
 	case Outcome::AuthRequired:
+		if (p == Platform::Facebook)
+			return QStringLiteral(
+				"Facebook: session expired. Reconnect your "
+				"account.");
 		return QStringLiteral(
 			"%1: not authorized. Reconnect your account.")
 			.arg(platformName(p));
 	case Outcome::Forbidden:
+		if (p == Platform::Facebook)
+			return QStringLiteral(
+				"Facebook: the account did not grant the "
+				"required permissions (publish_video / pages_*). "
+				"Accounts need 60+ days and Pages 100+ "
+				"followers to go live.");
 		return QStringLiteral(
 			"%1: the account did not grant the required "
 			"permissions.")
@@ -188,6 +270,10 @@ QString userMessage(Outcome o, Platform p)
 			return QStringLiteral(
 				"YouTube: no valid broadcast found. Refresh "
 				"broadcasts and select one.");
+		if (p == Platform::Facebook)
+			return QStringLiteral(
+				"Facebook: live video not found. Refresh the "
+				"list and select one.");
 		return QStringLiteral("%1: resource not found.")
 			.arg(platformName(p));
 	case Outcome::Conflict:

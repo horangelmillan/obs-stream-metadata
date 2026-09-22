@@ -12,12 +12,13 @@ Wire formats mirror the P3-validated ones (F-020, F-021, F-023).
 #pragma once
 
 #include <QString>
+#include <QStringList>
 
 #include <optional>
 
 namespace meta {
 
-enum class Platform { Twitch, YouTube, Kick };
+enum class Platform { Twitch, YouTube, Kick, Facebook };
 
 // T-049: connection mode (ADR-012). Explicit domain concept, not a bool or
 // UI string: Independent = user-supplied App Identity (direct/BYO-app),
@@ -43,12 +44,16 @@ extern const int kTwitchTitleMax;
 extern const int kYouTubeTitleMin;
 extern const int kYouTubeTitleMax;
 extern const int kYouTubeDescMax;
+// T-071 FB-2: Facebook title 1-254 (D2, user/page live_videos reference).
+// Description SI existe (a diferencia de Twitch/Kick): sin limite inventado.
+extern const int kFacebookTitleMax;
 
 struct Selection {
 	bool twitch = false;
 	bool youtube = false;
 	bool kick = false;
-	bool any() const { return twitch || youtube || kick; }
+	bool facebook = false;
+	bool any() const { return twitch || youtube || kick || facebook; }
 };
 
 struct Metadata {
@@ -58,7 +63,8 @@ struct Metadata {
 
 const char *platformName(Platform p);
 
-// Only YouTube has a stream-description equivalent (F-001).
+// YouTube + Facebook tienen descripcion de stream equivalente (F-001,
+// T-071 D2). Twitch/Kick no.
 bool supportsDescription(Platform p);
 
 // Validates title/description against the most restrictive SELECTED
@@ -88,6 +94,21 @@ enum class Outcome {
 };
 
 Outcome classifyStatus(int code);
+
+// T-071 FB-2: POST /{live-video-id} solo title/description (D1).
+// Jamas channel_description/stream_title/snippet (D2, AGENTS §47).
+QString facebookPayload(const QString &title, const QString &desc);
+// T-071 FB-2: clasificacion §28 + tabla brief §5 (190/1363120/1363144/10).
+Outcome classifyFb(int httpStatus, int metaCode);
+// T-071 FB-2: scopes minimos (D3). Perfil -> publish_video; Page ->
+// pages_manage_posts + pages_read_engagement + pages_show_list.
+// Jamas publish_to_groups/email.
+QStringList fbRequiredScopes(bool page);
+// T-071 FB-2: flujo manual desktop OIDC+PKCE sin secret (D4, F-065).
+// dialog/oauth v26.0 + state + code_challenge S256. Sin client_secret.
+QString facebookAuthUrl(const QString &clientId, const QString &redirectUri,
+			const QString &state, const QString &scope,
+			const QString &challenge);
 
 // User-facing message. Never leaks JSON, headers, tokens or URLs (§16).
 QString userMessage(Outcome o, Platform p);
