@@ -96,6 +96,14 @@ class PgPool:
         self._free: queue.Queue = queue.Queue()
         self._created = 0
         self._guard = threading.Lock()
+        self._local = threading.local()
+
+    @property
+    def _stack(self) -> list:
+        stack = getattr(self._local, "stack", None)
+        if stack is None:
+            stack = self._local.stack = []
+        return stack
 
     @property
     def dsn_redacted(self) -> str:
@@ -145,12 +153,19 @@ class PgPool:
                 self._created -= 1
 
     def __enter__(self):
+        # La adquisición en curso vive en una PILA por-hilo, jamás en
+        # un atributo compartido: el servidor es multi-hilo y dos
+        # `with` solapados con un `self._released` común liberaban dos
+        # veces la misma conexión mientras la otra se fugaba para
+        # siempre (pool exhausted en prod con un solo usuario activo).
+        # La pila además tolera `with` anidados en el mismo hilo.
         conn = self.acquire()
-        self._released = conn
+        self._stack.append(conn)
         return conn
 
     def __exit__(self, *exc):
-        conn, self._released = self._released, None
+        stack = self._stack
+        conn = stack.pop() if stack else None
         if conn is not None:
             if exc[0] is not None:
                 try:
