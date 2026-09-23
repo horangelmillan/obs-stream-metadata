@@ -842,14 +842,12 @@ QString providerSlug(meta::Platform p)
 }
 
 // Backend-backed providers: YouTube (T-045), Kick (T-046), Twitch FASE 2
-// (auth-code via backend; Independent DCF untouched).
-// Facebook Managed llega en FB-3 (T-072): aqui false, sin fallback.
+// (auth-code via backend; Independent DCF untouched) y Facebook FB-3
+// (T-072; Independent PKCE intacto).
 bool managedSupported(meta::Platform p)
 {
-	if (p == meta::Platform::Facebook)
-		return false;
 	return p == meta::Platform::YouTube || p == meta::Platform::Kick ||
-	       p == meta::Platform::Twitch;
+	       p == meta::Platform::Twitch || p == meta::Platform::Facebook;
 }
 
 } // namespace
@@ -913,14 +911,8 @@ void MetadataDock::repaintModeStatuses()
 void MetadataDock::onConnectManaged(meta::Platform p)
 {
 	if (!managedSupported(p)) {
-		if (p == meta::Platform::Facebook)
-			setResult(p, false,
-				  tr("Facebook Managed arrives with FB-3 "
-				     "(Independent only for now)."));
-		else
-			setResult(p, false,
-				  tr("Managed Twitch is not available yet "
-				     "(direct only)."));
+		setResult(p, false,
+			  tr("Managed is not available for this platform."));
 		return;
 	}
 	startConnectBusy(p);
@@ -1122,8 +1114,7 @@ void MetadataDock::onDisconnectManaged(meta::Platform p)
 {
 	if (!managedSupported(p)) {
 		setResult(p, false,
-			  tr("Managed Twitch is not available yet "
-			     "(direct only)."));
+			  tr("Managed is not available for this platform."));
 		return;
 	}
 	// Clear local Managed state first (mirrors Independent semantics),
@@ -1182,7 +1173,8 @@ void MetadataDock::onEraseManagedData()
 				}
 				using P = meta::Platform;
 				for (P p :
-				     {P::Twitch, P::YouTube, P::Kick}) {
+				     {P::Twitch, P::YouTube, P::Kick,
+				      P::Facebook}) {
 					ManagedConn &m = managedAccount(p);
 					m.connected = false;
 					m.userId.clear();
@@ -1705,6 +1697,7 @@ void MetadataDock::saveStore()
 	fillManaged(mYt_, d.managedYoutube);
 	fillManaged(mKk_, d.managedKick);
 	fillManaged(mTw_, d.managedTwitch);
+	fillManaged(mFb_, d.managedFacebook);
 	// T-041: the mode is always persisted explicitly (idempotent
 	// migration: first save after upgrade writes it). Legacy clear
 	// behavior stays unless Managed was explicitly selected or a
@@ -1766,6 +1759,7 @@ void MetadataDock::loadStore()
 	restoreManaged(mYt_, d.managedYoutube);
 	restoreManaged(mKk_, d.managedKick);
 	restoreManaged(mTw_, d.managedTwitch);
+	restoreManaged(mFb_, d.managedFacebook);
 	if (tw_.connected)
 		twIdEdit_->setText(tw_.clientId);
 	if (yt_.connected) {
@@ -2184,11 +2178,9 @@ void MetadataDock::onDisconnectKick()
 void MetadataDock::onConnectFacebook()
 {
 	if (isManaged()) {
-		// FB-3 (T-072) aun no existe: mensaje explicito, sin red,
-		// sin fallback al Independent (ADR-012).
-		finishConnectError(meta::Platform::Facebook,
-				   tr("Facebook Managed arrives with FB-3. "
-				      "Use Independent mode for now."));
+		// FB-3 (T-072): Connect Managed via backend (sin App ID
+		// local, sin secretos en el plugin).
+		onConnectManaged(meta::Platform::Facebook);
 		return;
 	}
 	Account &a = fb_;
@@ -2372,9 +2364,17 @@ void MetadataDock::fetchFacebookVideos()
 
 void MetadataDock::onRefreshFacebook()
 {
+	// FB-3: en Managed la lista viene del backend (tokens server-side),
+	// mismo combo (vale item listado o ID pegado, F-074/F-075).
 	if (isManaged()) {
-		finishPlatform(meta::Platform::Facebook, false,
-			       tr("Facebook Managed arrives with FB-3."));
+		if (!managedAccount(meta::Platform::Facebook).connected) {
+			generalMsg_->setText(meta::userMessage(
+				meta::Outcome::AuthRequired,
+				meta::Platform::Facebook));
+			return;
+		}
+		applyAfterList_ = false;
+		fetchManagedFacebookVideos();
 		return;
 	}
 	if (!fb_.connected) {
@@ -2442,10 +2442,11 @@ void MetadataDock::startApplyNext()
 	}
 	backoffResume_ = false;
 	// Managed Apply (backend token): YouTube (FASE 2.1-C), Twitch y
-	// Kick (T-068). Solo Independent usa su cuenta directa.
+	// Kick (T-068), Facebook (FB-3). Solo Independent usa su cuenta
+	// directa.
 	const bool authorized =
 		(isManaged() && (p == P::YouTube || p == P::Twitch ||
-				 p == P::Kick))
+				 p == P::Kick || p == P::Facebook))
 			? managedAccount(p).connected
 			: account(p).connected;
 	if (!authorized) {
@@ -2523,13 +2524,10 @@ void MetadataDock::startApplyNext()
 			 QStringLiteral("PATCH"), meta::kickPayload(title),
 			 Op::UpKk, kk_.access, QString(), true);
 	} else if (p == P::Facebook) {
-		// T-071 FB-2: solo Independent directo. Managed llega en
-		// FB-3 (T-072): mensaje explicito, sin red ni fallback.
+		// FB-3: Managed Apply va por el backend con el token
+		// server-side; Independent directo abajo, intacto.
 		if (isManaged()) {
-			finishPlatform(
-				p, false,
-				tr("Facebook Managed arrives with FB-3."));
-			startApplyNext();
+			startManagedFacebookApply();
 			return;
 		}
 		// F-074: vale el item listado o un ID pegado a mano.
@@ -2589,6 +2587,184 @@ void MetadataDock::startManagedKickApply()
 	QJsonObject body;
 	body[QStringLiteral("title")] = titleEdit_->text();
 	managedAuth_->apiPost(QStringLiteral("/metadata/kick"), body,
+			      [this, p](const backend_auth::Client::ApiReply &rep) {
+				      obs_log(LOG_INFO,
+					      "managed apply reply: result=%d "
+					      "http=%d",
+					      static_cast<int>(rep.result),
+					      rep.http);
+				      if (!isManaged())
+					      return; // user switched mode
+				      if (rep.result ==
+					  backend_auth::Result::Ok) {
+					      finishPlatform(
+						      p, true,
+						      meta::userMessage(
+							      meta::Outcome::Success,
+							      p));
+					      obs_log(LOG_INFO,
+						      "apply %s: ok (managed)",
+						      meta::platformName(p));
+					      startApplyNext();
+					      return;
+				      }
+				      const meta::Outcome oc =
+					      rep.result ==
+						      backend_auth::Result::
+							      NetworkError
+					      ? meta::Outcome::NetworkError
+					      : meta::classifyStatus(
+						      rep.http == 0 ? -1
+								    : rep.http);
+				      if (scheduleBackoff(p, oc, rep.http))
+					      return;
+				      if (oc == meta::Outcome::AuthRequired) {
+					      ManagedConn &mm =
+						      managedAccount(p);
+					      mm.connected = false;
+					      mm.userId.clear();
+					      mm.display.clear();
+					      setStatus(p,
+							tr("Needs reconnection."));
+					      saveStore(); // drop the stale snapshot
+				      }
+				      finishPlatform(
+					      p, false,
+					      meta::userMessage(oc, p));
+				      startApplyNext();
+			      });
+}
+
+// --- managed Facebook videos + apply (FB-3, T-072) --------------------------
+// Token server-side: el plugin envía solo sesión bearer + {live_video_id,
+// title, description} (+ target si hay Page seleccionada; por defecto el
+// perfil). Listado best-effort (F-074/F-075: puede venir vacío con objetos
+// legibles por ID): el combo acepta pegar el ID a mano, sin inventar
+// broadcasts. Título 1-254 + descripción SÍ (D2, como YouTube).
+
+void MetadataDock::fetchManagedFacebookVideos()
+{
+	using P = meta::Platform;
+	fbRefreshButton_->setEnabled(false);
+	managedAuth_->apiGet(QStringLiteral("/metadata/facebook/broadcasts"),
+			     [this](const backend_auth::Client::ApiReply &rep) {
+				     using P = meta::Platform;
+				     obs_log(LOG_INFO,
+					     "managed fb videos reply: "
+					     "result=%d http=%d",
+					     static_cast<int>(rep.result),
+					     rep.http);
+				     fbRefreshButton_->setEnabled(true);
+				     if (!isManaged())
+					     return; // user switched mode
+				     if (rep.result !=
+					 backend_auth::Result::Ok) {
+					     const meta::Outcome oc =
+						     rep.result ==
+							     backend_auth::Result::
+								     NetworkError
+						     ? meta::Outcome::
+							       NetworkError
+						     : meta::classifyStatus(
+							       rep.http == 0
+								       ? -1
+								       : rep.http);
+					     if (applyAfterList_) {
+						     applyAfterList_ = false;
+						     const P p = applyQueue_
+								     .takeFirst();
+						     finishPlatform(
+							     p, false,
+							     meta::userMessage(
+								     oc, p));
+						     startApplyNext();
+					     } else {
+						     generalMsg_->setText(
+							     meta::userMessage(
+								     oc, P::Facebook));
+					     }
+					     return;
+				     }
+				     fbLiveCombo_->clear();
+				     const QJsonArray items =
+					     rep.body
+						     .value(QStringLiteral(
+							 "resources"))
+						     .toArray();
+				     for (const auto &v : items) {
+					     const QJsonObject it =
+						     v.toObject();
+					     const QString id = it.value(
+								QStringLiteral(
+									"id"))
+								.toString();
+					     const QString title =
+						     it.value(QStringLiteral(
+								"title"))
+								.toString();
+					     if (id.isEmpty())
+						     continue;
+					     fbLiveCombo_->addItem(
+						     QStringLiteral("%1 (%2)")
+							     .arg(title, id),
+						     id);
+				     }
+				     if (applyAfterList_) {
+					     applyAfterList_ = false;
+					     if (fbLiveCombo_->count() ==
+						     0 &&
+						 !applyQueue_.isEmpty()) {
+						     const P p = applyQueue_
+								     .takeFirst();
+						     finishPlatform(
+							     p, false,
+							     meta::userMessage(
+								     meta::Outcome::
+									     NotFound,
+								     p));
+					     }
+					     startApplyNext();
+				     } else {
+					     generalMsg_->setText(
+						     tr("Facebook videos loaded "
+							"(%1).")
+							     .arg(fbLiveCombo_
+								      ->count()));
+				     }
+			     });
+}
+
+void MetadataDock::startManagedFacebookApply()
+{
+	using P = meta::Platform;
+	const P p = P::Facebook;
+	const ManagedConn &m = managedAccount(p);
+	if (!m.connected || m.userId.isEmpty()) {
+		finishPlatform(p, false,
+			       meta::userMessage(meta::Outcome::AuthRequired,
+						 p));
+		startApplyNext();
+		return;
+	}
+	// F-074: vale el item listado o un ID pegado a mano.
+	QString liveId = fbLiveCombo_->currentData().toString();
+	if (liveId.isEmpty())
+		liveId = fbLiveCombo_->currentText().trimmed();
+	if (liveId.isEmpty()) {
+		// Fetch the list first, then retry this platform.
+		applyQueue_.prepend(p);
+		applyAfterList_ = true;
+		fetchManagedFacebookVideos();
+		return;
+	}
+	setResult(p, true, tr("Updating…"));
+	QJsonObject body;
+	body[QStringLiteral("live_video_id")] = liveId;
+	body[QStringLiteral("title")] = titleEdit_->text();
+	body[QStringLiteral("description")] = descEdit_->toPlainText();
+	if (!fbTarget_.isEmpty())
+		body[QStringLiteral("target")] = fbTarget_;
+	managedAuth_->apiPost(QStringLiteral("/metadata/facebook"), body,
 			      [this, p](const backend_auth::Client::ApiReply &rep) {
 				      obs_log(LOG_INFO,
 					      "managed apply reply: result=%d "

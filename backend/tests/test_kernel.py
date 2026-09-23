@@ -11,6 +11,8 @@ class KernelTest(unittest.TestCase):
         self.assertTrue(CAPABILITIES[Provider.YOUTUBE].stream_description)
         self.assertFalse(CAPABILITIES[Provider.TWITCH].stream_description)
         self.assertFalse(CAPABILITIES[Provider.KICK].stream_description)
+        # FB-3: Facebook tambien tiene descripcion de stream (D2).
+        self.assertTrue(CAPABILITIES[Provider.FACEBOOK].stream_description)
 
     def test_all_providers_support_title(self):
         for provider in Provider:

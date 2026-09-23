@@ -1,6 +1,7 @@
 """Tests adapters: metadatos declarativos + aislamiento (sin red)."""
 import unittest
 
+from backend.adapters.facebook import FacebookProvider
 from backend.adapters.kick import KickProvider
 from backend.adapters.twitch import TwitchProvider
 from backend.adapters.youtube import YouTubeProvider
@@ -20,7 +21,9 @@ class FakeSecrets:
                 "KICK_CLIENT_ID": "test-kick-id",
                 "KICK_CLIENT_SECRET": "test-kick-secret",
                 "TWITCH_CLIENT_ID": "test-tw-id",
-                "TWITCH_CLIENT_SECRET": "test-tw-secret"}.get(name)
+                "TWITCH_CLIENT_SECRET": "test-tw-secret",
+                "FB_APP_ID": "test-fb-id",
+                "FB_APP_SECRET": "test-fb-secret"}.get(name)
 
 
 def _session(provider: Provider) -> OAuthSession:
@@ -37,11 +40,15 @@ class AdaptersTest(unittest.TestCase):
                          ("https://www.googleapis.com/auth/youtube.force-ssl",))
         self.assertEqual(self.kk.SCOPES, ("channel:write", "channel:read"))
         self.assertEqual(TwitchProvider().SCOPES, ("channel:manage:broadcast",))
+        self.assertEqual(FacebookProvider.SCOPES, ("publish_video",))
 
     def test_capabilities_match_kernel_matrix(self):
         self.assertTrue(self.yt.capability.stream_description)
         self.assertFalse(self.kk.capability.stream_description)
         self.assertFalse(TwitchProvider().capability.stream_description)
+        # FB-3: descripcion SI existe (D2, como YouTube).
+        self.assertTrue(FacebookProvider(
+            FakeSecrets(), "http://x/cb").capability.stream_description)
 
     def test_not_implemented_raises_internal_without_leak(self):
         with self.assertRaises(AppError) as ctx:

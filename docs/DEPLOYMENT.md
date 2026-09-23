@@ -76,7 +76,7 @@ PostgreSQL.
 | `STREAM_META_BACKEND_ENV` | `production` | Otro valor = fail-fast |
 | `STREAM_META_BACKEND_DATABASE_URL` | `postgresql://USER:PASSWORD@HOST/DB?sslmode=require` | LA DATABASE_URL; via Secret Manager, nunca en claro |
 | `STREAM_META_BACKEND_PUBLIC_URL` | `https://api.example.com` | HTTPS obligatorio; de aquí derivan `/connect/*/callback` (registrados en las OAuth apps) |
-| `STREAM_META_BACKEND_PROVIDERS` | `youtube,kick` | Los que el despliegue habilite |
+| `STREAM_META_BACKEND_PROVIDERS` | `youtube,kick` | Los que el despliegue habilite (`+facebook` al habilitar FB-3) |
 | `STREAM_META_BACKEND_SECRET_DIR` | `/run/secrets` | Ficheros montados (Google/Kick client IDs+secrets) |
 | `STREAM_META_BACKEND_DB_POOL_MAX` | `5` | Conservador: instancias × pool ≤ max_connections Neon Free |
 | `STREAM_META_BACKEND_DB_POOL_TIMEOUT_S` | `10` | Espera de conexión del pool |
@@ -89,13 +89,16 @@ backend; con Cloud Run + HTTPS público, terminación en la plataforma.
 ## Secretos
 
 - `GOOGLE_CLIENT_ID/SECRET`, `KICK_CLIENT_ID/SECRET`
-  (+ `TWITCH_CLIENT_ID/SECRET` al habilitar Twitch Managed, FASE 2):
+  (+ `TWITCH_CLIENT_ID/SECRET` al habilitar Twitch Managed, FASE 2;
+  + `FB_APP_ID/SECRET` al habilitar Facebook Managed, FB-3 T-072):
   ficheros en `$SECRET_DIR` (Cloud Run: Secret Manager montado como
   volumen o env — nunca en la imagen, nunca en el repo, nunca en logs).
 - `DATABASE_URL` (con password): Secret Manager; en logs solo forma
   redactada `postgresql://usuario:***@host/db` (redacción verificada).
 - OAuth apps PROD (operador): proyecto Google PROD + app Kick PROD
-  (+ app Twitch PROD tipo confidencial con secret para Managed, FASE 2)
+  (+ app Twitch PROD tipo confidencial con secret para Managed, FASE 2;
+  + app Meta PROD del servicio tipo None/Business —nunca Consumer, que
+  rechaza `pages_*` con Invalid Scopes (F-072)— para Facebook Managed)
   separados de DEV; redirects = `$PUBLIC_URL/connect/*/callback`.
 
 ## Secret Manager ↔ FileSecretStore (T-057, precisado en T-058)
@@ -150,6 +153,26 @@ gana; vacío = fail-fast). Configuración exacta del operador:
 --set-secrets=/run/secrets/kick-client-secret/KICK_CLIENT_SECRET=KICK_CLIENT_SECRET:1
 --set-env-vars=STREAM_META_BACKEND_SECRET_DIRS=/run/secrets/google-client-id:/run/secrets/google-client-secret:/run/secrets/kick-client-id:/run/secrets/kick-client-secret
 ```
+
+Habilitar Facebook Managed (FB-3, T-072; un secreto por directorio, se
+suma a `SECRET_DIRS` + `facebook` a `PROVIDERS`):
+
+```text
+--set-secrets=/run/secrets/fb-app-id/FB_APP_ID=FB_APP_ID:1
+--set-secrets=/run/secrets/fb-app-secret/FB_APP_SECRET=FB_APP_SECRET:1
+--set-env-vars=STREAM_META_BACKEND_SECRET_DIRS=...:/run/secrets/fb-app-id:/run/secrets/fb-app-secret
+--set-env-vars=STREAM_META_BACKEND_PROVIDERS=youtube,kick,facebook
+```
+
+Requisitos previos (operador, sin código): app Meta del servicio tipo
+None/Business en `developers.facebook.com/apps` (la Consumer `manage-streams`
+no sirve: F-072); redirect exacta
+`$PUBLIC_URL/connect/facebook/callback` en Valid OAuth Redirect URIs;
+caso de uso Facebook Login + permisos `publish_video`, `pages_manage_posts`,
+`pages_read_engagement`, `pages_show_list` (jamás `publish_to_groups` ni
+`email`); App Review + verificación de empresa solo antes del Managed
+comercial a terceros (D12/D14); en Development basta el rol propio para
+el E2E de perfil (D9).
 
 Reglas:
 

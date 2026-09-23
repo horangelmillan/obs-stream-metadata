@@ -1,5 +1,57 @@
 # VALIDATION — estrategia progresiva
 
+## T-072 FB-3 Managed (2026-09-23, rama `feat/T-072-fb-3-managed`)
+
+```text
+BACKEND:   PASS 244 OK (10 skips PG por diseño; 26 nuevos test_facebook.py,
+             TDD rojo ImportError → verde con 3 fixes wire-format F-077)
+SCAN:      PASS (patrón CI GNU grep sobre ficheros FB-3: limpio; sin valores)
+BUILD:     PASS (preset windows-x64 incremental, RelWithDebInfo;
+             obs-stream-metadata.dll + metadata-selfcheck.exe, 0 errores)
+SELFCHECK: PASS exit 0, SELFCHECK OK (msnap-fb-write/msnap-fb-restore nuevos;
+             regresión TW/YT/KK/FB-2 intacta; Qt bin en PATH por 0xC0000135)
+PACKAGE:   PASS commercial contra prod (package.ps1: configure+build+install+
+             makensis; dist/obs-stream-metadata-0.1.0-windows-x64-commercial.exe
+             257124 bytes, sha256 92ecf154…f147f4; payload solo DLL+ini+tls)
+FIX-E2E:   E2E halló bloqueo rancio en el botón Connect (F-078):
+             `onConnectFacebook` retenía el mensaje FB-2 en modo Managed.
+             Fix: rutea a `onConnectManaged` (espejo YouTube); cuerdas
+             rancias a cero en fuente; rebuild 0 errores + selfcheck OK;
+             commercial reempaquetado (sha256 `cb86f88b…215afee8`;
+             instala ESTE, no el anterior). Backend intacto.
+FIX-SCOPE: E2E mostró `Invalid Scopes: pages_manage_posts` (F-079 = F-072
+             en Managed: `manage-streams` es Consumer). Fix: Managed pide
+             solo `publish_video` (perfil D9); suite 244 OK; redeploy rev
+             `00032-7n9` en verde; sonda prod confirma `scope=publish_video`
+             (instalación revocada). Sin reinstalar plugin (solo backend).
+ROUTING:   PASS (ruta genérica /metadata/facebook + /connect/facebook/*,
+             sin cambios de routing; Independent intacto)
+DEPLOY:    PASS rev-00032-7n9 al 100% (imagen con adapter FB perfil-only;
+             /health ok + /version production + /ready true; PROVIDERS
+             youtube,kick,twitch,facebook; rev-00029-9h8 previa superada)
+ENABLE:    PASS rev-00031-crz al 100% (secretos FB_APP_ID/SECRET v1 desde
+             ficheros del operador + IAM Secret Accessor al SA dedicado +
+             mounts fb-app-id/fb-app-secret + SECRET_DIRS + PROVIDERS
+             youtube,kick,twitch,facebook; arranque sin fail-fast)
+START:     PASS sonda prod 10/10 (bootstrap→sesión→POST /connect/facebook
+             200: dialog v26.0, publish_video, sin groups/email, PKCE S256,
+             redirect prod /connect/facebook/callback, sin secret en URL;
+             instalación de sonda revocada, cero filas)
+E2E:       Connect PASS operador 2026-09-23 (consent perfil publish_video →
+             callback connected id 28266677726327934 `Connected as` en dock).
+             Update+read-back PASS (objeto API 28277653911896982 creado en
+             Explorer → dock Apply título+desc → `Facebook ✓ updated` →
+             read-back idéntico + status LIVE). Restart PASS (sesión
+             restaurada, Apply de nuevo OK). Disconnect PASS
+             (`disconnected`, reconexión exigida). Limpieza PASS (DELETE
+             objeto prueba). Negativas vivas no ejercitadas (190/429):
+             cubiertas en tests (`expired_user_token`, `429_rate_limited`)
+             + camino SESSION_EXPIRED→reconnect (D8).
+FINAL: T-072 HECHA — E2E operador completo. Merge vía PR con template +
+       CI verde + squash (pendiente autorización commit/push/PR).
+       Cero FB-4 en esta sesión.
+```
+
 ## T-071 FB-2 Independent (2026-09-22, rama `feat/T-071-fb-2-independent`)
 
 ```text

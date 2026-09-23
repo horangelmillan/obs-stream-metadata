@@ -8,6 +8,7 @@ Producción: mismo wiring con SecretStore/TokenStore/SessionStore productivos
 """
 from __future__ import annotations
 
+from backend.adapters.facebook import FacebookProvider
 from backend.adapters.kick import KickProvider
 from backend.adapters.twitch import TwitchProvider
 from backend.adapters.youtube import YouTubeProvider
@@ -35,9 +36,10 @@ def create_app(secrets=None, sessions=None, limiter=None,
                ready_check=None, settings=None, providers=None,
                installations=None, auth_service=None,
                transactions=None, connections=None, tokens=None,
-                enable_youtube: bool = False,
-                enable_kick: bool = False,
-                enable_twitch: bool = False) -> BackendApp:
+                 enable_youtube: bool = False,
+                 enable_kick: bool = False,
+                 enable_twitch: bool = False,
+                 enable_facebook: bool = False) -> BackendApp:
     settings = settings or load_settings()
     secrets = secrets or EnvSecretStore()
     sessions = sessions or InMemorySessionStore()
@@ -77,6 +79,14 @@ def create_app(secrets=None, sessions=None, limiter=None,
             providers["twitch"] = ConnectService(
                 TwitchProvider(secrets, redirect), *shared)
             redirects["twitch"] = redirect
+        if enable_facebook:
+            # FB-3: mismo loopback `localhost` que Kick (F-017); en prod
+            # es https. La app del servicio es None/Business (F-072).
+            redirect = _localhost_base(settings.public_base_url) + \
+                "/connect/facebook/callback"
+            providers["facebook"] = ConnectService(
+                FacebookProvider(secrets, redirect), *shared)
+            redirects["facebook"] = redirect
     else:
         redirects = {name: "" for name in providers}
     # T-053: entorno explícito. Producción con piezas de grado-dev o con
@@ -153,6 +163,7 @@ def _production_wiring(settings):
         "youtube": YouTubeProvider.required_secret_names,
         "kick": KickProvider.required_secret_names,
         "twitch": TwitchProvider.required_secret_names,
+        "facebook": FacebookProvider.required_secret_names,
     }
     missing = [f"{provider}/{name}"
                for provider in sorted(wanted)
@@ -209,14 +220,16 @@ def main() -> None:
                          tokens=wiring["tokens"],
                           limiter=wiring["limiter"],
                           ready_check=wiring["ready_check"],
-                          enable_youtube="youtube" in wanted,
-                          enable_kick="kick" in wanted,
-                          enable_twitch="twitch" in wanted)
+                           enable_youtube="youtube" in wanted,
+                           enable_kick="kick" in wanted,
+                           enable_twitch="twitch" in wanted,
+                           enable_facebook="facebook" in wanted)
     else:
         app = create_app(settings=settings,
                          enable_youtube="youtube" in wanted,
                          enable_kick="kick" in wanted,
-                         enable_twitch="twitch" in wanted)
+                         enable_twitch="twitch" in wanted,
+                         enable_facebook="facebook" in wanted)
     log = get_logger("main", app.settings.log_level)
     server = serve(app)
     log.info("listening host=%s port=%s env=%s",

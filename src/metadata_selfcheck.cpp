@@ -477,6 +477,22 @@ int main(int argc, char **argv)
 			      !raw.contains("refresh_token") &&
 			      !raw.contains("client_secret"),
 		      "msnap-no-secret-shapes");
+		// FB-3: snapshot managed_facebook (solo id+display, sin
+		// secretos por construcción); legacy sin la clave sigue
+		// desconectado.
+		CHECK(f.open(QIODevice::WriteOnly | QIODevice::Truncate),
+		      "msnap-fb-write");
+		f.write(QByteArrayLiteral(
+			"{\"managed_facebook\":{\"connected\":true,"
+			"\"user_id\":\"12345\",\"display\":\"Fb Name\"}}"));
+		f.close();
+		CHECK(!store.load(d) && d.managedFacebook.connected &&
+			      d.managedFacebook.userId ==
+				      QStringLiteral("12345") &&
+			      d.managedFacebook.display ==
+				      QStringLiteral("Fb Name") &&
+			      d.anyManaged() && !d.managedKick.connected,
+		      "msnap-fb-restore");
 	}
 #ifdef Q_OS_WIN
 	// T-051: round-trip with Independent accounts + backendInstall:
