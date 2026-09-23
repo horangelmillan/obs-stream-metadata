@@ -13,6 +13,7 @@ class Provider(str, Enum):
     TWITCH = "twitch"
     YOUTUBE = "youtube"
     KICK = "kick"
+    FACEBOOK = "facebook"
 
 
 class ConnectionStatus(str, Enum):
@@ -35,6 +36,9 @@ CAPABILITIES: dict[Provider, ProviderCapability] = {
     Provider.TWITCH: ProviderCapability(Provider.TWITCH, True, False),
     Provider.YOUTUBE: ProviderCapability(Provider.YOUTUBE, True, True),
     Provider.KICK: ProviderCapability(Provider.KICK, True, False),
+    # FB-3: titulo 1-254 + descripcion SI existe (D2, a diferencia de
+    # Twitch/Kick que no tienen descripcion de stream equivalente).
+    Provider.FACEBOOK: ProviderCapability(Provider.FACEBOOK, True, True),
 }
 
 

@@ -61,6 +61,8 @@ struct Data {
 	ManagedSnapshot managedYoutube;
 	ManagedSnapshot managedKick;
 	ManagedSnapshot managedTwitch;
+	// FB-3 (T-072): Managed Facebook, misma forma (solo id+display).
+	ManagedSnapshot managedFacebook;
 	// T-053: backend this installation belongs to (explicit environment
 	// binding). Plaintext URL, not a secret; empty = legacy file without
 	// binding (treated as mismatch → re-bootstrap, never cross-backend
@@ -74,7 +76,7 @@ struct Data {
 	bool anyManaged() const
 	{
 		return managedYoutube.connected || managedKick.connected ||
-		       managedTwitch.connected;
+		       managedTwitch.connected || managedFacebook.connected;
 	}
 };
 

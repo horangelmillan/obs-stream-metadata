@@ -122,6 +122,13 @@ private slots:
 	// descripción de stream equivalente, jamás channel_description).
 	// Independent directo intacto.
 	void startManagedKickApply();
+	// FB-3 (T-072): Apply Managed Facebook via backend (título 1-254 +
+	// descripción SÍ + privacy EVERYONE, token server-side).
+	// Independent directo intacto.
+	void startManagedFacebookApply();
+	// FB-3 (T-072): listado Managed best-effort (F-074/F-075) hacia el
+	// combo existente (vale item listado o ID pegado, como Independent).
+	void fetchManagedFacebookVideos();
 	// T-071 FB-2: Facebook Independent (OAuth PKCE + list + update).
 	// Managed Facebook llega en FB-3 (T-072): aqui solo Independent.
 	void startFacebookExchange(const QString &code);
@@ -310,8 +317,9 @@ private:
 	ManagedConn mYt_;
 	ManagedConn mKk_;
 	ManagedConn mTw_;
-	// T-071 FB-2: placeholder Managed Facebook (FB-3 lo cablea).
-	// Siempre desconectado aqui: sin snapshot, sin red, sin fallback.
+	// FB-3 (T-072): Managed Facebook cableado (Connect/Apply/listado
+	// por backend + snapshot managed_facebook). Sin tokens por
+	// construcción, como el resto de ManagedConn.
 	ManagedConn mFb_;
 	QTimer *managedPollTimer_ = nullptr;
 	meta::Platform managedPollFor_ = meta::Platform::YouTube;
