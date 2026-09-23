@@ -112,9 +112,35 @@ def _meta_code(payload) -> int:
         return 0
 
 
+def _meta_subcode(payload) -> int:
+    """Subcode Meta (`error_subcode`, 0 si no hay).
+
+    El caso F-080 es code 100 + subcode 33 (objeto web/ID desconocido):
+    sin el subcode se miente con "input invalido".
+    """
+    if not isinstance(payload, dict):
+        return 0
+    err = payload.get("error", {})
+    if isinstance(err, dict) and "error_subcode" in err:
+        try:
+            return int(err["error_subcode"])
+        except (TypeError, ValueError):
+            return 0
+    try:
+        return int(payload.get("error_subcode", 0))
+    except (AttributeError, TypeError, ValueError):
+        return 0
+
+
 def classify_facebook_error(payload: dict, status: int) -> AppError:
     """Mapeo errores Meta -> modelo backend (detalle solo en logs)."""
     code = _meta_code(payload)
+    sub = _meta_subcode(payload)
+    if code == 100 and sub == 33:
+        # F-080: objeto web/ID desconocido -> gestionable creando
+        # desde el dock, no "titulo invalido".
+        return AppError(ErrorCode.PROVIDER_REJECTED,
+                        "facebook:not-manageable:33")
     if code == 190:
         return AppError(ErrorCode.SESSION_EXPIRED, "facebook:auth-expired")
     if code in (1363120, 1363144):
@@ -284,6 +310,99 @@ class FacebookProvider(OAuthProvider):
                         "status": str(item.get("status", ""))})
         return out
 
+    def get_live_status(self, access_token: str, live_id: str) -> dict:
+        """GET /{live-video-id}?fields=id,title,description,status.
+
+        Base del indicador en-vivo FB-4 (D7). Sin polling: solo a
+        peticion del dock (Refresh/Apply).
+        """
+        live_id = (live_id or "").strip()
+        if not live_id:
+            raise AppError(ErrorCode.INVALID_REQUEST, "live video required")
+        url = (f"{GRAPH_URL}/{live_id}?" + urllib.parse.urlencode(
+            {"fields": "id,title,description,status"}))
+        status, resp = _graph("GET", url, access_token, None,
+                              self._transport)
+        if status != 200 or "error" in resp:
+            raise classify_facebook_error(resp, status)
+        return {"id": str(resp.get("id", live_id)),
+                "title": str(resp.get("title", "")),
+                "description": str(resp.get("description", "")),
+                "status": str(resp.get("status", ""))}
+
+    def create_live_video(self, access_token: str, title: str,
+                          description: str = "", target: str = "") -> dict:
+        """POST /{me|page}/live_videos (creación-por-dock, F-075).
+
+        Via de producto ID-centrica: el dock crea su propio objeto y
+        recuerda el ID (jamas el preview web H1). Limpieza con
+        `delete_live_video` (F-075). Jamas `stream_title`/`snippet`/
+        `channel_description`.
+        """
+        title = str(title or "")
+        if not (1 <= len(title) <= FB_TITLE_MAX):
+            raise AppError(ErrorCode.INVALID_REQUEST, "invalid title")
+        if not isinstance(description, str):
+            raise AppError(ErrorCode.INVALID_REQUEST, "invalid description")
+        target = (target or "").strip() or "me"
+        token = access_token
+        if target != "me":
+            token = self._page_token(access_token, target)
+        payload: dict = {"title": title}
+        if description:
+            payload["description"] = description
+        payload["privacy"] = {"value": "EVERYONE"}
+        url = f"{GRAPH_URL}/{target}/live_videos"
+        status, resp = _graph("POST", url, token, payload,
+                              self._transport)
+        if status != 200 or "error" in resp:
+            raise classify_facebook_error(resp, status)
+        new_id = str(resp.get("id", "") or "")
+        if not new_id:
+            raise AppError(ErrorCode.PROVIDER_REJECTED,
+                           "facebook:no-live-id")
+        return {"id": new_id, "title": title, "description": description}
+
+    def end_live_video(self, access_token: str, live_id: str) -> dict:
+        """POST /{live-video-id}?end_live_video=true -> VOD (D7 OFF)."""
+        live_id = (live_id or "").strip()
+        if not live_id:
+            raise AppError(ErrorCode.INVALID_REQUEST, "live video required")
+        url = f"{GRAPH_URL}/{live_id}?" + urllib.parse.urlencode(
+            {"end_live_video": "true"})
+        status, resp = _graph("POST", url, access_token, {},
+                              self._transport)
+        if status != 200 or "error" in resp:
+            raise classify_facebook_error(resp, status)
+        return {"id": live_id}
+
+    def delete_live_video(self, access_token: str, live_id: str) -> dict:
+        """DELETE /{live-video-id} (limpieza F-075)."""
+        live_id = (live_id or "").strip()
+        if not live_id:
+            raise AppError(ErrorCode.INVALID_REQUEST, "live video required")
+        status, resp = _graph("DELETE", f"{GRAPH_URL}/{live_id}",
+                              access_token, None, self._transport)
+        if status != 200 or "error" in resp:
+            raise classify_facebook_error(resp, status)
+        return {"id": live_id}
+
+    def _go_live(self, access_token: str, live_id: str) -> dict:
+        """POST /{live-video-id} {status:LIVE_NOW} (D6R ON).
+
+        Solo sobre objeto existente/creado-por-dock; el dock exige
+        confirmacion UI explicita (riesgo de publicar). Sin RTMP/keys.
+        """
+        live_id = (live_id or "").strip()
+        if not live_id:
+            raise AppError(ErrorCode.INVALID_REQUEST, "live video required")
+        status, resp = _graph("POST", f"{GRAPH_URL}/{live_id}",
+                              access_token, {"status": "LIVE_NOW"},
+                              self._transport)
+        if status != 200 or "error" in resp:
+            raise classify_facebook_error(resp, status)
+        return {"id": live_id, "status": "LIVE_NOW"}
+
     def apply_metadata(self, access_token: str, data: dict) -> dict:
         """POST /{live-video-id} con token Managed server-side.
 
@@ -292,7 +411,32 @@ class FacebookProvider(OAuthProvider):
         Jamas `channel_description` (es del canal, AGENTS.md sec. 47).
         `target` opcional: "me"/vacio = perfil; page-id = Page (token
         derivado en memoria via /me/accounts).
+
+        FB-4 sin cambios de routing: `op` dispatcha el ciclo de vida
+        sobre la ruta generica POST /metadata/facebook:
+        update (defecto) / status / create / go_live / end / delete.
         """
+        data = data or {}
+        op = str(data.get("op", "update") or "update").strip().lower()
+        if op == "status":
+            live_id = str(data.get("live_video_id", "") or "").strip()
+            return self.get_live_status(access_token, live_id)
+        if op == "create":
+            return self.create_live_video(
+                access_token, str(data.get("title", "") or ""),
+                data.get("description", ""),
+                str(data.get("target", "") or "").strip())
+        if op in ("go_live", "golive", "live"):
+            live_id = str(data.get("live_video_id", "") or "").strip()
+            return self._go_live(access_token, live_id)
+        if op == "end":
+            live_id = str(data.get("live_video_id", "") or "").strip()
+            return self.end_live_video(access_token, live_id)
+        if op == "delete":
+            live_id = str(data.get("live_video_id", "") or "").strip()
+            return self.delete_live_video(access_token, live_id)
+        if op != "update":
+            raise AppError(ErrorCode.INVALID_REQUEST, "unknown op")
         live_id = str(data.get("live_video_id", "") or "").strip()
         title = str(data.get("title", "") or "")
         description = data.get("description", "")

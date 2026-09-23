@@ -25,6 +25,7 @@ Per connected account, the minimum the provider APIs return:
 | YouTube | channel/user id, display (channel title), granted scopes | `fetch_identity` (channels API) |
 | Kick | `broadcaster_user_id`, `slug` (display), granted scopes | `fetch_identity` (channels API) |
 | Twitch | `user_id`, `login` (display), granted scopes (validated) | `/validate` (device flow) |
+| Facebook | user id, `name` (display), granted scopes (`publish_video`; `pages_*` diferidas F-072/F-079) | `fetch_identity` (`/me?fields=id,name`; ADR-015) |
 
 Not collected: email, real name, avatar, location, or any profile
 field the code never reads (verified in the three adapters).
@@ -292,6 +293,7 @@ fixed here, never by silently changing the system (T-060 rule).
 | `access/refresh/clientId/secret` (Independent) | OAuth flows | DPAPI file (encrypted) | API calls | until Disconnect | Disconnect wipes |
 | installation id+secret | bootstrap | DPAPI (plugin) + PG `installations` | backend auth | until revoke/uninstall-independent | revoke/re-bootstrap |
 | `managedYoutube/managedKick` | `/status` | DPAPI file (plaintext) | reconnect labels | until Disconnect | snapshot omitted |
+| `managedFacebook` + `facebookLiveId` | `/status` + dock (ADR-015) | DPAPI file (plaintext: id+display + live-video ID, sin tokens) | reconnect labels + ID-céntrico F-075 (sobrevive a Disconnect/restart; solo DELETE lo limpia) | until Disconnect (snapshot) / until DELETE (live ID) | snapshot omitido / live ID borrado en DELETE |
 | `connectionMode`, `backendBaseUrl` | local/backend | DPAPI file (plaintext) | context/binding | until overwrite | — |
 | session token record | `/auth/*` | PG `sessions` | bearer auth | 30 min access TTL; flagged on revoke, physically deleted by the daily F-C4 purge (≤ ~25 h) | purge (expired/revoked) or erase deletes all of the installation |
 | OAuth transaction | `/connect/*` | PG `transactions` | CSRF/PKCE/exchange | 600 s TTL, single-use | consume/expiry; erase deletes pending of the installation |

@@ -99,6 +99,12 @@ class AdapterTest(unittest.TestCase):
                 ErrorCode.PROVIDER_RATE_LIMITED)
         self.assertEqual(classify_facebook_error({"code": 100}, 400).code,
                          ErrorCode.INVALID_REQUEST)
+        # T-073 FB-4 F-080: subcode 33 (objeto web/ID desconocido) no es
+        # "input invalido": es rechazo/not-found gestionable desde el dock.
+        self.assertEqual(
+            classify_facebook_error(
+                {"error": {"code": 100, "error_subcode": 33}}, 400).code,
+            ErrorCode.PROVIDER_REJECTED)
         self.assertEqual(classify_facebook_error({"code": 1}, 401).code,
                          ErrorCode.SESSION_EXPIRED)
         self.assertEqual(classify_facebook_error({"code": 1}, 403).code,
@@ -410,6 +416,88 @@ class MetadataFacebookTest(unittest.TestCase):
             svc.apply_metadata("nadie", {"live_video_id": LIVE_ID,
                                          "title": "Nuevo directo"})
         self.assertEqual(ctx.exception.code, ErrorCode.AUTHENTICATION)
+
+
+class LifecycleFacebookTest(unittest.TestCase):
+    """T-073 FB-4: indicador/on-off/creación-por-dock server-side.
+
+    Sin cambios de routing: todo via `apply_metadata` con `op`
+    (update/status/create/end/delete). D6R/D7/D11 ya validados en
+    sondas B'/C; aquí contrato offline TDD rojo-primero.
+    """
+
+    def _connected(self, transport):
+        svc, _ = make_service(transport)
+        started = svc.start("inst-fb", "http://localhost:0/cb")
+        txn = svc._transactions.load(started["transaction_id"])
+        svc.callback(txn["state"], "code-fb")
+        return svc
+
+    def test_status_op_returns_live_state(self):
+        def transport(method, url, fields):
+            if method == "GET" and LIVE_ID in url:
+                return 200, {"id": LIVE_ID, "title": "T",
+                             "description": "D", "status": "LIVE"}
+            return fake_facebook_ok(method, url, fields)
+
+        svc = self._connected(transport)
+        out = svc.apply_metadata("inst-fb", {"op": "status",
+                                             "live_video_id": LIVE_ID})
+        self.assertEqual(out["result"]["status"], "LIVE")
+        self.assertEqual(out["result"]["id"], LIVE_ID)
+
+    def test_create_op_posts_me_live_videos(self):
+        seen = {}
+
+        def transport(method, url, fields):
+            if method == "POST" and "live_videos" in url:
+                seen["payload"] = fields.get("payload", {})
+                return 200, {"id": "999", "stream_url": "x",
+                             "secure_stream_url": "y"}
+            return fake_facebook_ok(method, url, fields)
+
+        svc = self._connected(transport)
+        out = svc.apply_metadata("inst-fb", {"op": "create",
+                                             "title": "Dock live",
+                                             "description": "D"})
+        self.assertEqual(out["result"]["id"], "999")
+        self.assertEqual(seen["payload"].get("title"), "Dock live")
+        self.assertNotIn("stream_title", seen["payload"])
+        self.assertNotIn("channel_description", seen["payload"])
+
+    def test_end_op_posts_end_live_video(self):
+        seen = {}
+
+        def transport(method, url, fields):
+            if method == "POST" and "end_live_video" in url:
+                seen["url"] = url
+                return 200, {"success": True}
+            return fake_facebook_ok(method, url, fields)
+
+        svc = self._connected(transport)
+        out = svc.apply_metadata("inst-fb", {"op": "end",
+                                             "live_video_id": LIVE_ID})
+        self.assertEqual(out["result"]["id"], LIVE_ID)
+        self.assertIn("end_live_video", seen.get("url", ""))
+
+    def test_delete_op_deletes_object(self):
+        def transport(method, url, fields):
+            if method == "DELETE" and LIVE_ID in url:
+                return 200, {"success": True}
+            return fake_facebook_ok(method, url, fields)
+
+        svc = self._connected(transport)
+        out = svc.apply_metadata("inst-fb", {"op": "delete",
+                                             "live_video_id": LIVE_ID})
+        self.assertEqual(out["result"]["id"], LIVE_ID)
+
+    def test_unknown_op_is_invalid(self):
+        svc = self._connected(fake_facebook_ok)
+        with self.assertRaises(AppError) as ctx:
+            svc.apply_metadata("inst-fb", {"op": "launch",
+                                           "live_video_id": LIVE_ID,
+                                           "title": "T"})
+        self.assertEqual(ctx.exception.code, ErrorCode.INVALID_REQUEST)
 
 
 class HttpMetadataFacebookTest(unittest.TestCase):

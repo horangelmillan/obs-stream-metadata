@@ -99,7 +99,19 @@ Outcome classifyStatus(int code);
 // Jamas channel_description/stream_title/snippet (D2, AGENTS §47).
 QString facebookPayload(const QString &title, const QString &desc);
 // T-071 FB-2: clasificacion §28 + tabla brief §5 (190/1363120/1363144/10).
+// T-073 FB-4 (F-080): subcode 33 (GraphMethodException objeto web/ID
+// desconocido) es NotFound, no BadRequest de titulo.
 Outcome classifyFb(int httpStatus, int metaCode);
+// T-073 FB-4: warnings especificos elegibilidad/permisos (D9 §B.5).
+// 1363120 = 60+ dias, 1363144 = 100+ seguidores, 10 = permisos/review,
+// 33/100 = objeto no gestionable. Vacio si no hay warning especifico.
+QString fbEligibilityMessage(int metaCode);
+// T-073 FB-4: indicador por status del LiveVideo (D7). Mapeo lectura
+// real: LIVE/LIVE_NOW = en directo, UNPUBLISHED/SCHEDULED_* = vista
+// previa, VOD/LIVE_STOPPED = terminado, resto = Unknown.
+enum class FbLiveState { Unknown, Preview, Live, Ended };
+FbLiveState fbLiveState(const QString &status);
+QString fbLiveStateLabel(FbLiveState s);
 // T-071 FB-2: scopes minimos (D3). Perfil -> publish_video; Page ->
 // pages_manage_posts + pages_read_engagement + pages_show_list.
 // Jamas publish_to_groups/email.
