@@ -63,6 +63,10 @@ struct Data {
 	ManagedSnapshot managedTwitch;
 	// FB-3 (T-072): Managed Facebook, misma forma (solo id+display).
 	ManagedSnapshot managedFacebook;
+	// T-073 FB-4: LiveVideo creado por el dock (POST /me/live_videos,
+	// F-075 ID-centrico). Plaintext ID no-sensible (como userId/display):
+	// sobrevive a Disconnect/restart; se limpia con DELETE.
+	QString facebookLiveId;
 	// T-053: backend this installation belongs to (explicit environment
 	// binding). Plaintext URL, not a secret; empty = legacy file without
 	// binding (treated as mismatch → re-bootstrap, never cross-backend

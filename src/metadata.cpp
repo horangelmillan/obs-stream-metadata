@@ -136,6 +136,8 @@ QString facebookPayload(const QString &title, const QString &desc)
 // T-071 FB-2: taxonomia §28 + tabla brief §5. metaCode = Graph `code`
 // (190, 1363120/1363144 elegibilidad, 10, 613/4/17 rate). httpStatus =
 // HTTP real. Los codigos Meta mandan sobre el HTTP 200.
+// T-073 FB-4 (F-080): subcode 33 = objeto web/ID desconocido
+// (GraphMethodException) -> NotFound para no mentir con "titulo invalido".
 Outcome classifyFb(int httpStatus, int metaCode)
 {
 	if (metaCode == 1363120 || metaCode == 1363144 || metaCode == 10)
@@ -144,7 +146,64 @@ Outcome classifyFb(int httpStatus, int metaCode)
 		return Outcome::AuthRequired;
 	if (metaCode == 613 || metaCode == 4 || metaCode == 17)
 		return Outcome::RateLimited;
+	if (metaCode == 33)
+		return Outcome::NotFound;
 	return classifyStatus(httpStatus);
+}
+
+QString fbEligibilityMessage(int metaCode)
+{
+	if (metaCode == 1363120)
+		return QStringLiteral(
+			"Facebook: account must be at least 60 days old "
+			"to go live (code 1363120).");
+	if (metaCode == 1363144)
+		return QStringLiteral(
+			"Facebook: Page needs at least 100 followers "
+			"to go live (code 1363144).");
+	if (metaCode == 10)
+		return QStringLiteral(
+			"Facebook: missing permissions or app approval "
+			"(publish_video / pages_*).");
+	if (metaCode == 33 || metaCode == 100)
+		return QStringLiteral(
+			"Facebook: live video not manageable via API "
+			"(unknown or web object). Create one from the dock.");
+	if (metaCode == 190)
+		return QStringLiteral(
+			"Facebook: session expired. Reconnect your account.");
+	return QString();
+}
+
+FbLiveState fbLiveState(const QString &status)
+{
+	const QString s = status.trimmed().toUpper();
+	if (s == QStringLiteral("LIVE") ||
+	    s == QStringLiteral("LIVE_NOW"))
+		return FbLiveState::Live;
+	if (s == QStringLiteral("UNPUBLISHED") ||
+	    s.startsWith(QStringLiteral("SCHEDULED")))
+		return FbLiveState::Preview;
+	if (s == QStringLiteral("VOD") ||
+	    s == QStringLiteral("LIVE_STOPPED") ||
+	    s == QStringLiteral("COMPLETE"))
+		return FbLiveState::Ended;
+	return FbLiveState::Unknown;
+}
+
+QString fbLiveStateLabel(FbLiveState s)
+{
+	switch (s) {
+	case FbLiveState::Live:
+		return QStringLiteral("LIVE");
+	case FbLiveState::Preview:
+		return QStringLiteral("Preview");
+	case FbLiveState::Ended:
+		return QStringLiteral("Ended");
+	default:
+		break;
+	}
+	return QStringLiteral("Unknown");
 }
 
 QStringList fbRequiredScopes(bool page)
@@ -272,8 +331,9 @@ QString userMessage(Outcome o, Platform p)
 				"broadcasts and select one.");
 		if (p == Platform::Facebook)
 			return QStringLiteral(
-				"Facebook: live video not found. Refresh the "
-				"list and select one.");
+				"Facebook: live video not found or not "
+				"manageable via API. Create one from the dock "
+				"or paste a valid ID.");
 		return QStringLiteral("%1: resource not found.")
 			.arg(platformName(p));
 	case Outcome::Conflict:

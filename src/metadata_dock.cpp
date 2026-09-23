@@ -23,6 +23,7 @@ secrets in memory + DPAPI-encrypted store, never plaintext/printed/logged.
 #include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -360,6 +361,42 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 	fbDetailLayout->addWidget(fbLiveLabel);
 	fbDetailLayout->addWidget(fbLiveCombo_);
 	fbDetailLayout->addWidget(fbRefreshButton_);
+	// T-073 FB-4: indicador + ciclo de vida (D6R/D7/F-075). Sin
+	// polling auto: todo a peticion (Refresh/Apply/botones).
+	fbStateLabel_ = new QLabel(tr("Status: —"), fbDetail_);
+	fbStateLabel_->setWordWrap(true);
+	fbDetailLayout->addWidget(fbStateLabel_);
+	fbStatusButton_ =
+		new QPushButton(tr("Check live status"), fbDetail_);
+	connect(fbStatusButton_, &QPushButton::clicked, this,
+		&MetadataDock::onFbStatus);
+	fbCreateButton_ =
+		new QPushButton(tr("Create live video (dock)"), fbDetail_);
+	fbCreateButton_->setToolTip(
+		tr("POST /me/live_videos: creates a preview object owned "
+		   "by the dock (F-075). No RTMP/keys touched."));
+	connect(fbCreateButton_, &QPushButton::clicked, this,
+		&MetadataDock::onFbCreate);
+	fbGoLiveButton_ = new QPushButton(tr("Go live (ON)"), fbDetail_);
+	fbGoLiveButton_->setToolTip(
+		tr("Publishes the existing/dock-created video (LIVE_NOW). "
+		   "Requires explicit confirmation."));
+	connect(fbGoLiveButton_, &QPushButton::clicked, this,
+		&MetadataDock::onFbGoLive);
+	fbEndButton_ = new QPushButton(tr("End live (OFF)"), fbDetail_);
+	connect(fbEndButton_, &QPushButton::clicked, this,
+		&MetadataDock::onFbEndLive);
+	fbDeleteButton_ =
+		new QPushButton(tr("Delete live video"), fbDetail_);
+	fbDeleteButton_->setToolTip(
+		tr("DELETEs the dock object (cleanup F-075)."));
+	connect(fbDeleteButton_, &QPushButton::clicked, this,
+		&MetadataDock::onFbDelete);
+	fbDetailLayout->addWidget(fbStatusButton_);
+	fbDetailLayout->addWidget(fbCreateButton_);
+	fbDetailLayout->addWidget(fbGoLiveButton_);
+	fbDetailLayout->addWidget(fbEndButton_);
+	fbDetailLayout->addWidget(fbDeleteButton_);
 
 	// Twitch device-flow prompt lives inside the Twitch card detail
 	// (same show/hide call sites as before).
@@ -672,11 +709,37 @@ void MetadataDock::refreshContentVisibility()
 		fbLiveCombo_->setVisible(fb);
 	if (fbRefreshButton_)
 		fbRefreshButton_->setVisible(fb);
+	// T-073 FB-4 (F-086): indicador + ciclo de vida solo con sesion.
+	// Sin conexion no hay ID que leer/crear/publicar/terminar/borrar.
+	if (fbStateLabel_)
+		fbStateLabel_->setVisible(fb);
+	if (fbStatusButton_)
+		fbStatusButton_->setVisible(fb);
+	if (fbCreateButton_)
+		fbCreateButton_->setVisible(fb);
+	if (fbGoLiveButton_)
+		fbGoLiveButton_->setVisible(fb);
+	if (fbEndButton_)
+		fbEndButton_->setVisible(fb);
+	if (fbDeleteButton_)
+		fbDeleteButton_->setVisible(fb);
+	// T-073 FB-4 (F-086): Connect solo sin sesion, Disconnect solo con
+	// sesion, en las cuatro tarjetas y en ambos modos (usable == connected
+	// en el modo activo). Evita flujos con conflicto (p. ej. Disconnect
+	// o ciclo de vida sin conexion).
+	const bool tw = platformUsable(meta::Platform::Twitch);
+	const bool kk = platformUsable(meta::Platform::Kick);
+	twConnect_->setVisible(!tw);
+	twDisconnect_->setVisible(tw);
+	ytConnect_->setVisible(!yt);
+	ytDisconnect_->setVisible(yt);
+	kkConnect_->setVisible(!kk);
+	kkDisconnect_->setVisible(kk);
+	fbConnect_->setVisible(!fb);
+	fbDisconnect_->setVisible(fb);
 	// FASE 2: Twitch connects/disconnects in Managed like the other
 	// platforms (own ManagedConn state, no shared Independent account).
 	// The legacy "not available" note stays hidden.
-	twConnect_->setVisible(true);
-	twDisconnect_->setVisible(true);
 	if (twManagedNote_)
 		twManagedNote_->setVisible(false);
 	updateCardVisibility();
@@ -803,6 +866,11 @@ void MetadataDock::cancelPendingForModeSwitch()
 	case Op::FbTargets:
 	case Op::FbList:
 	case Op::FbRead:
+	case Op::FbStatus:
+	case Op::FbCreate:
+	case Op::FbGoLive:
+	case Op::FbEnd:
+	case Op::FbDelete:
 		pending_ = Op::None;
 		devicePrompt_->setVisible(false);
 		// Repaint from the real state: a finished connection was
@@ -1698,13 +1766,24 @@ void MetadataDock::saveStore()
 	fillManaged(mKk_, d.managedKick);
 	fillManaged(mTw_, d.managedTwitch);
 	fillManaged(mFb_, d.managedFacebook);
+	// T-073 FB-4: LiveVideo ID del dock (plaintext, ID no-sensible).
+	// Se preserva aunque no haya conexion (ID-centrico F-075): el
+	// objeto Meta sobrevive a Disconnect/restart; solo DELETE lo limpia.
+	// El combo manda cuando tiene ID; si esta vacio se conserva el
+	// guardado (no se borra por un save incidental).
+	{
+		const QString comboId = currentFbLiveId();
+		if (!comboId.isEmpty())
+			d.facebookLiveId = comboId;
+	}
 	// T-041: the mode is always persisted explicitly (idempotent
 	// migration: first save after upgrade writes it). Legacy clear
 	// behavior stays unless Managed was explicitly selected or a
 	// Managed snapshot exists.
 	d.connectionMode = QString::fromLatin1(meta::connectionModeName(mode_))
 				   .toLower();
-	if (!d.anyConnected() && !d.anyManaged() && !isManaged()) {
+	if (!d.anyConnected() && !d.anyManaged() && !isManaged() &&
+	    d.facebookLiveId.isEmpty()) {
 		store_->clear();
 		return;
 	}
@@ -1773,6 +1852,26 @@ void MetadataDock::loadStore()
 	if (fb_.connected) {
 		fbIdEdit_->setText(fb_.clientId);
 		fbSecretEdit_->setText(fb_.secret);
+	}
+	// T-073 FB-4: restaurar el LiveVideo ID del dock (ID-centrico).
+	if (!d.facebookLiveId.isEmpty() && fbLiveCombo_) {
+		bool found = false;
+		for (int i = 0; i < fbLiveCombo_->count(); ++i) {
+			if (fbLiveCombo_->itemData(i).toString() ==
+				    d.facebookLiveId ||
+			    fbLiveCombo_->itemText(i).contains(
+				    d.facebookLiveId)) {
+				fbLiveCombo_->setCurrentIndex(i);
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			fbLiveCombo_->addItem(d.facebookLiveId,
+					      d.facebookLiveId);
+			fbLiveCombo_->setCurrentIndex(
+				fbLiveCombo_->count() - 1);
+		}
 	}
 	for (meta::Platform p :
 	     {meta::Platform::Twitch, meta::Platform::YouTube,
@@ -1845,10 +1944,15 @@ void MetadataDock::wipeLocal(meta::Platform p)
 	if (p == meta::Platform::YouTube)
 		broadcastCombo_->clear();
 	if (p == meta::Platform::Facebook) {
-		fbLiveCombo_->clear();
+		// T-073 FB-4: Disconnect no borra el LiveVideo ID del dock
+		// (el objeto Meta sigue existiendo; ID-centrico F-075). Solo
+		// se limpian credenciales/targets en memoria; el combo y el
+		// ID persistido sobreviven para reconectar.
 		fbTargetCombo_->clear();
 		fbPageTokens_.clear();
 		fbTarget_.clear();
+		if (fbStateLabel_)
+			fbStateLabel_->setText(tr("Status: —"));
 	}
 	setStatus(p, tr("Not connected"));
 	setResult(p, true, tr("disconnected"));
@@ -2399,6 +2503,415 @@ void MetadataDock::onFacebookTargetChanged(int index)
 	fetchFacebookVideos();
 }
 
+// --- facebook lifecycle FB-4 (T-073, D6R/D7/F-075) ------------------------
+// Indicador por `status` del LiveVideo; ON solo sobre ID existente o
+// creado-por-dock + confirmacion explicita; OFF/DELETE confirman;
+// CREATE persiste el ID (secure::Data.facebookLiveId) + limpieza DELETE.
+// Cero RTMP/keys/Aitum (§51): solo estado del LiveVideo por API.
+
+QString MetadataDock::currentFbLiveId() const
+{
+	if (!fbLiveCombo_)
+		return QString();
+	QString id = fbLiveCombo_->currentData().toString();
+	if (id.isEmpty() && fbLiveCombo_->isEditable())
+		id = fbLiveCombo_->currentText().trimmed();
+	// El combo muestra "title (id)" o "title (status)": extraer el ID
+	// entre parentesis cuando el texto pegado trae ese formato.
+	if (id.contains(QLatin1Char('('))) {
+		const int a = id.lastIndexOf(QLatin1Char('('));
+		const int b = id.lastIndexOf(QLatin1Char(')'));
+		if (a >= 0 && b > a)
+			id = id.mid(a + 1, b - a - 1).trimmed();
+	}
+	return id;
+}
+
+void MetadataDock::setFbLiveId(const QString &id)
+{
+	const QString clean = id.trimmed();
+	if (clean.isEmpty() || !fbLiveCombo_)
+		return;
+	// Evitar duplicados: reutilizar item existente o añadirlo.
+	for (int i = 0; i < fbLiveCombo_->count(); ++i) {
+		if (fbLiveCombo_->itemData(i).toString() == clean ||
+		    fbLiveCombo_->itemText(i).contains(clean)) {
+			fbLiveCombo_->setCurrentIndex(i);
+			saveStore();
+			return;
+		}
+	}
+	fbLiveCombo_->addItem(clean, clean);
+	fbLiveCombo_->setCurrentIndex(fbLiveCombo_->count() - 1);
+	saveStore(); // persiste facebookLiveId (plaintext ID, sin secretos)
+}
+
+void MetadataDock::setFbState(const QString &status)
+{
+	if (!fbStateLabel_)
+		return;
+	const meta::FbLiveState st = meta::fbLiveState(status);
+	const QString label = meta::fbLiveStateLabel(st);
+	QString dot = QStringLiteral("○");
+	if (st == meta::FbLiveState::Live)
+		dot = QStringLiteral("● LIVE");
+	else if (st == meta::FbLiveState::Preview)
+		dot = QStringLiteral("○ Preview");
+	else if (st == meta::FbLiveState::Ended)
+		dot = QStringLiteral("■ Ended");
+	fbStateLabel_->setText(tr("Status: %1 (%2)").arg(
+		dot, status.isEmpty() ? QStringLiteral("—") : status));
+}
+
+void MetadataDock::onFbStatus()
+{
+	const QString liveId = currentFbLiveId();
+	if (liveId.isEmpty()) {
+		generalMsg_->setText(meta::userMessage(
+			meta::Outcome::NotFound, meta::Platform::Facebook));
+		return;
+	}
+	if (isManaged()) {
+		if (!managedAccount(meta::Platform::Facebook).connected) {
+			generalMsg_->setText(meta::userMessage(
+				meta::Outcome::AuthRequired,
+				meta::Platform::Facebook));
+			return;
+		}
+		startManagedFbOp(QStringLiteral("status"), liveId);
+		return;
+	}
+	if (!fb_.connected) {
+		generalMsg_->setText(meta::userMessage(
+			meta::Outcome::AuthRequired,
+			meta::Platform::Facebook));
+		return;
+	}
+	startFbStatusIndependent(liveId);
+}
+
+void MetadataDock::onFbCreate()
+{
+	if (isManaged()) {
+		if (!managedAccount(meta::Platform::Facebook).connected) {
+			generalMsg_->setText(meta::userMessage(
+				meta::Outcome::AuthRequired,
+				meta::Platform::Facebook));
+			return;
+		}
+		startManagedFbOp(QStringLiteral("create"), QString());
+		return;
+	}
+	if (!fb_.connected) {
+		generalMsg_->setText(meta::userMessage(
+			meta::Outcome::AuthRequired,
+			meta::Platform::Facebook));
+		return;
+	}
+	startFbCreateIndependent();
+}
+
+void MetadataDock::onFbGoLive()
+{
+	const QString liveId = currentFbLiveId();
+	if (liveId.isEmpty()) {
+		generalMsg_->setText(meta::userMessage(
+			meta::Outcome::NotFound, meta::Platform::Facebook));
+		return;
+	}
+	QMessageBox::StandardButton ok = QMessageBox::warning(
+		this, tr("Go live on Facebook"),
+		tr("This will PUBLISH the video %1 as LIVE_NOW, visible to "
+		   "its audience. Continue?")
+			.arg(liveId),
+		QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+	if (ok != QMessageBox::Yes)
+		return;
+	if (isManaged()) {
+		if (!managedAccount(meta::Platform::Facebook).connected) {
+			generalMsg_->setText(meta::userMessage(
+				meta::Outcome::AuthRequired,
+				meta::Platform::Facebook));
+			return;
+		}
+		startManagedFbOp(QStringLiteral("go_live"), liveId);
+		return;
+	}
+	if (!fb_.connected) {
+		generalMsg_->setText(meta::userMessage(
+			meta::Outcome::AuthRequired,
+			meta::Platform::Facebook));
+		return;
+	}
+	startFbGoLiveIndependent(liveId);
+}
+
+void MetadataDock::onFbEndLive()
+{
+	const QString liveId = currentFbLiveId();
+	if (liveId.isEmpty()) {
+		generalMsg_->setText(meta::userMessage(
+			meta::Outcome::NotFound, meta::Platform::Facebook));
+		return;
+	}
+	QMessageBox::StandardButton ok = QMessageBox::question(
+		this, tr("End Facebook live"),
+		tr("End the live video %1 (VOD)?").arg(liveId),
+		QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+	if (ok != QMessageBox::Yes)
+		return;
+	if (isManaged()) {
+		if (!managedAccount(meta::Platform::Facebook).connected) {
+			generalMsg_->setText(meta::userMessage(
+				meta::Outcome::AuthRequired,
+				meta::Platform::Facebook));
+			return;
+		}
+		startManagedFbOp(QStringLiteral("end"), liveId);
+		return;
+	}
+	if (!fb_.connected) {
+		generalMsg_->setText(meta::userMessage(
+			meta::Outcome::AuthRequired,
+			meta::Platform::Facebook));
+		return;
+	}
+	startFbEndIndependent(liveId);
+}
+
+void MetadataDock::onFbDelete()
+{
+	const QString liveId = currentFbLiveId();
+	if (liveId.isEmpty()) {
+		generalMsg_->setText(meta::userMessage(
+			meta::Outcome::NotFound, meta::Platform::Facebook));
+		return;
+	}
+	QMessageBox::StandardButton ok = QMessageBox::warning(
+		this, tr("Delete Facebook live video"),
+		tr("DELETE the live video %1? This cannot be undone.")
+			.arg(liveId),
+		QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+	if (ok != QMessageBox::Yes)
+		return;
+	if (isManaged()) {
+		if (!managedAccount(meta::Platform::Facebook).connected) {
+			generalMsg_->setText(meta::userMessage(
+				meta::Outcome::AuthRequired,
+				meta::Platform::Facebook));
+			return;
+		}
+		startManagedFbOp(QStringLiteral("delete"), liveId);
+		return;
+	}
+	if (!fb_.connected) {
+		generalMsg_->setText(meta::userMessage(
+			meta::Outcome::AuthRequired,
+			meta::Platform::Facebook));
+		return;
+	}
+	startFbDeleteIndependent(liveId);
+}
+
+void MetadataDock::startFbStatusIndependent(const QString &liveId)
+{
+	QUrl url(QString::fromLatin1(kFbGraph) + QStringLiteral("/") +
+		 liveId);
+	QUrlQuery q;
+	q.addQueryItem(QStringLiteral("fields"),
+		       QStringLiteral("id,title,description,status"));
+	url.setQuery(q);
+	setFbState(QString());
+	generalMsg_->setText(tr("Checking Facebook status…"));
+	sendGet(url, Op::FbStatus, fb_.access);
+}
+
+void MetadataDock::startFbCreateIndependent()
+{
+	const QString title = titleEdit_->text().trimmed();
+	if (title.isEmpty() || title.size() > meta::kFacebookTitleMax) {
+		generalMsg_->setText(meta::userMessage(
+			meta::Outcome::BadRequest, meta::Platform::Facebook));
+		return;
+	}
+	const QString target =
+		fbTarget_.isEmpty() ? QStringLiteral("me") : fbTarget_;
+	QString token = fb_.access;
+	if (target != QStringLiteral("me"))
+		token = fbPageTokens_.value(target, token);
+	QUrl url(QString::fromLatin1(kFbGraph) + QStringLiteral("/") +
+		 target + QStringLiteral("/live_videos"));
+	QJsonObject body;
+	body[QStringLiteral("title")] = title;
+	const QString desc = descEdit_->toPlainText();
+	if (!desc.isEmpty())
+		body[QStringLiteral("description")] = desc;
+	QJsonObject privacy;
+	privacy[QStringLiteral("value")] = QStringLiteral("EVERYONE");
+	body[QStringLiteral("privacy")] = privacy;
+	generalMsg_->setText(tr("Creating Facebook live video…"));
+	sendJson(url, QStringLiteral("POST"),
+		 QString::fromUtf8(
+			 QJsonDocument(body).toJson(QJsonDocument::Compact)),
+		 Op::FbCreate, token);
+}
+
+void MetadataDock::startFbGoLiveIndependent(const QString &liveId)
+{
+	QUrl url(QString::fromLatin1(kFbGraph) + QStringLiteral("/") +
+		 liveId);
+	QJsonObject body;
+	body[QStringLiteral("status")] = QStringLiteral("LIVE_NOW");
+	generalMsg_->setText(tr("Going live on Facebook…"));
+	sendJson(url, QStringLiteral("POST"),
+		 QString::fromUtf8(
+			 QJsonDocument(body).toJson(QJsonDocument::Compact)),
+		 Op::FbGoLive, fb_.access);
+}
+
+void MetadataDock::startFbEndIndependent(const QString &liveId)
+{
+	QUrl url(QString::fromLatin1(kFbGraph) + QStringLiteral("/") +
+		 liveId);
+	QUrlQuery q;
+	q.addQueryItem(QStringLiteral("end_live_video"),
+		       QStringLiteral("true"));
+	url.setQuery(q);
+	generalMsg_->setText(tr("Ending Facebook live…"));
+	sendJson(url, QStringLiteral("POST"), QString(), Op::FbEnd,
+		 fb_.access);
+}
+
+void MetadataDock::startFbDeleteIndependent(const QString &liveId)
+{
+	QUrl url(QString::fromLatin1(kFbGraph) + QStringLiteral("/") +
+		 liveId);
+	generalMsg_->setText(tr("Deleting Facebook live video…"));
+	sendJson(url, QStringLiteral("DELETE"), QString(), Op::FbDelete,
+		 fb_.access);
+}
+
+void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
+{
+	QJsonObject body;
+	body[QStringLiteral("op")] = op;
+	if (!liveId.isEmpty())
+		body[QStringLiteral("live_video_id")] = liveId;
+	if (op == QStringLiteral("create")) {
+		body[QStringLiteral("title")] = titleEdit_->text();
+		body[QStringLiteral("description")] =
+			descEdit_->toPlainText();
+		if (!fbTarget_.isEmpty())
+			body[QStringLiteral("target")] = fbTarget_;
+	}
+	generalMsg_->setText(tr("Facebook %1…").arg(op));
+	managedAuth_->apiPost(
+		QStringLiteral("/metadata/facebook"), body,
+		[this, op, liveId](const backend_auth::Client::ApiReply &rep) {
+			obs_log(LOG_INFO,
+				"managed fb %s reply: result=%d http=%d",
+				qPrintable(op),
+				static_cast<int>(rep.result), rep.http);
+			if (!isManaged())
+				return;
+			if (rep.result !=
+			    backend_auth::Result::Ok) {
+				const meta::Outcome oc =
+					rep.result ==
+							backend_auth::Result::
+								NetworkError
+						? meta::Outcome::NetworkError
+						: meta::classifyStatus(
+							  rep.http == 0 ? -1
+									: rep.http);
+				generalMsg_->setText(meta::userMessage(
+					oc, meta::Platform::Facebook));
+				return;
+			}
+			const QJsonObject res =
+				rep.body.value(QStringLiteral("result"))
+					.toObject();
+			const QString id =
+				res.value(QStringLiteral("id")).toString();
+			const QString st =
+				res.value(QStringLiteral("status"))
+					.toString();
+			if (!id.isEmpty() &&
+			    (op == QStringLiteral("create") ||
+			     op == QStringLiteral("status")))
+				setFbLiveId(id);
+			if (!st.isEmpty())
+				setFbState(st);
+			// F-085: tras on/off, lectura encadenada (una vez,
+			// sin polling) para dejar el indicador real sin
+			// Check manual; el mensaje de la operacion se conserva.
+			const QString doneId = !id.isEmpty()
+						       ? id
+						       : liveId;
+			if ((op == QStringLiteral("go_live") ||
+			     op == QStringLiteral("end")) &&
+			    !doneId.isEmpty()) {
+				if (op == QStringLiteral("go_live"))
+					setFbState(QStringLiteral("LIVE"));
+				else
+					setFbState(QStringLiteral("VOD"));
+				fbQuietStatus_ = true;
+				QJsonObject sbody;
+				sbody[QStringLiteral("op")] =
+					QStringLiteral("status");
+				sbody[QStringLiteral("live_video_id")] =
+					doneId;
+				managedAuth_->apiPost(
+					QStringLiteral("/metadata/facebook"),
+					sbody,
+					[this, doneId](const backend_auth::Client::
+						       ApiReply &srep) {
+						if (!isManaged())
+							return;
+						if (srep.result !=
+						    backend_auth::Result::
+							    Ok) {
+							fbQuietStatus_ = false;
+							return;
+						}
+						const QJsonObject sres =
+							srep.body
+								.value(QStringLiteral(
+									"result"))
+								.toObject();
+						setFbState(
+							sres.value(QStringLiteral(
+									"status"))
+								.toString());
+						fbQuietStatus_ = false;
+					});
+			}
+			if (op == QStringLiteral("delete") && !id.isEmpty()) {
+				// Limpieza F-075: retirar el ID del combo y
+				// del store persistido.
+				for (int i = fbLiveCombo_->count() - 1;
+				     i >= 0; --i) {
+					if (fbLiveCombo_->itemData(i)
+						    .toString() == id ||
+					    fbLiveCombo_->itemText(i)
+						    .contains(id))
+						fbLiveCombo_->removeItem(i);
+				}
+				if (store_) {
+					secure::Data d;
+					store_->load(d);
+					if (d.facebookLiveId == id) {
+						d.facebookLiveId.clear();
+						store_->save(d);
+					}
+				}
+				setFbState(QString());
+			}
+			generalMsg_->setText(
+				tr("Facebook %1 OK.").arg(op));
+		});
+}
+
 // --- apply -------------------------------------------------------------
 
 void MetadataDock::onApply()
@@ -2925,6 +3438,11 @@ void MetadataDock::onReply(QNetworkReply *reply)
 	case Op::FbLongLived:
 	case Op::FbIdentity:
 	case Op::FbTargets:
+	case Op::FbStatus:
+	case Op::FbCreate:
+	case Op::FbGoLive:
+	case Op::FbEnd:
+	case Op::FbDelete:
 		if (isManaged())
 			return;
 		break;
@@ -3239,24 +3757,32 @@ void MetadataDock::onReply(QNetworkReply *reply)
 							    .toObject();
 			int code = err.value(QStringLiteral("code"))
 					   .toInt(0);
+			const int sub = err.value(QStringLiteral(
+							  "error_subcode"))
+					      .toInt(0);
 			if (code == 0)
-				code = err.value(QStringLiteral(
-							 "error_subcode"))
-					       .toInt(0);
+				code = sub;
+			else if (code == 100 && sub == 33)
+				code = 33; // F-080: objeto web/ID desconocido
 			return code;
 		};
 		if (netFail || http != 200) {
+			const int fbc = fbCode();
 			const meta::Outcome oc =
-				meta::classifyFb(http, fbCode());
+				meta::classifyFb(http, fbc);
+			const QString spec =
+				meta::fbEligibilityMessage(fbc);
+			const QString msg = !spec.isEmpty()
+						    ? spec
+						    : meta::userMessage(
+							      oc, P::Facebook);
 			if (applyAfterList_) {
 				applyAfterList_ = false;
 				const P p = applyQueue_.takeFirst();
-				finishPlatform(p, false,
-					       meta::userMessage(oc, p));
+				finishPlatform(p, false, msg);
 				startApplyNext();
 			} else {
-				generalMsg_->setText(meta::userMessage(
-					oc, P::Facebook));
+				generalMsg_->setText(msg);
 			}
 			return;
 		}
@@ -3308,6 +3834,166 @@ void MetadataDock::onReply(QNetworkReply *reply)
 		return;
 	}
 
+	case Op::FbStatus: {
+		// Indicador D7: solo lectura, sin decidir Apply.
+		if (netFail || http != 200) {
+			const QJsonObject err = replyJson(reply)
+							    .value(QStringLiteral(
+								    "error"))
+							    .toObject();
+			int code = err.value(QStringLiteral("code"))
+					   .toInt(0);
+			const int sub = err.value(QStringLiteral(
+							  "error_subcode"))
+					      .toInt(0);
+			if (code == 0)
+				code = sub;
+			else if (code == 100 && sub == 33)
+				code = 33;
+			const QString spec =
+				meta::fbEligibilityMessage(code);
+			generalMsg_->setText(
+				!spec.isEmpty()
+					? spec
+					: meta::userMessage(
+						  meta::classifyFb(http, code),
+						  P::Facebook));
+			setFbState(QString());
+			return;
+		}
+		const QJsonObject o = replyJson(reply);
+		setFbState(o.value(QStringLiteral("status")).toString());
+		if (!fbQuietStatus_)
+			generalMsg_->setText(
+				tr("Facebook status: %1")
+					.arg(o.value(QStringLiteral("status"))
+						     .toString()));
+		fbQuietStatus_ = false;
+		obs_log(LOG_INFO, "facebook status checked");
+		return;
+	}
+
+	case Op::FbCreate: {
+		if (netFail || http != 200) {
+			const QJsonObject err = replyJson(reply)
+							    .value(QStringLiteral(
+								    "error"))
+							    .toObject();
+			int code = err.value(QStringLiteral("code"))
+					   .toInt(0);
+			const int sub = err.value(QStringLiteral(
+							  "error_subcode"))
+					      .toInt(0);
+			if (code == 0)
+				code = sub;
+			else if (code == 100 && sub == 33)
+				code = 33;
+			const QString spec =
+				meta::fbEligibilityMessage(code);
+			generalMsg_->setText(
+				!spec.isEmpty()
+					? spec
+					: meta::userMessage(
+						  meta::classifyFb(http, code),
+						  P::Facebook));
+			return;
+		}
+		const QJsonObject o = replyJson(reply);
+		const QString nid = o.value(QStringLiteral("id"))
+					    .toString();
+		if (nid.isEmpty()) {
+			generalMsg_->setText(meta::userMessage(
+				meta::Outcome::ServerRetry, P::Facebook));
+			return;
+		}
+		setFbLiveId(nid);
+		setFbState(QStringLiteral("UNPUBLISHED"));
+		generalMsg_->setText(
+			tr("Facebook live video created (%1).").arg(nid));
+		obs_log(LOG_INFO, "facebook live video created");
+		return;
+	}
+
+	case Op::FbGoLive:
+	case Op::FbEnd:
+	case Op::FbDelete: {
+		const char *label = (op == Op::FbGoLive)
+					    ? "facebook go-live"
+					    : (op == Op::FbEnd)
+						      ? "facebook end-live"
+						      : "facebook delete";
+		if (netFail || http != 200) {
+			const QJsonObject err = replyJson(reply)
+							    .value(QStringLiteral(
+								    "error"))
+							    .toObject();
+			int code = err.value(QStringLiteral("code"))
+					   .toInt(0);
+			const int sub = err.value(QStringLiteral(
+							  "error_subcode"))
+					      .toInt(0);
+			if (code == 0)
+				code = sub;
+			else if (code == 100 && sub == 33)
+				code = 33;
+			const QString spec =
+				meta::fbEligibilityMessage(code);
+			generalMsg_->setText(
+				!spec.isEmpty()
+					? spec
+					: meta::userMessage(
+						  meta::classifyFb(http, code),
+						  P::Facebook));
+			obs_log(LOG_WARNING, "%s http %d", label, http);
+			return;
+		}
+		{
+			const QString liveId = currentFbLiveId();
+			if (op == Op::FbGoLive && !liveId.isEmpty()) {
+				// F-085: refresco encadenado (una lectura,
+				// sin polling): el indicador queda real sin
+				// Check manual; el mensaje del ON se conserva.
+				setFbState(QStringLiteral("LIVE"));
+				fbQuietStatus_ = true;
+				startFbStatusIndependent(liveId);
+			} else if (op == Op::FbEnd && !liveId.isEmpty()) {
+				setFbState(QStringLiteral("VOD"));
+				fbQuietStatus_ = true;
+				startFbStatusIndependent(liveId);
+			}
+		}
+		if (op == Op::FbDelete) {
+			const QString liveId = currentFbLiveId();
+			for (int i = fbLiveCombo_->count() - 1; i >= 0;
+			     --i) {
+				if (fbLiveCombo_->itemData(i).toString() ==
+					    liveId ||
+				    fbLiveCombo_->itemText(i).contains(
+					    liveId))
+					fbLiveCombo_->removeItem(i);
+			}
+			if (store_) {
+				secure::Data d;
+				store_->load(d);
+				if (d.facebookLiveId == liveId) {
+					d.facebookLiveId.clear();
+					store_->save(d);
+				}
+			}
+			setFbState(QString());
+			generalMsg_->setText(
+				tr("Facebook live video deleted."));
+		} else if (op == Op::FbGoLive) {
+			setFbState(QStringLiteral("LIVE"));
+			generalMsg_->setText(tr("Facebook is LIVE."));
+		} else {
+			setFbState(QStringLiteral("VOD"));
+			generalMsg_->setText(tr("Facebook live ended."));
+		}
+		obs_log(LOG_INFO, "%s ok", label);
+		return;
+	}
+
 	case Op::UpFb:
 	case Op::UpFbRetry: {
 		const P p = P::Facebook;
@@ -3317,9 +4003,13 @@ void MetadataDock::onReply(QNetworkReply *reply)
 						    .toObject();
 		int code =
 			err.value(QStringLiteral("code")).toInt(0);
+		const int sub =
+			err.value(QStringLiteral("error_subcode"))
+				.toInt(0);
 		if (code == 0)
-			code = err.value(QStringLiteral("error_subcode"))
-				       .toInt(0);
+			code = sub;
+		else if (code == 100 && sub == 33)
+			code = 33; // F-080: objeto web/ID desconocido
 		const meta::Outcome oc = netFail
 						 ? meta::Outcome::NetworkError
 						 : meta::classifyFb(http, code);
@@ -3331,8 +4021,13 @@ void MetadataDock::onReply(QNetworkReply *reply)
 			fb_.connected = false;
 			setStatus(p, tr("Needs reconnection."));
 		}
+		const QString spec =
+			!netFail ? meta::fbEligibilityMessage(code)
+				 : QString();
 		finishPlatform(p, oc == meta::Outcome::Success,
-			       meta::userMessage(oc, p));
+			       !spec.isEmpty()
+				       ? spec
+				       : meta::userMessage(oc, p));
 		startApplyNext();
 		return;
 	}

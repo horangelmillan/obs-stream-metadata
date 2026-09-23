@@ -71,6 +71,14 @@ private slots:
 	void onRefreshBroadcasts();
 	void onRefreshFacebook();
 	void onFacebookTargetChanged(int index);
+	// T-073 FB-4: ciclo de vida LiveVideo (indicador/on-off/creación).
+	// ON solo sobre ID existente/creado-por-dock + confirmación UI;
+	// OFF/DELETE también confirman; STATUS es solo lectura.
+	void onFbCreate();
+	void onFbStatus();
+	void onFbGoLive();
+	void onFbEndLive();
+	void onFbDelete();
 	void onReply(QNetworkReply *reply);
 	void onTwitchPollTimeout();
 	void onBackoffTimeout();
@@ -135,6 +143,16 @@ private slots:
 	void startFacebookLongLived();
 	void fetchFacebookVideos();
 	void fetchFacebookTargets();
+	// T-073 FB-4: helpers ciclo de vida (ambos modos, QNAM async).
+	QString currentFbLiveId() const;
+	void setFbLiveId(const QString &id);
+	void setFbState(const QString &status);
+	void startFbStatusIndependent(const QString &liveId);
+	void startFbCreateIndependent();
+	void startFbGoLiveIndependent(const QString &liveId);
+	void startFbEndIndependent(const QString &liveId);
+	void startFbDeleteIndependent(const QString &liveId);
+	void startManagedFbOp(const QString &op, const QString &liveId);
 	// F-C2: borrado total Managed (POST /privacy/erase + snapshots).
 	void onEraseManagedData();
 
@@ -159,6 +177,11 @@ private:
 		FbTargets,
 		FbList,
 		FbRead,
+		FbStatus,
+		FbCreate,
+		FbGoLive,
+		FbEnd,
+		FbDelete,
 		UpFb,
 		UpFbRetry,
 		UpTw,
@@ -262,6 +285,18 @@ private:
 	QPushButton *fbRefreshButton_ = nullptr;
 	QLabel *fbTargetLabel_ = nullptr;
 	QLabel *fbLiveLabel_ = nullptr;
+	// T-073 FB-4: indicador + ciclo de vida (solo UI, sin estado nuevo
+	// sensible; el ID persiste en secure::Data.facebookLiveId).
+	QLabel *fbStateLabel_ = nullptr;
+	QPushButton *fbStatusButton_ = nullptr;
+	QPushButton *fbCreateButton_ = nullptr;
+	QPushButton *fbGoLiveButton_ = nullptr;
+	QPushButton *fbEndButton_ = nullptr;
+	QPushButton *fbDeleteButton_ = nullptr;
+	// T-073 FB-4: status encadenado tras on/off (F-085). Cuando es true,
+	// el read-back actualiza el indicador sin pisar el mensaje de la
+	// operacion (sigue siendo una lectura a peticion, sin polling).
+	bool fbQuietStatus_ = false;
 	QLabel *devicePrompt_ = nullptr;
 	QPushButton *applyButton_ = nullptr;
 	// F-C2: "Borrar mis datos" (solo Managed; Independent intacto).

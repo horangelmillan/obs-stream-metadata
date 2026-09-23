@@ -26,6 +26,10 @@ const char *kConnectionMode = "connection_mode";
 // T-053: root-level backend URL key. Plaintext (endpoint, not a secret).
 const char *kBackendBaseUrl = "backend_base_url";
 
+// T-073 FB-4: LiveVideo ID creado por el dock. Plaintext (ID no-sensible,
+// como userId/display; jamas token/secreto).
+const char *kFacebookLiveId = "facebook_live_id";
+
 // Canonical wire strings (T-049 helpers are the single source of truth).
 QString modeToString(meta::ConnectionMode m)
 {
@@ -260,6 +264,10 @@ bool Store::save(const Data &d)
 	if (d.managedFacebook.connected)
 		root[QStringLiteral("managed_facebook")] =
 			managedToJson(d.managedFacebook);
+	// T-073 FB-4: LiveVideo ID del dock (plaintext, no-sensible).
+	if (!d.facebookLiveId.isEmpty())
+		root[QString::fromLatin1(kFacebookLiveId)] =
+			d.facebookLiveId;
 	// T-053: installation↔backend binding (plaintext endpoint). Written
 	// whenever known so a later backend switch is detectable; like the
 	// mode, it survives the load-time reset below.
@@ -331,14 +339,19 @@ bool Store::load(Data &d)
 	const bool fbManaged = managedFromJson(
 		root.value(QStringLiteral("managed_facebook")).toObject(),
 		d.managedFacebook);
+	// T-073 FB-4: LiveVideo ID del dock (plaintext). Parsed before the
+	// reset so it survives it, like snapshots/mode.
+	const QString fbLiveId =
+		root.value(QString::fromLatin1(kFacebookLiveId)).toString();
 	if (!any && !backendOk && !ytManaged && !kkManaged && !twManaged &&
-	    !fbManaged)
+	    !fbManaged && fbLiveId.isEmpty())
 		d = Data();
 	d.connectionMode = modeToString(mode);
 	// T-053: binding parsed after the reset so it is always faithful to
 	// the file (missing key = legacy = empty = never matches).
 	d.backendBaseUrl =
 		root.value(QString::fromLatin1(kBackendBaseUrl)).toString();
+	d.facebookLiveId = fbLiveId;
 	return any;
 #else
 	d = Data();

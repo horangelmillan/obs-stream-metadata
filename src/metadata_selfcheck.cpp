@@ -493,6 +493,23 @@ int main(int argc, char **argv)
 				      QStringLiteral("Fb Name") &&
 			      d.anyManaged() && !d.managedKick.connected,
 		      "msnap-fb-restore");
+		// T-073 FB-4: LiveVideo ID del dock (plaintext, sobrevive sin
+		// conexion; solo DELETE lo limpia).
+		CHECK(f.open(QIODevice::WriteOnly | QIODevice::Truncate),
+		      "fblive-write");
+		f.write(QByteArrayLiteral(
+			"{\"facebook_live_id\":\"28237427212586319\"}"));
+		f.close();
+		CHECK(!store.load(d) && d.facebookLiveId ==
+			      QStringLiteral("28237427212586319"),
+		      "fblive-restore");
+		CHECK(f.open(QIODevice::ReadOnly), "fblive-reread");
+		const QByteArray fbliveRaw = f.readAll();
+		f.close();
+		CHECK(!fbliveRaw.isEmpty() &&
+			      !fbliveRaw.contains("\"blob\"") &&
+			      !fbliveRaw.contains("access_token"),
+		      "fblive-no-secret-shapes");
 	}
 #ifdef Q_OS_WIN
 	// T-051: round-trip with Independent accounts + backendInstall:
@@ -774,6 +791,57 @@ int main(int argc, char **argv)
 						meta::Platform::Facebook)
 				      .contains(QStringLiteral("100")),
 		      "fb-msg-403");
+		// T-073 FB-4: F-080 objeto web/ID desconocido (100/33) no es
+		// "titulo invalido": es NotFound gestionable creando desde el
+		// dock. TDD rojo-primero.
+		CHECK(meta::classifyFb(400, 33) ==
+			      meta::Outcome::NotFound,
+		      "fb-33-notfound");
+		CHECK(meta::classifyFb(400, 100) ==
+			      meta::Outcome::BadRequest,
+		      "fb-100-badrequest");
+		CHECK(meta::userMessage(meta::Outcome::NotFound,
+					meta::Platform::Facebook)
+			      .contains(QStringLiteral("dock")) ||
+			      meta::userMessage(meta::Outcome::NotFound,
+						meta::Platform::Facebook)
+				      .contains(QStringLiteral("manageable")),
+		      "fb-msg-404-dock");
+		// T-073 FB-4: warnings especificos elegibilidad (D9 §B.5).
+		CHECK(meta::fbEligibilityMessage(1363120).contains(
+			      QStringLiteral("60")),
+		      "fb-warn-60d");
+		CHECK(meta::fbEligibilityMessage(1363144).contains(
+			      QStringLiteral("100")),
+		      "fb-warn-100");
+		CHECK(!meta::fbEligibilityMessage(0).isEmpty() ||
+			      meta::fbEligibilityMessage(0).isEmpty(),
+		      "fb-warn-shape");
+		CHECK(meta::fbEligibilityMessage(10).contains(
+			      QStringLiteral("permission")) ||
+			      meta::fbEligibilityMessage(10).contains(
+				      QStringLiteral("approval")),
+		      "fb-warn-10");
+		// T-073 FB-4: indicador por status del LiveVideo (D7).
+		CHECK(meta::fbLiveState(QStringLiteral("LIVE")) ==
+			      meta::FbLiveState::Live,
+		      "fb-state-live");
+		CHECK(meta::fbLiveState(QStringLiteral("LIVE_NOW")) ==
+			      meta::FbLiveState::Live,
+		      "fb-state-livenow");
+		CHECK(meta::fbLiveState(QStringLiteral("UNPUBLISHED")) ==
+			      meta::FbLiveState::Preview,
+		      "fb-state-preview");
+		CHECK(meta::fbLiveState(QStringLiteral("VOD")) ==
+			      meta::FbLiveState::Ended,
+		      "fb-state-vod");
+		CHECK(meta::fbLiveState(QStringLiteral("LIVE_STOPPED")) ==
+			      meta::FbLiveState::Ended,
+		      "fb-state-stopped");
+		CHECK(!meta::fbLiveStateLabel(
+			      meta::FbLiveState::Live)
+			       .isEmpty(),
+		      "fb-state-label");
 	}
 
 #ifdef Q_OS_WIN

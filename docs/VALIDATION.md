@@ -1,5 +1,64 @@
 # VALIDATION — estrategia progresiva
 
+## T-073 FB-4 UI y cierre (2026-09-23, rama `feat/T-073-fb-4-cierre`)
+
+```text
+BACKEND:   PASS 249 OK (10 skips PG por diseño; 31 test_facebook.py:
+             26 heredados + 5 Lifecycle nuevos status/create/end/delete/
+             unknown-op; F-080 subcode 33 → PROVIDER_REJECTED)
+SELFCHECK: PASS SELFCHECK OK (fb-33-notfound/fb-100-badrequest/
+             fb-msg-404-dock/fb-warn-60d-100-10/fb-state-*/fblive-*
+             nuevos; regresión TW/YT/KK/FB intacta)
+BUILD:     PASS preset windows-x64 RelWithDebInfo, 0 errores
+             (obs-stream-metadata.dll + metadata-selfcheck.exe)
+SCAN:      PASS patrón CI (0 hits valores; constructores TokenPair
+             preexistentes no son valores)
+PACKAGE:   PASS local 19e8bcd8… + commercial b00baabe… (F-085 +
+             F-086 incluidos) contra prod
+             https://obs-stream-metadata-service-364043334054.us-east5.run.app
+             (payload solo DLL+ini+tls; dist/ ignorada)
+E2E:       PENDING OPERADOR (código listo; sin consentimiento humano en
+             esta sesión; go-live exige aprobación explícita + doble llave):
+             1. Connect perfil publish_video (Independent BYO + Managed
+                backend) → `Connected as`.
+             2. Create live video (dock) → ID persistido + restart lo
+                restaura en el combo.
+             3. Status → indicador Preview/LIVE/Ended.
+             4. Apply título+desc → read-back idéntico.
+             5. Go-live SOLO con aprobación (objeto dock) → LIVE visible.
+             6. End → VOD + Delete → limpieza + ID retirado del store.
+             7. Restart → sesión + ID restaurados; Disconnect → reconexión
+                exigida (ID conservado).
+             8. Warnings: 1363120 (60d) / 1363144 (100) / 10 / 100-33
+                (no-gestionable → crear desde dock).
+             E2E Managed 2026-09-23 (operador, commercial FB-4):
+                Create PASS (ID 28278448785150828 persistido) + Status
+                `● LIVE (LIVE)` PASS + Apply `Facebook ✓ updated` +
+                read-back Explorer idéntico (title/desc `PRUEBA FB4`,
+                status LIVE) PASS. H1 confirmada otra vez: Live Producer
+                web muestra otro objeto (1652370182887354) — el read-back
+                vale solo vía API/Explorer, no vía web.
+                End `Facebook end OK` PASS + Delete `Facebook delete OK`
+                PASS.                 Hallazgo F-085 (indicador no auto-refrescaba tras
+                on/off) → fix con status encadenado. Hallazgo F-086
+                (botones sin sentido visibles sin conexión) → fix
+                visibilidad por `platformUsable` en las 4 tarjetas.
+                Commercial vigente `b00baabe…`, reinstalar.
+                Restart + Disconnect pendientes.
+             Criterio de parada: sonda en rojo → parar, FINDINGS, preguntar.
+             Page/App Review (D12/D14) fuera de E2E perfil.
+FINAL: T-073 HECHA — E2E operador completo (Managed perfil):
+       Connect, create+ID, status LIVE, Apply+read-back Explorer idéntico,
+       end, delete, restart con sesión restaurada, Disconnect con solo
+       Connect visible (F-086 verificado: desconectado solo Connect,
+       conectado Disconnect+controles). Negativas vivas no ejercitadas
+       (1363120/1363144/190/429): cubiertas offline en selfcheck
+       (`fb-warn-*`, `fb-190-expired`, `fb-429-limited`) + backend
+       (`expired_user_token`, `429_rate_limited`), como en T-071/T-072.
+       Merge vía PR con template + CI verde + squash (pendiente
+       autorización commit/push/PR). Cero FB-5 en esta sesión.
+```
+
 ## T-072 FB-3 Managed (2026-09-23, rama `feat/T-072-fb-3-managed`)
 
 ```text

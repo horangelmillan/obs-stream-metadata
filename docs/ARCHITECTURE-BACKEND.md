@@ -255,7 +255,7 @@ pendiente = representable sin implementación; no hay casos "no soportado".
 | Twitch | implementado + validado (DCF directo, DPAPI, T-031 live) | pendiente: sin servicio backend; dock informa "direct only", cero red | T-031; `managedSupported()==false` |
 | YouTube | implementado + validado (OAuth directo, T-031 live) | implementado + validado (T-045 + T-048; live 2026-09-09 revalidado) | T-031; T-045; live este turno |
 | Kick | implementado + validado (OAuth directo, T-031 live) | implementado + validado (T-046 + T-048; live 2026-09-09 revalidado) | T-031; T-036; T-046; live este turno |
-| Facebook | implementado + validado (OAuth PKCE directo BYO-app, T-071 live) | implementado (T-072: adapter + dock + snapshot `managed_facebook`); validado pendiente E2E operador | T-071; T-072; F-072; F-076 |
+| Facebook | implementado + validado (OAuth PKCE directo BYO-app, T-071 live; FB-4: indicador/on-off/creación-por-dock + warnings F-080/F-081 + visibilidad F-086) | implementado + validado (T-072 adapter + dock + snapshot `managed_facebook`; T-073 E2E operador PASS Managed perfil: create+ID, status, Apply+read-back, end, delete, restart, Disconnect) | T-071; T-072; T-073; F-072; F-076; F-081; F-082; F-084; F-085; F-086; ADR-015 |
 
 Modelo/UI/routing/OAuth/storage/backend por celda: Independent = directo +
 DPAPI + navegador; Managed (YT/Kick) = `backend_auth` + ConnectService +
