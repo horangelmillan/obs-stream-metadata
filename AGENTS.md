@@ -1,14 +1,27 @@
 # AGENTS.md --- Stream Metadata Controller for OBS Studio
 
-> Documento de investigación y contexto técnico para que un agente de
-> desarrollo (por ejemplo OpenCode) pueda planear y ejecutar un MVP
-> funcional de un plugin de OBS Studio cuyo único objetivo inicial sea
-> gestionar **título y descripción de streams** en Twitch, YouTube y
-> Kick.
+> Documento de reglas duraderas para agentes: límites de producto,
+> decisiones vigentes y flujo de trabajo. No es un informe de estado:
+> el estado actual vive en `docs/STATE.md` y el trabajo pendiente en
+> `docs/BACKLOG.md` (canónico). La investigación previa al desarrollo
+> que originó este archivo (2026-09-07) queda conservada como referencia
+> técnica histórica en las secciones numeradas; donde el producto la haya
+> superado, una nota de vigencia lo indica sin reescribir la historia.
 >
-> **Fecha de investigación:** 2026-09-07\
-> **Estado:** investigación previa al desarrollo\
-> **Alcance:** MVP, no arquitectura completa ni implementación.
+> **Jerarquía documental (no duplicar):** `AGENTS.md` = límites y reglas
+> duraderas · `docs/BACKLOG.md` = estado canónico de tareas (no cambiar
+> estados sin evidencia) · `docs/STATE.md` = resumen breve reconciliado
+> con el checkout y el backlog · `docs/ARCHITECTURE-BACKEND.md` + ADRs =
+> arquitectura vigente e historia · `docs/DEPLOYMENT.md` = contrato de
+> despliegue y estado operativo (hecho verificado vs documentado vs
+> pendiente) · `docs/VALIDATION.md` = registro histórico de evidencia
+> · `docs/PROJECT_CONTEXT.md` = resumen de recuperación con enlaces,
+> no otro backlog · `README.md` = resumen para personas.
+>
+> **Producto actual (resumen; detalle en STATE/BACKLOG):** plugin Qt6 +
+> backend Python con dos modalidades (Independiente BYO-app /
+> Administrado vía backend) para Twitch, YouTube, Kick y Facebook
+> (perfil; Page de Facebook diferida). Matriz de capacidades §3.
 
 ------------------------------------------------------------------------
 
@@ -16,6 +29,12 @@
 
 Construir un plugin para OBS Studio que añada un panel/dock sencillo
 dentro de OBS para gestionar metadatos de transmisión.
+
+> Nota de vigencia: el MVP descrito aquí se construyó y cerró (BACKLOG
+> T-033 hecha; puerta §50 en verde). El producto actual añade una cuarta
+> plataforma, Facebook (perfil; Page diferida, ver BACKLOG T-069–T-073),
+> y dos modalidades, Independiente (BYO-app) y Administrado (backend
+> propio, ADR-012). Las restricciones de esta sección siguen vigentes.
 
 El MVP debe hacer solamente esto:
 
@@ -173,6 +192,13 @@ Por tanto:
 
   Kick            OAuth 2.1 +                       Sí    No asumir soporte
                   PKCE                                 
+
+  Facebook        OAuth 2.0                         Sí                   Sí
+  (perfil; Page                     (vía LiveVideo                (vía LiveVideo
+  diferida)                          propio creado                 propio; Page
+                                     por el plugin,               diferida)
+                                     no el de Live
+                                     Producer web)
   -------------------------------------------------------------------------
 
 La UI del MVP debe reflejar esta realidad.
@@ -1497,6 +1523,13 @@ No se necesita:
 -   backend cloud
 -   Docker
 
+> Nota de vigencia: la lista "no se necesita backend cloud / servidor
+> remoto" corresponde a la hipótesis MVP 2026-09-07 y quedó superada por
+> decisión explícita: backend centralizado para el modo Administrado
+> (ADR-009, ADR-012, T-043–T-046; referencia vigente
+> `docs/ARCHITECTURE-BACKEND.md`). El modo Independiente sigue sin
+> necesitarlo.
+
 Node/JavaScript puede utilizarse durante desarrollo auxiliar si el
 agente lo considera conveniente, pero no es requisito para el plugin.
 
@@ -1979,6 +2012,10 @@ Actualmente:
 -   YouTube: sí existe descripción del broadcast.
 -   Twitch: no hay equivalente directo en Modify Channel Information.
 -   Kick: `channel_description` es descripción de canal.
+-   Facebook: sí existe descripción, pero solo sobre el `live_video`
+    propio creado por el plugin (`POST /me/live_videos`); el objeto que
+    muestra Live Producer web no es gestionable por API (F-065/F-066,
+    D11). Page diferida (F-072/F-079).
 
 El modelo interno del plugin debe respetar estas diferencias.
 
@@ -2042,31 +2079,38 @@ provider user/channel identity
 
 # 50. Definición de terminado del MVP
 
+> Nota de vigencia: puerta histórica en verde (BACKLOG T-033 hecha;
+> evidencia en `docs/VALIDATION.md`). Se conserva como definición, no
+> como estado: el estado vive en `docs/STATE.md`. Las casillas se marcan
+> [x] únicamente con base en ese cierre documentado (T-033; matriz viva
+> T-031 T1–T20 + hardening T-032 + negativos T-033), no en verificación
+> en vivo de esta sesión.
+
 El MVP está terminado cuando:
 
--   [ ] El plugin compila con el OBS objetivo.
--   [ ] OBS lo carga sin errores.
--   [ ] Aparece un dock propio.
--   [ ] El dock puede abrirse/cerrarse.
--   [ ] Twitch puede conectarse.
--   [ ] YouTube puede conectarse.
--   [ ] Kick puede conectarse.
--   [ ] Los tokens sobreviven a reiniciar OBS.
--   [ ] Twitch puede actualizar título.
--   [ ] YouTube puede actualizar título.
--   [ ] YouTube puede actualizar descripción.
--   [ ] Kick puede actualizar título.
--   [ ] La UI explica que Twitch/Kick no tienen descripción de stream
+-   [x] El plugin compila con el OBS objetivo.
+-   [x] OBS lo carga sin errores.
+-   [x] Aparece un dock propio.
+-   [x] El dock puede abrirse/cerrarse.
+-   [x] Twitch puede conectarse.
+-   [x] YouTube puede conectarse.
+-   [x] Kick puede conectarse.
+-   [x] Los tokens sobreviven a reiniciar OBS.
+-   [x] Twitch puede actualizar título.
+-   [x] YouTube puede actualizar título.
+-   [x] YouTube puede actualizar descripción.
+-   [x] Kick puede actualizar título.
+-   [x] La UI explica que Twitch/Kick no tienen descripción de stream
     equivalente.
--   [ ] Un error de Twitch no impide actualizar YouTube/Kick.
--   [ ] Un error de YouTube no impide actualizar Twitch/Kick.
--   [ ] Los tokens nunca aparecen en logs.
--   [ ] HTTP 204 es manejado correctamente.
--   [ ] HTTP 401 produce recuperación/reautorización adecuada.
--   [ ] HTTP 429 no provoca un loop de requests.
--   [ ] La UI no se congela durante requests.
--   [ ] El usuario puede desconectar cada cuenta.
--   [ ] Se puede verificar cada cambio en la plataforma correspondiente.
+-   [x] Un error de Twitch no impide actualizar YouTube/Kick.
+-   [x] Un error de YouTube no impide actualizar Twitch/Kick.
+-   [x] Los tokens nunca aparecen en logs.
+-   [x] HTTP 204 es manejado correctamente.
+-   [x] HTTP 401 produce recuperación/reautorización adecuada.
+-   [x] HTTP 429 no provoca un loop de requests.
+-   [x] La UI no se congela durante requests.
+-   [x] El usuario puede desconectar cada cuenta.
+-   [x] Se puede verificar cada cambio en la plataforma correspondiente.
 
 ------------------------------------------------------------------------
 
@@ -2101,6 +2145,11 @@ No implementar hasta que el MVP sea estable:
 ------------------------------------------------------------------------
 
 # 52. Próximo paso recomendado para OpenCode
+
+> Nota histórica: recomendación de 2026-09-07 ya ejecutada y superada
+> (PoC T-030 PASS, cerrada; ver `docs/VALIDATION.md` y BACKLOG T-030).
+> Se conserva como contexto de aquel momento, no como instrucción
+> vigente: no iniciar ninguna PoC nueva a partir de esta sección.
 
 No comenzar directamente por toda la implementación.
 
@@ -2184,9 +2233,20 @@ No existe ninguna necesidad técnica demostrada de incorporar Aitum,
 Streamlabs, un servidor cloud, React, Electron, WebSocket o un backend
 remoto para esta primera versión.
 
+> Nota de vigencia: "backend remoto" quedó superado por decisión
+> explícita para el modo Administrado (ADR-009/ADR-012, nota en §31).
+> El resto de la frase sigue vigente: nada de Aitum/Streamlabs/React/
+> Electron/WebSocket para el producto actual.
+
 ------------------------------------------------------------------------
 
 # 54. Subagente GCP del proyecto (gcp-stream-metadata)
+
+> Solo lectura por defecto. Sus dictámenes describen un instante
+> temporal: no conviertas información temporal de GCP (revisiones, URLs,
+> tráfico, cuotas) en reglas permanentes de este archivo. El estado
+> operativo vive en `docs/DEPLOYMENT.md`, que distingue hechos
+> verificados, documentados y pendientes.
 
 Antes de cualquier cambio que afecte o pueda afectar a Google Cloud
 (Cloud Run, Artifact Registry/Cloud Build, IAM, Secret Manager,
@@ -2202,3 +2262,64 @@ nube), consultar al subagente persistente:
 - Ninguna escritura productiva (deploy, tráfico, IAM, secretos,
   scheduler, cuotas, URLs) sin plan concreto y autorización explícita
   separada. Neon es externo: solo integración, no administración.
+
+------------------------------------------------------------------------
+
+# 55. Jerarquía documental (no duplicar estado ni capacidades)
+
+1.  Este archivo manda en límites de producto, reglas duraderas y flujo
+    de trabajo. No duplica el estado actual.
+2.  `docs/BACKLOG.md` es el estado canónico de tareas y trabajo
+    pendiente. No cambies estados sin evidencia (comando + salida o E2E
+    del operador registrado).
+3.  `docs/STATE.md` es el resumen actual breve, reconciliado con el
+    checkout y el backlog. Si STATE y BACKLOG discrepan, manda BACKLOG
+    y se registra la discrepancia.
+4.  `docs/ARCHITECTURE-BACKEND.md` y los ADR de `docs/DECISIONS/` son la
+    arquitectura vigente y las decisiones históricas. Una discrepancia
+    doc-vs-código se registra en `docs/FINDINGS.md` (F-###) y se corrige
+    en el doc correspondiente en el mismo PR cuando la evidencia lo
+    permite (precedente: F-064).
+5.  `docs/DEPLOYMENT.md` es el contrato de despliegue y el estado
+    operativo. Distingue siempre: hecho verificado (comando + salida en
+    esta sesión), hecho documentado (E2E/sesión previa citada) y
+    pendiente de confirmación. No afirmes un dato de producción como
+    verificado si no pudiste comprobarlo.
+6.  `docs/VALIDATION.md` es registro histórico: se añaden entradas, no
+    se reescribe el pasado. Los resultados antiguos se separan del
+    estado vigente sin borrar historia.
+7.  `docs/PROJECT_CONTEXT.md` es resumen de recuperación con enlaces a
+    las fuentes canónicas. No debe convertirse en otro backlog ni
+    duplicar el inventario de detalles.
+8.  No confundas el estado de la app de Meta (modo Development, sin App
+    Review: solo sirve a usuarios con rol en la app) con el despliegue
+    del backend en Cloud Run (infraestructura productiva). Son dos
+    hechos independientes y se documentan por separado.
+
+------------------------------------------------------------------------
+
+# 56. Agentes locales y Skill compartida
+
+Definiciones en `.opencode/agents/` (descubrimiento:
+`opencode debug agents` desde la raíz del checkout):
+
+-   `harness-steward`: coherencia documental; edita solo los
+    documentos de su alcance; sin código ni operaciones externas.
+-   `obs-plugin`: C++/Qt6 y cliente del plugin; trabaja en `src/`;
+    sin despliegues ni cuentas externas.
+-   `backend-integrations`: backend Python/OAuth/pruebas; trabaja en
+    `backend/`; sin infraestructura productiva ni despliegues.
+-   `gcp-stream-metadata`: auditoría GCP en solo lectura; sus datos
+    fechados son evidencia histórica hasta re-verificar.
+
+Skill compartida en `.agents/skills/project-harness-governance/`:
+gobierno documental (fuentes canónicas, discrepancias con evidencia,
+etiquetas [C]/[D]/[I]/[P], límites). La cargan `harness-steward`
+(siempre en docs) y los agentes de dominio cuando su tarea toque
+documentación.
+
+Coordinación: OpenCode principal orquesta e integra; un solo agente
+escribe a la vez; ningún agente hace commit, push, PR, merge,
+despliegue ni cambios externos sin autorización separada. Detalle de
+permisos y herramientas por agente en cada definición y en
+`docs/TOOLS.md`.
