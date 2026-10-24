@@ -4209,6 +4209,9 @@ void MetadataDock::onReply(QNetworkReply *reply)
 			return;
 		}
 		broadcastCombo_->clear();
+		const QJsonArray items = replyJson(reply)
+					 .value(QStringLiteral("items"))
+					 .toArray();
 		// T-076: ordenar como en Managed (activo, proximos por
 		// fecha, terminados). La API no garantiza orden.
 		QList<QJsonObject> sorted;
