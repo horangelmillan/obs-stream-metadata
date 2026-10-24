@@ -187,6 +187,7 @@ if ($bad) {
   Fail ('staging con ficheros dev no permitidos: ' + (($bad | ForEach-Object { $_.Name }) -join ', '))
 }
 
+New-Item -ItemType Directory -Path $PkgDirAbs -Force | Out-Null
 & $makensisExe "/DPKG_BIN=$StagingAbs\$PluginName\obs-plugins\64bit" "/DPKG_DATA=$StagingAbs\$PluginName\data\obs-plugins\$PluginName" "/DOUTDIR=$PkgDirAbs" $nsiFile
 if ($LASTEXITCODE -ne 0) { Fail "makensis fallo (exit $LASTEXITCODE)" }
 
