@@ -2183,3 +2183,22 @@ OBS
 No existe ninguna necesidad técnica demostrada de incorporar Aitum,
 Streamlabs, un servidor cloud, React, Electron, WebSocket o un backend
 remoto para esta primera versión.
+
+------------------------------------------------------------------------
+
+# 54. Subagente GCP del proyecto (gcp-stream-metadata)
+
+Antes de cualquier cambio que afecte o pueda afectar a Google Cloud
+(Cloud Run, Artifact Registry/Cloud Build, IAM, Secret Manager,
+Cloud Scheduler, Cloud Logging/Monitoring, APIs habilitadas, cuotas,
+OAuth de Google, URLs/callbacks, red, facturación o persistencia en la
+nube), consultar al subagente persistente:
+
+- Agente: `.opencode/agents/gcp-stream-metadata.md`
+- Invocación: `@gcp-stream-metadata <tarea>` o herramienta `subagent`.
+- Por defecto solo lectura; dictamina `compatible` /
+  `compatible con condiciones` / `bloqueado` con evidencia y
+  validaciones pendientes.
+- Ninguna escritura productiva (deploy, tráfico, IAM, secretos,
+  scheduler, cuotas, URLs) sin plan concreto y autorización explícita
+  separada. Neon es externo: solo integración, no administración.
