@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import queue
 import threading
+import time
 from urllib.parse import urlparse
 
 import psycopg
@@ -110,11 +111,15 @@ class PgPool:
         return redacted_url(self._url)
 
     def acquire(self):
-        try:
-            conn = self._free.get_nowait()
-        except queue.Empty:
-            conn = None
-        if conn is not None:
+        # Drenar rotas de la cola libre con ping: cada descarte baja
+        # _created (antes se perdía la cuenta y 10 rotas mataban el
+        # pool para siempre, como hoy en prod con Neon cerrando quietas).
+        while True:
+            try:
+                conn = self._free.get_nowait()
+            except queue.Empty:
+                conn = None
+                break
             try:
                 conn.execute("SELECT 1")
                 return conn
@@ -123,18 +128,40 @@ class PgPool:
                     conn.close()
                 except Exception:
                     pass
+                with self._guard:
+                    self._created -= 1
                 conn = None
         with self._guard:
-            if conn is None and self._created < self._max_size:
+            if self._created < self._max_size:
                 conn = self._opener()
                 self._created += 1
-        if conn is not None:
-            return conn
-        try:
-            return self._free.get(timeout=self._acquire_timeout_s)
-        except queue.Empty:
-            raise DatabaseError(
-                f"postgres pool exhausted ({self._max_size} connections)")
+                return conn
+        deadline = time.monotonic() + self._acquire_timeout_s
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise DatabaseError(
+                    f"postgres pool exhausted ({self._max_size} connections)")
+            try:
+                conn = self._free.get(timeout=remaining)
+            except queue.Empty:
+                raise DatabaseError(
+                    f"postgres pool exhausted ({self._max_size} connections)")
+            try:
+                conn.execute("SELECT 1")
+                return conn
+            except Exception:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                with self._guard:
+                    self._created -= 1
+                with self._guard:
+                    if self._created < self._max_size:
+                        conn = self._opener()
+                        self._created += 1
+                        return conn
 
     def release(self, conn) -> None:
         try:
