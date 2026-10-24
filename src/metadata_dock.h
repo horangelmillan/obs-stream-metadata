@@ -99,6 +99,13 @@ private slots:
 	void repaintModeStatuses();
 	ManagedConn &managedAccount(meta::Platform p);
 	void initManaged();
+	// T-075: silent revalidation on startup (no browser, single pass).
+	void silentRevalidateManaged();
+	// T-075: one silent plugin-session retry (http==0 only). Provider
+	// 401/403 (http!=0) means revoked → manual Connect, no retry.
+	// Dispatches internally to the same platform Apply (no loops:
+	// single shot via retried_).
+	bool autoRetryManagedSession(meta::Platform p, int http);
 	// UX FASE 1 (Modelo B): single-open cards. Visibility only: closing
 	// a card never disconnects, clears or reselects anything.
 	void toggleCard(meta::Platform p);

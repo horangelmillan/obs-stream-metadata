@@ -43,6 +43,29 @@ class PoolConcurrencyTest(unittest.TestCase):
             with pool as conn:
                 conn.execute("SELECT 1")
 
+    def test_broken_idle_conn_does_not_leak_count(self):
+        # Neon cierra conexiones quietas: el ping SELECT 1 al reciclar
+        # descarta la rota. Antes se perdía la cuenta (_created no
+        # bajaba) y con 10 rotas el pool moría para siempre.
+        pool = make_pool(max_size=2)
+        c1 = pool.acquire()
+        c2 = pool.acquire()
+        pool.release(c1)
+        pool.release(c2)
+        for conn in list(pool._free.queue):
+            def _broken(sql, _c=conn):
+                raise Exception("connection closed")
+            conn.execute = _broken
+        with pool as a:
+            a.execute("SELECT 1")
+        with pool as b:
+            b.execute("SELECT 1")
+        self.assertLessEqual(pool._created, 2)
+        got = [pool.acquire() for _ in range(2)]
+        self.assertEqual(len({id(c) for c in got}), 2)
+        for c in got:
+            pool.release(c)
+
     def test_overlapping_use_never_leaks(self):
         pool = make_pool()
         # Tantos hilos como conexiones: todos adquieren a la vez y se
