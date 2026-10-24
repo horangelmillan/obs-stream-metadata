@@ -531,3 +531,28 @@ KICK:      PASS vivo 2026-09-08 (OAuth 2.1+PKCE localhost sonokigame/128456005;
            runner tools/t030_live_kick.py)
 FINAL: P3 PASS — P4 desbloqueada
 ```
+
+## Observación histórica GCP reportada (2026-10-24) [D histórico; no verificado en esta sesión de edición]
+
+```text
+ORIGEN: informe gcp-stream-metadata de sesión anterior (2026-10-24),
+  no verificación ejecutada en la sesión de edición actual
+  (aquí no se ejecutó `gcloud`/`curl`).
+COMANDOS REPORTADOS (exactos, no re-ejecutados aquí):
+  gcloud run services describe obs-stream-metadata-service --project=obs-stream-metadata --region=us-east5
+  gcloud scheduler jobs describe obs-stream-metadata-purge --project=obs-stream-metadata --location=us-east1
+RESUMEN REDACTADO DE CAMPOS OBSERVADOS [D histórico]:
+  - Cloud Run: URL antigua
+    https://obs-stream-metadata-service-364043334054.us-east5.run.app;
+    rev 00036-cjj; imagen master-ee5a402; PUBLIC_URL con la misma URL
+    antigua.
+  - Scheduler: job obs-stream-metadata-purge; uri con la misma URL
+    antigua; schedule `0 3 * * *`, zona America/New_York, estado
+    ENABLED; campo status.code 13 reportado (se cita sin interpretar).
+  - Sin datos personales ni secretos en este resumen.
+ESTADO ACTUAL [P]: discrepancia entre esta observación histórica (URL
+  antigua) y la URL T-076 DOCUMENTADA en DEPLOYMENT.md pendiente de
+  aclarar; procedencia T-076 pendiente; estado operativo actual
+  pendiente de re-verificación en vivo. Ver bloque canónico en
+  `docs/DEPLOYMENT.md` (T-076/DRIFT).
+```

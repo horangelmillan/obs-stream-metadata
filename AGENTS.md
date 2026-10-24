@@ -2295,6 +2295,37 @@ nube), consultar al subagente persistente:
     Review: solo sirve a usuarios con rol en la app) con el despliegue
     del backend en Cloud Run (infraestructura productiva). Son dos
     hechos independientes y se documentan por separado.
+9.  Autoridad de privacidad por capas (sin reescribir `PRIVACY.md` aquí):
+    principios y restricciones duraderas → este archivo (`AGENTS.md`);
+    tratamiento, retención, datos recogidos y comunicaciones al usuario
+    → `docs/PRIVACY.md` como documentación descriptiva; implementación
+    técnica de esos principios → código vigente más
+    `docs/ARCHITECTURE-BACKEND.md`. Ante conflicto, el principio de
+    `AGENTS.md` prevalece, el detalle descriptivo se corrige hacia el
+    código/la arquitectura y el desajuste se registra en
+    `docs/FINDINGS.md`. Si las fuentes no permiten una jerarquía
+    coherente, se documenta el hueco como regla provisional marcada
+    (`[P] provisional`) sin inventar decisiones de producto.
+10. Rutas protegidas o excluidas (`staging/`, `dev.env` y análogas): no
+    leer, listar, hashear ni inspeccionar su contenido. Registrar el
+    estado Git inicial y final de esas rutas solo con comandos de
+    lectura (p. ej. `git status --porcelain`). Distinguir siempre:
+    (a) "no se ejecutaron acciones dirigidas a esta ruta" (alcance del
+    procedimiento); (b) "el estado Git observado al inicio y al final
+    fue el mismo" (solo `status`, [C] de observación, no de contenido);
+    (c) "se comprobó que el contenido no cambió" (requiere una
+    comprobación de contenido autorizada y adecuada; `git status` solo
+    nunca basta). Si la ruta tiene prohibida la lectura o la huella, se
+    reporta la limitación y se usa la formulación más acotada
+    sostenible. Correspondencia: (a)/(b) como [C] de procedimiento u
+    observación; cualquier salto a contenido sin su evidencia es [I];
+    sin base, [P].
+11. Evidencia documental frente a verificación operativa: `GET /health`,
+    `/ready` o `/version` no demuestran por sí solos a qué URL apunta un
+    job de Cloud Scheduler. Afirmar el destino operativo del job exige
+    evidencia del propio job obtenida por consulta de solo lectura
+    autorizada; mientras no se ejecute, el destino queda como `[D]`
+    (documentado) o `[P]` (pendiente) según la evidencia disponible.
 
 ------------------------------------------------------------------------
 
