@@ -35,9 +35,14 @@ def fake_google_meta(method, url, fields):
         # Un solo filtro (mine): broadcastStatus+mine es incompatibleParameters.
         assert "broadcastStatus" not in url, "filtros excluyentes combinados"
         return 200, {"items": [
-            {"id": "B-ACT", "snippet": {"title": "En vivo", "categoryId": "20"},
+            {"id": "B-UP2", "snippet": {"title": "Viejo", "categoryId": "20",
+                                        "scheduledStartTime": "2026-09-20T00:00:00Z"},
+             "status": {"lifeCycleStatus": "ready"}},
+            {"id": "B-ACT", "snippet": {"title": "En vivo", "categoryId": "20",
+                                        "scheduledStartTime": "2026-09-22T00:00:00Z"},
              "status": {"lifeCycleStatus": "live"}},
-            {"id": "B-UP", "snippet": {"title": "Próximo", "categoryId": "20"},
+            {"id": "B-UP", "snippet": {"title": "Próximo", "categoryId": "20",
+                                       "scheduledStartTime": "2026-09-21T00:00:00Z"},
              "status": {"lifeCycleStatus": "ready"}}]}
     if "liveBroadcasts" in url and "id=" in url and method == "GET":
         return 200, {"items": [
@@ -146,9 +151,12 @@ class FlowMetadataTest(unittest.TestCase):
         svc = self._connected()
         out = svc.list_resources("inst-m")
         self.assertEqual(out["provider"], "youtube")
-        self.assertEqual(out["resources"],
-                         [{"id": "B-ACT", "title": "En vivo", "status": "active"},
-                          {"id": "B-UP", "title": "Próximo", "status": "upcoming"}])
+        # T-076: activo primero aunque la API lo devuelva segundo;
+        # próximos por fecha ascendente (20 antes que 21).
+        ids = [r["id"] for r in out["resources"]]
+        self.assertEqual(ids, ["B-ACT", "B-UP2", "B-UP"])
+        self.assertEqual(out["resources"][0]["status"], "active")
+        self.assertTrue(all("scheduledStart" in r for r in out["resources"]))
 
     def test_list_incompatible_filters_rejected(self):
         """Google 400 incompatibleParameters → INVALID_REQUEST (no 502 opaco)."""

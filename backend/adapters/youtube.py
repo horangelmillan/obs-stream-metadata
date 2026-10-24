@@ -266,10 +266,21 @@ class YouTubeProvider(OAuthProvider):
                 label = "completed"
             else:
                 label = "upcoming"
+            start = str(snippet.get("scheduledStartTime", "")
+                        or snippet.get("publishedAt", "")
+                        or item.get("publishedAt", ""))
             out.append({"id": str(item.get("id", "")),
                         "title": str(snippet.get("title", "")),
-                        "status": label})
-        return out
+                        "status": label,
+                        "scheduledStart": start})
+        # T-076: orden listo para el usuario: el activo primero (orden
+        # API), luego próximos por fecha (sin fecha al final), luego
+        # terminados. La API no garantiza orden (docs 2026-10-15).
+        act = [r for r in out if r["status"] == "active"]
+        up = sorted([r for r in out if r["status"] == "upcoming"],
+                    key=lambda r: (r["scheduledStart"] == "", r["scheduledStart"]))
+        done = [r for r in out if r["status"] not in ("active", "upcoming")]
+        return act + up + done
 
     def apply_metadata(self, access_token: str, data: dict) -> dict:
         """Actualiza título/descripción preservando el resto del snippet

@@ -40,6 +40,8 @@ secrets in memory + DPAPI-encrypted store, never plaintext/printed/logged.
 #include <QUuid>
 #include <QVBoxLayout>
 
+#include <algorithm>
+
 namespace {
 
 const char *kBrowserUa =
@@ -327,6 +329,17 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 	bcLabel_ = bcLabel;
 	broadcastCombo_ = new QComboBox(ytDetail_);
 	bcLabel->setBuddy(broadcastCombo_);
+	// T-076: explicar para qué es el selector (solo título/descripción,
+	// pero la API exige un video). Sin tecnicismos en la pregunta del
+	// usuario: elegir a qué video se le cambia el título.
+	bcLabel->setToolTip(
+		tr("Video al que se le cambia el título y la descripción. "
+		   "Se elige solo el activo o el próximo más cercano; cámbialo "
+		   "si transmites a otro."));
+	broadcastCombo_->setToolTip(
+		tr("Video al que se le cambia el título y la descripción. "
+		   "Se elige solo el activo o el próximo más cercano; cámbialo "
+		   "si transmites a otro."));
 	refreshButton_ = new QPushButton(tr("Refresh broadcasts"), ytDetail_);
 	connect(refreshButton_, &QPushButton::clicked, this,
 		&MetadataDock::onRefreshBroadcasts);
@@ -1424,11 +1437,25 @@ void MetadataDock::fetchManagedBroadcasts()
 								.toString();
 					     if (id.isEmpty())
 						     continue;
+					     // T-076: el backend ya ordena (activo, proximos por
+					     // fecha, terminados). Mostrar estado para elegir.
+					     const QString st = it.value(
+						     QStringLiteral("status"))
+							.toString();
+					     if (id.isEmpty())
+						continue;
 					     broadcastCombo_->addItem(
-						     QStringLiteral("%1 (%2)")
-							     .arg(title, id),
+						     st.isEmpty()
+							     ? QStringLiteral("%1 (%2)")
+							           .arg(title, id)
+							     : QStringLiteral("%1 [%2] (%3)")
+							           .arg(title, st, id),
 						     id);
 				     }
+					     // T-076: seleccion lista por defecto (primero =
+					     // activo o proximo mas cercano).
+					     if (broadcastCombo_->count() > 0)
+						broadcastCombo_->setCurrentIndex(0);
 				     if (applyAfterList_) {
 					     applyAfterList_ = false;
 					     if (broadcastCombo_->count() ==
@@ -3043,14 +3070,22 @@ void MetadataDock::onApply()
 	}
 	generalMsg_->clear();
 	applyQueue_.clear();
-	if (s.twitch)
+	// T-076: solo entran plataformas conectadas en el modo activo.
+	// Una marcada pero desconectada se salta en silencio (sin alarma
+	// roja): la tarjeta ya se ve apagada y el Connect vive en ella.
+	if (s.twitch && platformUsable(meta::Platform::Twitch))
 		applyQueue_ << meta::Platform::Twitch;
-	if (s.youtube)
+	if (s.youtube && platformUsable(meta::Platform::YouTube))
 		applyQueue_ << meta::Platform::YouTube;
-	if (s.kick)
+	if (s.kick && platformUsable(meta::Platform::Kick))
 		applyQueue_ << meta::Platform::Kick;
-	if (s.facebook)
+	if (s.facebook && platformUsable(meta::Platform::Facebook))
 		applyQueue_ << meta::Platform::Facebook;
+	if (applyQueue_.isEmpty()) {
+		generalMsg_->setText(
+			tr("Connect a platform first — disconnected platforms are skipped."));
+		return;
+	}
 	applyButton_->setEnabled(false);
 	applyButton_->setText(tr("Applying…"));
 	startApplyNext();
@@ -4175,21 +4210,69 @@ void MetadataDock::onReply(QNetworkReply *reply)
 		}
 		broadcastCombo_->clear();
 		const QJsonArray items = replyJson(reply)
-						 .value(QStringLiteral("items"))
-						 .toArray();
-		for (const auto &v : items) {
-			const QJsonObject it = v.toObject();
+					 .value(QStringLiteral("items"))
+					 .toArray();
+		// T-076: ordenar como en Managed (activo, proximos por
+		// fecha, terminados). La API no garantiza orden.
+		QList<QJsonObject> sorted;
+		for (const auto &v : items)
+			sorted.append(v.toObject());
+		std::sort(sorted.begin(), sorted.end(),
+			[](const QJsonObject &a, const QJsonObject &b) {
+				auto life = [](const QJsonObject &it) {
+					return it.value(QStringLiteral("status")).toObject()
+					.value(QStringLiteral("lifeCycleStatus")).toString();
+				};
+				auto start = [](const QJsonObject &it) {
+					return it.value(QStringLiteral("snippet")).toObject()
+					.value(QStringLiteral("scheduledStartTime")).toString();
+				};
+				auto rank = [&](const QJsonObject &it) {
+					const QString l = life(it);
+					if (l == QStringLiteral("live") || l == QStringLiteral("liveStarting"))
+							return 0;
+					if (l == QStringLiteral("complete") || l == QStringLiteral("revoked"))
+							return 2;
+					return 1;
+				};
+				const int ra = rank(a), rb = rank(b);
+				if (ra != rb)
+					return ra < rb;
+				if (ra == 1) {
+					const QString sa = start(a), sb = start(b);
+					if (sa.isEmpty() != sb.isEmpty())
+							return !sa.isEmpty();
+					if (sa != sb)
+							return sa < sb;
+				}
+				return false;
+			});
+		for (const auto &it : sorted) {
 			const QJsonObject sn =
 				it.value(QStringLiteral("snippet")).toObject();
+			const QString lf =
+				it.value(QStringLiteral("status")).toObject()
+				.value(QStringLiteral("lifeCycleStatus")).toString();
+			const QString lb = (lf == QStringLiteral("live") ||
+				lf == QStringLiteral("liveStarting"))
+				? QStringLiteral("active")
+				: ((lf == QStringLiteral("complete") ||
+				lf == QStringLiteral("revoked"))
+				? QStringLiteral("completed")
+				: QStringLiteral("upcoming"));
 			const QString title =
 				sn.value(QStringLiteral("title")).toString();
 			const QString id =
 				it.value(QStringLiteral("id")).toString();
+			if (id.isEmpty())
+				continue;
 			broadcastCombo_->addItem(
-				QStringLiteral("%1 (%2)").arg(title, id),
+				QStringLiteral("%1 [%2] (%3)").arg(title, lb, id),
 				QString::fromUtf8(QJsonDocument(it).toJson(
 					QJsonDocument::Compact)));
 		}
+		if (broadcastCombo_->count() > 0)
+			broadcastCombo_->setCurrentIndex(0);
 		if (applyAfterList_) {
 			applyAfterList_ = false;
 			if (broadcastCombo_->count() == 0 &&
