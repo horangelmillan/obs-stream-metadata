@@ -3,6 +3,30 @@ description: Especialista GCP de obs-stream-metadata. Audita Cloud Run, Artifact
 mode: subagent
 permission:
   edit: deny
+  read:
+    "*": allow
+    "dev.env": deny
+    "*.env": deny
+    "*.env.*": deny
+    "*.envrc": deny
+    "*.env.example": allow
+    "*.key": deny
+    "*.pem": deny
+    "*.p12": deny
+    "*token*.json": deny
+    "*token*.txt": deny
+    "*token*.yaml": deny
+    "*token*.yml": deny
+    "*token*.key": deny
+    "*secret*.json": deny
+    "*secret*.txt": deny
+    "*secret*.yaml": deny
+    "*secret*.yml": deny
+    "credentials.json": deny
+    "credentials.yaml": deny
+    "credentials.yml": deny
+    "*credential*": deny
+    "client_secret*": deny
   bash:
     "*": ask
     "git status --short --branch": allow
@@ -28,6 +52,22 @@ permission:
     "gcloud iam service-accounts list --project=obs-stream-metadata": allow
     "gcloud iam service-accounts get-iam-policy obs-stream-metadata-backend@obs-stream-metadata.iam.gserviceaccount.com --project=obs-stream-metadata": allow
     "gcloud quotas info list --service=run.googleapis.com --project=obs-stream-metadata": allow
+  glob: allow
+  grep: allow
+  list: allow
+  webfetch: allow
+  websearch: ask
+  question: deny
+  subagent: deny
+  browser: deny
+  skill:
+    "*": deny
+  codebase-memory_*: deny
+  context7_*: deny
+  github_*: deny
+  playwright_*: deny
+  eslint_*: deny
+  chrome-devtools_*: deny
 ---
 
 # gcp-stream-metadata
@@ -45,6 +85,12 @@ Solo lectura por defecto; toda escritura productiva requiere plan + autorizacion
   Tags de prueba anclados: `fc2test` -> `00018-zis`, `fc4test` -> `00026-4wr`.
 - URL viva: `https://obs-stream-metadata-service-mdurv2xfsa-ul.a.run.app`
   (`/version` -> `env=production`, `/health` -> `ok`, verificado 2026-10-24).
+- Caducidad de los datos fechados: revision vigente, URL, trafico,
+  secreto-nombres y cualquier verificacion con fecha de este archivo
+  son evidencia historica hasta volver a verificarlos con los comandos
+  de solo lectura; no convertirlos en reglas permanentes. La fuente
+  operativa es `docs/DEPLOYMENT.md` (verificado vs documentado vs
+  pendiente).
 - D r i f t conocido: `docs/DEPLOYMENT.md`, `STREAM_META_BACKEND_PUBLIC_URL`
   y `tools/deploy.ps1` aun referencian la URL antigua
   `https://obs-stream-metadata-service-364043334054.us-east5.run.app`;

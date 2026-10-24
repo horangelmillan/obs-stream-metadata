@@ -1,24 +1,84 @@
 # STATE — estado actual del proyecto
 
-> Único archivo que responde: dónde estamos, qué hacemos, qué falta.
-> Actualizar en cada tarea terminada.
+> Resumen breve reconciliado con el checkout y `docs/BACKLOG.md`
+> (canónico: si discrepan, manda BACKLOG). Actualizar en cada tarea
+> terminada. Convenciones: [C] comprobado en este checkout ahora mismo
+> · [D] documentado (E2E/sesión previa citada, no re-ejecutado aquí)
+> · [P] pendiente.
 
-- **Fase actual:** Phase 6 (P6) — **T-033 en-progreso 2026-09-09** (rama `feat/t-033-integration-testing`, desde `master` tras merge de PR #10). Negativos offline §40 cubiertos en selfcheck (68/68 + 28/28 regresión, build 0 errores); matriz viva §39-40 pendiente del operador. T-032 PASS mergeada a `master` (`ac33d96`).
-- **Rama base:** `master` (confirmado por ADR-004; `default_branch: master`, sin branch protection, CI anclado a `master`).
-- **Repo remoto:** `horangelmillan/obs-stream-metadata` (público, GitHub-flow con PRs).
-- **Qué hicimos:** T-030 (P3 PASS): PoCs + triple LIVE PASS (runners `tools/t030_live_*.py`, F-015–F-024, `docs/T030-POC.md`). T-031 (P4 PASS, mergeada): dock unificado `src/metadata.*` + `src/metadata_dock.*`, matriz viva T1–T20 en verde, fixes F-025–F-028. T-032 (P5 PASS, mergeada `ac33d96`): storage DPAPI `src/secure_store.*` + revoke real + backoff acotado + fin de env vars + ADR-008 (F-029–F-032). T-033 (P6, en-progreso): negativos offline §40 en `src/metadata_selfcheck.cpp` (68 checks), sin cambios de producto; live §39-40 pendiente del operador.
-- **Qué falta para cerrar Phase 0:** solo entregar informe 13 puntos (T-002, preexistente, no bloquea fases).
-- **P1 validada (T-013, 2026-09-08):** template vendorizado con `buildspec.json` propio (OBS 32.2.2 + obs-deps/Qt6 2026-07-15, ADR-007); configure ok (VS2022, SDK 22621); `obs-stream-metadata.dll` x64 compilado; carga + unload verificados en OBS 32.2.2 real ×2 arranques (log `[obs-stream-metadata] plugin loaded/unloaded`); Qt deps 6.11.1 == Qt OBS 6.11.1 (R2 cerrado); validación sin admin vía `OBS_PLUGINS_PATH/DATA_PATH` (F-010); CWD y sentinels documentados (F-009, F-011).
-- **P2 validada y mergeada (T-020, 2026-09-08, PR #7 `c74eff3`):** dock nativo vía `obs_frontend_add_dock_by_id` (id `obs-stream-metadata-dock`, título `Stream Metadata`, 3 labels); registrado + visible (HWND `OBSDock`) + geometría restaurada por `DockState`; 5 ciclos abrir/cerrar limpios sin crash (F-013, F-014). Límite harness: píxeles Qt y toggle de menú no automatizables sin foreground → verificación manual de 30 s pendiente por el usuario.
-- **Restricción vigente:** `poc/t030/` es evidencia histórica + regresión (no tocar salvo corrección justificada); el producto vive en `src/`.
-- **Contexto técnico:** `AGENTS.md` (válido) + ADR-005 (toolchain: OBS 32.2.2 target / ≥30.0 mín, VS17 2022, SDK 10.0.22621, CMake ≥3.28, Qt6 vía obs-deps del template) + ADR-006 / `PHASES.md` (P0-P7 risk-first).
-- **Deuda conocida:** R1/R2 cerrados (T-013, ADR-007); distribución de secrets Desktop (F-017/F-019) y storage OS, resueltos en T-032 (ADR-008, F-029–F-032) salvo validación viva del operador (pasa a T-033/P6).
-- **Última actualización:** 2026-09-19 — F-C4 mergeado (T-065 hecha): purga diaria `POST /ops/purge` (Scheduler + bearer operador `OPS_PURGE_TOKEN`) + `tools/purge_expired.py` + `ops/monitoring/` (A1/A2/A3/A4). Evidencia: 209 backend OK (PG reales), job con conteos + restore verificado + señales de alerta probadas (recepción en canal: pendiente operador). Sin cambio arquitectónico (sin Redis, sin tier nuevo).
-- **2026-09-22 — outage Managed + fixes (F-068/F-069/F-070, mergeado en #48 como T-074):** pool Postgres agotado en prod (fuga por `self._released` compartido entre hilos) → todo lo autenticado 500 con `/health` verde; fix pila por-hilo + test concurrencia + `/ready` con ping DB, deploy rev `00028-zml`, sesión real OK. Cliente: 401/500 se mostraban como "network" y bloqueaban auto-recuperación; fix por código HTTP en `src/backend_auth.cpp` (verificado) + `commercial` re-empaquetado (`cdc6d393…`). 218 backend OK. Pendiente: prueba viva del operador tras reinstalar + commit/PR.
-- **2026-09-22 — FB-2 Independent mergeable (T-071 hecha, rama `feat/T-071-fb-2-independent`, PR pendiente):** dock directo BYO-app Facebook (OAuth PKCE sin secret, Apply título+desc+privacy, selector perfil, combo con ID pegable, revoke DELETE /permissions) + núcleo/selfchecks DPAPI; E2E operador PASS (Connect, update+read-back, restart, Disconnect, limpieza). Page diferida (F-072, Consumer rechaza `pages_*`); listado descartado (F-074/F-075, flujo B ID-céntrico → FB-4). Sin backend/Managed FB (cero FB-3).
-- **Objetivo UX/producto (2026-09-09, auditoría OAuth, objetivo no implementación completada):** `Instalar plugin → OBS → Tools/Docks/Stream Metadata → Connect Twitch/YouTube/Kick → navegador/flujo OAuth → autorización del usuario → Connected as ... → título/descripción → Apply`. El usuario final NO debe crear apps de desarrollador, ni introducir Client ID/Secret, ni configurar env vars, ni usar PowerShell para credenciales; solo interactúa con el flujo de conexión/autorización.
-- **Distinción arquitectónica vigente:** A) `App credentials / application identity` (Client ID/Secret de nuestra app ante el proveedor) ≠ B) `User authorization` (`Connect → browser → login → consent → callback/device → tokens → Connected as`). El trabajo T-030/T-031/T-032 corresponde principalmente a B; el problema pendiente es cómo la app distribuida obtiene/usa A sin trasladarlo al usuario.
-- **Historia preservada:** T-030 = PoC técnica con credenciales locales del operador (Device Flow Twitch, Desktop+PKCE YouTube, OAuth+PKCE Kick). T-031 = provisionalización con env vars locales, no UX final. T-032 = BYO-app + DPAPI + revoke + backoff + fin de env vars; etapa válida cuyo alcance como distribución final está en reconsideración (ver nota ADR-008). T-032 resolvió custodia/configuración para el modelo BYO-app, pero la auditoría determinó que ese modelo no coincide con la UX objetivo.
-- **Estado arquitectura (ADR-012 maestro, 2026-09-09; sustituye la lectura anterior de ADR-009):** backend = infraestructura del modo **Administrado**; BYO-app (ADR-008) = modo **Independiente** del producto (dock actual como embrión, hacia configuración contextual). Detalle en ADR-012 §3/§5. La línea anterior que declaraba “BYO-app no es UX final” queda superada: no es UX del modo Administrado, sí del Independiente.
-- **Dirección vigente (ADR-012, 2026-09-09):** un solo plugin, dos modalidades. **Independiente/Gratis** = BYO-app como producto (reenmarque de ADR-008: el dock actual con sus 5 campos es el embrión; pasa a configuración contextual por proveedor). **Administrado/Suscripción** = backend T-043–T-046 como base (wiring `backend_auth.*` + connect-vía-backend pendientes). Twitch directo en ambas. Matriz KEEP/MODIFY/DEPRECATE/NEW y plan en el informe de auditoría; `obs-stream-metadata-arquitectura-dos-modalidades.md` (raíz) es la referencia de producto.
-- **T-033 (aclaración):** validación de operador/desarrollo puede continuar con BYO-app existente cuando sea necesario; validación del producto distribuible todavía NO validada. Los campos Client ID/Secret actuales del dock NO son decisión definitiva de UX; queda pendiente la migración hacia `Connect` sin exponer credenciales de aplicación. Sin cambios funcionales a T-033 en esta tarea.
+- **Checkout [C]:** rama `master` (`master == origin/master == c6b5b26`,
+  "chore: fijar permisos del subagente GCP (#58)"). Baseline al inicio
+  de esta tarea documental: árbol limpio salvo `staging/` preexistente
+  sin seguimiento (no modificado). Estado actual: mismo HEAD + 8
+  archivos documentales modificados sin commitear (AGENTS.md, README.md,
+  STATE.md, PROJECT_CONTEXT.md, DEPLOYMENT.md, VALIDATION.md, TOOLS.md,
+  WORKFLOW.md); `staging/` preexistente sin seguimiento, no modificado;
+  sin commit/push en esta tarea.
+- **Fase actual:** sin ciclo de desarrollo abierto. BACKLOG reconciliado
+  [C contra `docs/BACKLOG.md`]: todo hecha salvo `T-002` (en-progreso,
+  informe Phase 0, no bloquea), `T-059`/`T-066` (futuro: licencias/firma)
+  y la fila `T-058` duplicada histórica (+ `T-042` superseded).
+  Últimas: T-075 (PR #54) y T-076 (PR #55) hecha el 2026-10-24 [D].
+- **Qué hicimos (post T-033):** T-062 Apply Managed Twitch (E2E de facto
+  vía T-063) [D]; F-C1/F-C2/F-C4 (cifrado, borrado, purga+backups+
+  alertas) [D]; T-067 `dist/` + `tools/package.ps1` [D]; T-068 Apply
+  Managed Kick + `tools/deploy.ps1` [D]; T-069–T-073 Facebook perfil
+  (Independent T-071, Managed T-072, cierre T-073 con PR #52) [D];
+  T-074 outage 20–22/09 (fuga del pool + 401/500 honestos, rev
+  `00028-zml`) [D]; T-075 auto-reconnect cómodo (PR #54) [D]; T-076
+  Facebook gris + YouTube default listo (PR #55, E2E operador, rev
+  `00036-cjj`) [D].
+- **Baselines en este checkout [C, conteo estático sin ejecutar]:**
+  backend 250 métodos `def test_*` en `backend/tests/` (coherente con el
+  "250 OK" documentado en T-075/T-076); selfcheck 180 invocaciones
+  `CHECK(` en `src/metadata_selfcheck.cpp` (+1 línea `#define`; último
+  resultado documentado: SELFCHECK OK, T-073). No se ejecutaron pruebas
+  en esta sesión documental.
+- **Capacidades vigentes [C código + D E2E]:** un solo plugin, dos modos
+  (Independiente BYO-app / Administrado vía backend). Twitch, YouTube,
+  Kick y Facebook-perfil soportados en ambos modos
+  (`managedSupported()==true` en `src/metadata_dock.cpp:928-932`;
+  adapters + tests en `backend/`); descripción de stream solo en
+  YouTube y Facebook-perfil (matriz `AGENTS.md` §3). Integración de
+  Pages de Facebook: diferida, sin fechas. Estado de la app de Meta y
+  requisitos de acceso para las pruebas del operador: pendientes de
+  confirmar (sin afirmar Live, App Review ni acciones iniciadas en
+  Meta).
+- **Distinción obligatoria (AGENTS.md §55.8):** app de Meta en modo
+  Development y sin App Review ⇒ solo sirve a usuarios con rol en la
+  app (operador); NO es desbloqueo para terceros [D: F-072/F-079,
+  DEPLOYMENT]. Hecho independiente del despliegue del backend en Cloud
+  Run [D: subagente GCP 2026-10-24].
+- **Cloud Run (estado operativo; detalle en DEPLOYMENT.md):**
+  documentado rev `00036-cjj` con `PROVIDERS=youtube,kick,twitch,
+  facebook` y URL nueva
+  `https://obs-stream-metadata-service-mdurv2xfsa-ul.a.run.app`
+  [D: `.opencode/agents/gcp-stream-metadata.md`, verificado 2026-10-24
+  por lectura]. Drift conocido: `DEPLOYMENT.md`, `tools/deploy.ps1` y el
+  job de purga aún referencian la URL anterior
+  `...-364043334054.us-east5.run.app`; no asumir que sigue válida [D].
+  Sin re-verificación en vivo en esta sesión [P].
+- **Discrepancias residuales conocidas [P, requieren confirmación]:**
+  1. `ARCHITECTURE-BACKEND.md` §18 fila Twitch Managed ("pendiente",
+  "direct only") desactualizada frente al código (adapter + Apply +
+  `managedSupported()==true`) y BACKLOG T-062 (precedente F-064; ARCH
+  fuera del alcance de esta tarea documental). 2. `PRIVACY.md` declara
+  "Twitch Managed is unsupported" (desactualizado; mismo origen).
+  3. Datos vivos de producción (URL, revisión al 100 %, E2E) citados
+  como documentados, no re-verificados aquí.
+- **Plan del operador pendiente [P, intención comunicada por el usuario
+  el 2026-10-24]:** avanzar durante octubre de 2026 hacia pruebas de
+  Facebook con usuarios reales y streams reales. No se afirma que la app
+  de Meta esté en Live, que App Review esté aprobado ni qué requisitos
+  específicos aplican (sin evidencia). Tarea separada del despliegue del
+  backend en Cloud Run (ver DEPLOYMENT.md); requiere confirmación y
+  alcance explícito antes de ejecutar nada.
+- **Rama base:** `master` (ADR-004; CI anclado a `master`).
+- **Repo remoto:** `horangelmillan/obs-stream-metadata` (público,
+  GitHub-flow con PRs).
+- **Restricción vigente:** `poc/` es evidencia histórica + regresión
+  (no tocar salvo corrección justificada); el producto vive en `src/`
+  + `backend/`.
+- **Última actualización:** 2026-10-24 — tarea documental: el harness
+  describe el producto actual y fija la jerarquía (AGENTS.md §55); sin
+  cambios de código, sin operaciones externas.

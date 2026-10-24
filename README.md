@@ -24,7 +24,10 @@ para cada una.
 
 ## Estado del proyecto
 
-MVP **cerrado y verificado** (backend 218 tests OK, selfcheck OK, CI verde).
+MVP **cerrado y verificado** (último resultado documentado: backend 250
+OK —250 métodos de prueba contados en este checkout—, selfcheck OK con
+180 CHECKs en fuente, E2E del operador y CI verde; ver
+[`docs/VALIDATION.md`](docs/VALIDATION.md)).
 
 | Fase | Estado |
 |---|---|
@@ -33,12 +36,14 @@ MVP **cerrado y verificado** (backend 218 tests OK, selfcheck OK, CI verde).
 | F-C2 borrado real + privacidad operativa | Hecha |
 | F-C4 operativa mínima (purga, backups, alertas) | Hecha |
 | F-C3 firma del instalador | **Aparcada** (sin financiación para el certificado) |
-| T-062 (Apply Managed Twitch) | Hecha (Twitch Managed soportado) |
+| T-062 (Apply Managed Twitch) | Hecha (Twitch Managed soportado; E2E de facto vía T-063) |
 | T-066 (firma, futuro) | Pendiente |
-| T-074 (outage Managed 20–22/09: fuga del pool + errores honestos) | Hecha (prod rev `00028-zml`, `commercial` re-empaquetado) |
-| Facebook Live | Solo PoC (FB-1 offline + sondas vivas hechas; FB-2/3/4 pendientes, no es producto aún) |
+| T-074 (outage Managed 20–22/09 + pool + 401/500 honestos) | Hecha (prod rev `00028-zml`; ver T-075 por el fix de pool posterior) |
+| T-075 (auto-reconnect cómodo Managed) | Hecha (PR #54; pool endurecido, deploy rev `00035` documentado) |
+| T-076 (Facebook gris sin conexión + YouTube default listo) | Hecha (PR #55; E2E operador PASS; deploy rev `00036-cjj`) |
+| Facebook (perfil) | Soportado en Independiente y Administrado (T-071–T-073); Page y App Review diferidos, sin fechas |
 
-Detalle vivo: [`docs/STATE.md`](docs/STATE.md). Tareas: [`docs/BACKLOG.md`](docs/BACKLOG.md).
+Detalle vivo: [`docs/STATE.md`](docs/STATE.md). Tareas: [`docs/BACKLOG.md`](docs/BACKLOG.md) (canónico).
 
 ## Instalación (usuarios)
 
@@ -60,22 +65,22 @@ contra 32.2.2).
 ```text
 1. Conectar  →  navegador del sistema  →  login + consentimiento
 2. Estado    →  "Conectado como: <usuario/canal>" (jamás verás tokens)
-3. Escribir  →  Título (+ Descripción, solo YouTube)
+3. Escribir  →  Título (+ Descripción: YouTube y Facebook-perfil; Twitch/Kick no tienen equivalente)
 4. Aplicar   →  ✓/✗ por plataforma, sin todo-o-nada
 ```
 
 **Restricción real (no es un bug):** Twitch y Kick **no tienen**
 descripción de stream equivalente a YouTube. La UI lo indica:
-Título ✓ en las tres; Descripción ✓ solo en YouTube.
+Título ✓ en las cuatro; Descripción ✓ en YouTube y Facebook-perfil.
 
 ## Modos y plataformas
 
 | Proveedor | Independiente | Administrado | Notas |
 |---|---|---|---|
-| YouTube | Soportado | Soportado | scope `youtube.force-ssl`; requiere elegir `liveBroadcast` |
+| YouTube | Soportado | Soportado | scope `youtube.force-ssl`; requiere elegir `liveBroadcast` (el combo elige el activo/próximo por defecto) |
 | Kick | Soportado | Soportado | scopes `channel:write channel:read`; redirect exacto |
-| Twitch | Soportado | Soportado | Independiente: Device Flow sin secret (Client ID vía build); Administrado: auth-code vía backend |
-| Facebook Live | No | No | Solo PoC investigativa (`poc/f0fb/`); sin producto ni fechas |
+| Twitch | Soportado | Soportado | Independiente: Device Flow sin secret; Administrado: auth-code vía backend + Apply server-side |
+| Facebook (perfil) | Soportado | Soportado | Solo perfil (`publish_video`); crea su propio LiveVideo desde el dock —el objeto de Live Producer web no es gestionable por API—; Page y App Review diferidos |
 
 - **Independiente:** tus credenciales viven solo en tu equipo (cifradas
   con DPAPI), jamás salen al backend.
@@ -117,7 +122,7 @@ cmake --build build_x64 --config RelWithDebInfo
 
 ```powershell
 python -m backend.app                 # 127.0.0.1:8080, in-memory sin DATABASE_URL
-python -m unittest discover -s backend/tests   # 218 OK (skips PG sin servidor por diseño)
+python -m unittest discover -s backend/tests   # 250 OK documentados (T-076; skips PG sin servidor por diseño)
 ```
 
 Con PostgreSQL local, los tests PG corren de verdad con

@@ -1,5 +1,42 @@
 # VALIDATION — estrategia progresiva
 
+> Nota de lectura (2026-10-24): este archivo es registro histórico de
+> evidencia; se añaden entradas, no se reescribe el pasado (AGENTS.md
+> §55.6). Estado vigente: T-075 y T-076 abajo. Los conteos antiguos
+> (134/218/244/249) son fotografías de su sesión, no el estado actual:
+> en este checkout hay 250 métodos `def test_*` en `backend/tests/` y
+> 180 invocaciones `CHECK(` en `src/metadata_selfcheck.cpp` (+1 línea
+> `#define`; conteo estático [C], sin ejecutar aquí). Últimos resultados documentados [D]: backend 250 OK
+> (T-076) + SELFCHECK OK (T-073).
+
+## T-076 Facebook gris + YouTube default listo (2026-10-24, PR #55 + #56)
+
+```text
+CÓDIGO:    PASS (plan docs/superpowers/plans/2026-10-24-fb-gris-yt-default.md
+             ejecutado: Apply filtra por `platformUsable`, orden backend
+             activo→próximos por fecha→terminados, selects index 0 + tooltip)
+BACKEND:   PASS 250 OK documentado (10 skips PG por diseño; +18
+             test_metadata_youtube por el orden listo)
+E2E:       PASS OPERADOR (combo elige el activo/próximo, sin error FB
+             sin conectar) [D]
+DEPLOY:    rev-00036-cjj al 100% [D: BACKLOG + agente GCP 2026-10-24]
+FINAL: T-076 HECHA (BACKLOG #56). Sin re-ejecución en esta sesión
+       documental (no se corrieron tests/build aquí).
+```
+
+## T-075 Auto-reconnect cómodo Managed (2026-10-24, PR #54)
+
+```text
+CÓDIGO:    PASS (plan docs/superpowers/plans/2026-10-24-auto-reconnect-comodo.md:
+             mensajes desglosados + revalidación silenciosa al arrancar +
+             1 reintento acotado antes de pedir Connect; `backend/db.py`
+             + `test_db_pool_concurrency.py` + `src/metadata_dock.*`)
+BACKEND:   PASS 250 OK documentado + pool fix rev-00035 [D: BACKLOG]
+E2E:       PASS OPERADOR (Connect/Apply/restart) [D: BACKLOG]
+FINAL: T-075 HECHA (BACKLOG #54). Sin re-ejecución en esta sesión
+       documental.
+```
+
 ## T-073 FB-4 UI y cierre (2026-09-23, rama `feat/T-073-fb-4-cierre`)
 
 ```text

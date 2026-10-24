@@ -4,10 +4,22 @@ Contrato entre código y operador. Sin valores reales (los aporta el
 operador). Principio: **Neon es el proveedor inicial; PostgreSQL es el
 contrato** (§3 T-055). Nada aquí depende de APIs de Neon.
 
+> Cómo leer el estado (AGENTS.md §55.5): VERIFICADO = comprobado con
+> comando + salida en la sesión citada · DOCUMENTADO = E2E/sesión
+> previa citada sin re-ejecutar aquí · PENDIENTE = por confirmar. Un
+> dato de producción nunca se presenta como verificado si no se pudo
+> comprobar. La URL y revisión vigentes pueden derivar (drift): ante
+> duda, manda una comprobación de lectura, no este archivo.
+
 ## Estado de despliegue (T-056, 2026-09-10; rev-00002 en T-057)
 
 Clasificación por registro (IMPLEMENTADO / CONFIGURADO / VERIFICADO /
-PENDIENTE / FALLIDO). Nada de esta sección afirma "production deployed".
+PENDIENTE / FALLIDO).
+
+> Nota histórica (era T-056/T-057, 2026-09-10): "Nada de esta sección
+> afirma «production deployed»". Quedó superada por los despliegues
+> DOCUMENTADOS de abajo (T-068 → T-076); se conserva la frase original
+> como contexto de aquel momento, no como estado vigente.
 
 - IMPLEMENTADO: backend portable PG + migrations + Dockerfile + gates
   prod + binding instalación↔backend (T-053/T-054/T-055 mergeadas).
@@ -38,12 +50,14 @@ PENDIENTE / FALLIDO). Nada de esta sección afirma "production deployed".
   `STREAM_META_BACKEND_SECRET_DIR` (`ProdstoresError`, fail-fast
   correcto, no workaround). Contrato resuelto en T-057 (sección
   Secret Manager ↔ FileSecretStore): montar volúmenes + `SECRET_DIR`.
-- PENDIENTE: repetir despliegue y verificar startup, `/health`,
+- PENDIENTE [HISTÓRICO, era T-056 — superado por los DESPLEGADO de
+  abajo]: repetir despliegue y verificar startup, `/health`,
   `/ready`, `/version`, conectividad PostgreSQL, wiring productivo,
   inyección del secreto, `PUBLIC_URL` y providers de producción.
-- PENDIENTE: `STREAM_META_BACKEND_PUBLIC_URL=https://<cloud-run-url>`
-  (la URL real se conoce tras un despliegue exitoso; NO inventarla;
-  prod exige `https://` por gate T-053).
+- PENDIENTE (origen T-056/T-057, superado en la práctica): la URL real
+  se conoció tras despliegues exitosos; la vigente DOCUMENTADA es la de
+  los bullets T-076/drift de arriba (no inventar otra; prod exige
+  `https://` por gate T-053).
 - DESPLEGADO (T-068, 2026-09-19): rev-00027-jb9 (100% tráfico; imagen
   `master-bff522f-dirty`; `/health` ok + `/version` production +
   `/ready` true) con `tools/deploy.ps1`. `PUBLIC_URL` =
@@ -54,6 +68,31 @@ PENDIENTE / FALLIDO). Nada de esta sección afirma "production deployed".
   pila por-hilo) + `/ready` con ping real a DB + fix cliente 401/500
   (F-068/F-069). Verificado: `/health` + `/version` production +
   `/ready true` (ahora con DB) + `ensureSession` real OK contra prod.
+- HABILITADO+DESPLEGADO (T-072/FB-3, 2026-09-23) [DOCUMENTADO,
+  `docs/VALIDATION.md` T-072]: rev-00031-crz (secretos `FB_APP_ID`/
+  `FB_SECRET` v1 + IAM al SA dedicado + mounts + `SECRET_DIRS` +
+  `PROVIDERS=youtube,kick,twitch,facebook`, arranque sin fail-fast) y
+  rev-00032-7n9 al 100% (adapter FB perfil-only; `/health` ok +
+  `/version` production + `/ready` true; sonda prod 10/10 + E2E operador
+  PASS Connect/update+read-back/restart/Disconnect/limpieza).
+- DESPLEGADO (T-075, 2026-10-24) [DOCUMENTADO, `docs/BACKLOG.md`]:
+  rev-00035 (pool endurecido) + E2E operador PASS (Connect/Apply/
+  restart), PR #54.
+- DESPLEGADO (T-076, 2026-10-24) [DOCUMENTADO, `docs/BACKLOG.md` +
+  `.opencode/agents/gcp-stream-metadata.md` verificado por lectura ese
+  día]: rev-00036-cjj al 100% (imagen `master-ee5a402`); E2E operador
+  PASS (combo elige el activo/próximo, sin error FB). URL pública
+  vigente DOCUMENTADA:
+  `https://obs-stream-metadata-service-mdurv2xfsa-ul.a.run.app`
+  (`/version` → `env=production`, `/health` → ok).
+- DRIFT CONOCIDO [DOCUMENTADO 2026-10-24]: este archivo, la línea
+  `STREAM_META_BACKEND_PUBLIC_URL` de ejemplo y `tools/deploy.ps1` aún
+  referencian la URL anterior
+  `https://obs-stream-metadata-service-364043334054.us-east5.run.app`;
+  el job `obs-stream-metadata-purge` (us-east1) también apunta a la
+  URL anterior. No asumir que la URL vieja sigue válida. Re-verificación
+  en vivo de URL/revisión/tráfico: PENDIENTE en esta sesión documental
+  (no se ejecutó `gcloud`/`curl` aquí).
 
 ## Topología
 
@@ -135,9 +174,11 @@ Reglas:
   de escuchar — un mount incompleto no se descubre en el primer OAuth.
 - Habilitar YouTube/Kick = montar sus 2 ficheros + listar el provider
   en `STREAM_META_BACKEND_PROVIDERS`. Sin mount, el provider no arranca.
-- Estado actual: `DATABASE_URL` enlazado (v1); ficheros de providers
-  PENDIENTES hasta habilitar OAuth productivo; `PUBLIC_URL` pendiente
-  de la URL real del servicio.
+- Estado documentado 2026-10-24 (subagente GCP, solo lectura):
+  `DATABASE_URL` enlazado; 10 volúmenes de secretos en `SECRET_DIRS`
+  (OAuth YT/Kick/Twitch/FB + `TOKEN_ENCRYPTION_KEY` + `OPS_PURGE_TOKEN`);
+  `PROVIDERS=youtube,kick,twitch,facebook`; `PUBLIC_URL` = URL vigente
+  de arriba. Sin re-verificación en vivo en esta sesión documental.
 
 ## Múltiples directorios (T-058)
 
@@ -239,7 +280,7 @@ gcloud scheduler jobs create http obs-stream-metadata-purge \
   --location=us-east5 \
   --schedule="0 3 * * *" \
   --time-zone="America/New_York" \
-  --uri="https://obs-stream-metadata-service-364043334054.us-east5.run.app/ops/purge" \
+  --uri="https://obs-stream-metadata-service-mdurv2xfsa-ul.a.run.app/ops/purge" \
   --http-method=POST \
   --headers="Content-Type=application/json" \
   --message-body="{}" \
@@ -251,7 +292,13 @@ gcloud scheduler jobs create http obs-stream-metadata-purge \
 El header `Authorization: Bearer <TOKEN>` se configura en el job tras
 crearlo (Console → Cloud Scheduler → job → Edit → Headers; el valor
 queda guardado como parte del job: es un secreto de un solo proposito,
-rotable regenerando el secreto y editando el job). Sin `OPS_PURGE_TOKEN`
+rotable regenerando el secreto y editando el job).
+
+> DRIFT 2026-10-24 [DOCUMENTADO, agente GCP]: el job existente
+> `obs-stream-metadata-purge` (us-east1) aún apunta a la URL anterior;
+> al recrear o editar el job, usar la URL vigente DOCUMENTADA arriba.
+> Re-verificación en vivo: PENDIENTE en esta sesión.
+Sin `OPS_PURGE_TOKEN`
 montado, el endpoint responde `500 purge not configured` (fail-closed).
 Rate-limit propio `ops: 10/min`. Ejecución manual (solo DBs de prueba o
 ventana de mantenimiento, nunca prod en caliente):

@@ -21,6 +21,7 @@ TASK → CONTEXT → INVESTIGATION → PLAN → IMPLEMENTATION → VALIDATION �
 
 Reglas:
 
+- **Jerarquía documental (AGENTS.md §55):** BACKLOG manda en estados; STATE resume; DEPLOYMENT distingue verificado/documentado/pendiente; VALIDATION no reescribe el pasado; PROJECT_CONTEXT enlaza, no duplica.
 - **El agente ejecuta todo lo ejecutable (OBLIGATORIO, T-076):** si un comando puede correr en su propio entorno (build, tests, `package.ps1`, `gcloud`, `gh`, `curl`, deploy, verificación de instalador), LO EJECUTA ÉL y entrega evidencia + artefacto listo. Al usuario NUNCA se le pide abrir una terminal para algo que el agente ya puede hacer.
 - Al usuario solo se le pide lo que exige su presencia física: contraseñas y clics de permiso en Google/Twitch/Kick/Meta (ningún agente puede consentir por él), cerrar OBS para instalar con admin, y verificación visual en OBS/YouTube Studio. Esos pasos se le dan masticados, uno por uno, sin terminal.
 - Contexto que originó la regla (2026-10-24): se pidió al usuario compilar y empaquetar tres veces, incluyendo una por un error de compilación que el agente podía haber detectado compilando él primero. No se repite.

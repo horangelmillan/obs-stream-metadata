@@ -1,6 +1,6 @@
 # PROJECT_CONTEXT — obs-stream-metadata (snapshot operativo)
 
-> Snapshot al commit `b2dae75` (master == origin/master). Punto de partida
+> Snapshot al commit `c6b5b26` (master == origin/master). Punto de partida
 > para sesiones nuevas. No reemplaza código ni docs normativas.
 > Marcas: [C] confirmado en repo ahora mismo · [D] documentado (E2E/infra
 > de sesiones previas, no re-ejecutado aquí) · [I] inferido · [P] pendiente.
@@ -8,9 +8,11 @@
 ## 1. Project Identity
 
 Plugin Qt6 para OBS Studio 32.2.2 (Windows x64) + backend Python que
-gestionan **título/descripción de streams** en Twitch, YouTube y Kick.
+gestionan **título/descripción de streams** en Twitch, YouTube, Kick y
+Facebook (perfil; Page diferida).
 Componentes: plugin (`src/`, dock Qt integrado) + backend (`backend/`,
-Cloud Run + Neon PostgreSQL). Alcance actual: MVP cerrado; un solo
+Cloud Run + Neon PostgreSQL). Alcance actual: MVP cerrado + hardening
+comercial F-C1/F-C2/F-C4 + Facebook perfil + T-075/T-076; un solo
 plugin, dos modos (Independent/Managed). Sin multichat, multistream,
 categorías, analytics ni backend remoto distinto del descrito.
 
@@ -18,9 +20,15 @@ categorías, analytics ni backend remoto distinto del descrito.
 
 - MVP STATUS: CLOSED [D] · §50: GREEN [D] · FUNCTIONAL GAPS: NONE [D]
 - BLOCKERS: NONE · HIGH: NONE
-- CURRENT DEVELOPMENT CYCLE: ninguno (MVP cerrado; ciclo UI/UX futuro e independiente, sin abrir)
+- CURRENT DEVELOPMENT CYCLE: ninguno (último: T-076 hecha 2026-10-24 [D]; sin ciclo abierto)
 - NEXT REQUIRED TECHNICAL TASK: NONE [D]
-- Baselines re-verificadas aquí [C]: backend 134 OK (7 skips PG por diseño), selfcheck 125/115, tree CLEAN, `master==origin/master==b2dae75`.
+- Baselines en este checkout [C, conteo estático sin ejecutar]: backend 250 `def test_*`
+  en `backend/tests/` (coherente con "250 OK" documentado en T-075/T-076),
+  selfcheck 180 invocaciones `CHECK(` en `src/metadata_selfcheck.cpp`
+  (+1 línea `#define`; conteo estático [C]) (último
+  documentado: SELFCHECK OK, T-073); tree con cambios documentales sin
+  commitear (ver §17) + `staging/` preexistente sin seguimiento (no
+  modificado); `master==origin/master==c6b5b26`.
 
 ## 3. Architecture
 
@@ -38,34 +46,39 @@ categorías, analytics ni backend remoto distinto del descrito.
 
 | Provider | Independent | Managed | Notas |
 |---|---|---|---|
-| YouTube | SUPPORTED | SUPPORTED | scopes `youtube.force-ssl` |
+| YouTube | SUPPORTED | SUPPORTED | scopes `youtube.force-ssl`; combo con default al activo/próximo (T-076) |
 | Kick | SUPPORTED | SUPPORTED | scopes `channel:write channel:read`; redirect con match exacto |
-| Twitch | SUPPORTED | **UNSUPPORTED** | DCF sin secret; explícito, sin fallback |
+| Twitch | SUPPORTED | SUPPORTED | Independent: DCF sin secret; Managed: auth-code vía backend + Apply server-side (E2E de facto T-063) |
+| Facebook (perfil) | SUPPORTED | SUPPORTED | Solo perfil (`publish_video`; DCF-like PKCE BYO-app / adapter + endpoint Managed); crea su propio LiveVideo; Pages diferidas sin fechas (F-072/F-079); estado de la app de Meta y requisitos de acceso para las pruebas del operador, pendientes de confirmar |
 
 ## 5. Authentication / OAuth
 
-- YouTube/Kick Managed: `POST /connect/<p>` → `authorization_url` (state `token_hex(16)` single-use+TTL, PKCE S256) → browser → `GET /connect/<p>/callback` → exchange server-side → `GET /connect/<p>/status`. App secrets solo backend; plugin recibe `{provider,status,account}`.
-- YouTube/Kick Independent: PKCE directo con credenciales BYO del usuario.
+- YouTube/Kick/Twitch/Facebook Managed: `POST /connect/<p>` → `authorization_url` (state `token_hex(16)` single-use+TTL, PKCE S256; Twitch sin PKCE por docs) → browser → `GET /connect/<p>/callback` → exchange server-side → `GET /connect/<p>/status`. App secrets solo backend; plugin recibe `{provider,status,account}`.
+- YouTube/Kick/Twitch Independent: OAuth directo con credenciales BYO
+  del usuario (YT/Kick PKCE; Twitch Device Flow).
 - Twitch: Device Flow (`id.twitch.tv/oauth2/device` → user_code + `twitch.tv/activate` → polling acotado con `slow_down` → `/validate` + scope check → DPAPI). Client ID distribuible vía `OBS_TWITCH_CLIENT_ID` build-time (default vacío = BYO); jamás secret.
 - Refresh: single-flight por cuenta; `invalid_grant` → reconectar. Disconnect: borrado local garantizado + revoke remoto best-effort.
 - Secretos de app vs usuario vs tokens estrictamente separados (§9).
 
 ## 6. Data / Persistence
 
-- Local (DPAPI, config dir OBS per-user): `Record{display,broadcaster,access,refresh,clientId,secret,connected}` ×3 + `backendInstall` + `connectionMode`/`backendBaseUrl`/snapshots en claro (`managedYoutube/Kick{connected,userId,display}`).
+- Local (DPAPI, config dir OBS per-user): `Record{display,broadcaster,access,refresh,clientId,secret,connected}` ×4 (tw/yt/kk/fb) + `facebookLiveId` en claro + `backendInstall` + `connectionMode`/`backendBaseUrl`/snapshots en claro (`managed{Twitch,Youtube,Kick,Facebook}{connected,userId,display}`).
 - Backend PG (`migrations/001_init.sql` + `schema_migrations`): `installations(id,secreto)`, `sessions(opaca+TTL)`, `transactions(state/verifier,600s,1 uso)`, `connections(installation,provider→account+obtained_at)`, `tokens(access+refresh)`.
-- Ownership/lifetime: usuario (Disconnect lo borra; backend borra filas, sesiones se flaggean); sin purga programada; uninstall elimina payload, NO DPAPI ni filas PG.
+- Ownership/lifetime: usuario (Disconnect lo borra; backend borra filas; F-C2 borrado total por instalación + F-C4 purga diaria de sesiones/transacciones expiradas vía `POST /ops/purge`); uninstall elimina payload, NO DPAPI ni filas PG.
 - Reconstrucción Managed: snapshot local → `/status` al conectar; `loadStore` sin auto-fetch.
 
 ## 7. Security Model
 
 DPAPI CurrentUser; PKCE; state/nonce single-use+TTL; HMAC-SHA256; aislamiento provider/modo (sin fallback); rate-limit (global 600/min + bootstrap/auth/connect por IP/instalación; `AllowAll` vetado en prod); redacción de logs + leak-guard; Secret Manager files-only; HTTPS; SA dedicado con solo Secret Accessor; gates prod fail-fast.
-NO hace: cifrado aplicacional propio, purga programada, WAF/CORS (N/A: sin XHR cross-origin), multi-instancia distribuida, certificaciones (sin claims SOC2/ISO/GDPR).
+NO hace: WAF/CORS (N/A: sin XHR cross-origin), multi-instancia distribuida, certificaciones (sin claims SOC2/ISO/GDPR).
+Sí hace (post-MVP): cifrado aplicacional Fernet de tokens en reposo (F-C1), purga programada diaria (F-C4).
 Secretos nunca en: repo, imágenes, logs, respuestas, snapshots, C++ Managed.
 
 ## 8. Production Infrastructure [D]
 
-GCP `obs-stream-metadata` (364043334054): Cloud Run `obs-stream-metadata-service`, `us-east5`, 1 CPU/512Mi/timeout 300s, min 0/max 1, 2ª gen, ingress público intencional (frontera en `backend_auth`), SA `obs-stream-metadata-backend` dedicado; Artifact Registry `us-east5`; Neon PG `AWS US East 2 (Ohio)`, branch `production`, DB `neondb`, pooling ON; Secret Manager (`DATABASE_URL` v1 + 4 OAuth files en mounts 1-secreto-por-directorio, `SECRET_DIRS`); PUBLIC_URL `https://obs-stream-metadata-service-364043334054.us-east5.run.app`; callbacks `/connect/{youtube,kick}/callback`; `PROVIDERS=youtube,kick`; rev sana con `/health` 200 y `/version.production`.
+GCP `obs-stream-metadata` (364043334054): Cloud Run `obs-stream-metadata-service`, `us-east5`, 1 CPU/512Mi/timeout 300s, min 0/max 1, 2ª gen, ingress público intencional (frontera en `backend_auth`), SA `obs-stream-metadata-backend` dedicado; Artifact Registry `us-east5`; Neon PG `AWS US East 2 (Ohio)`, branch `production`, DB `neondb`, pooling ON; Secret Manager (DATABASE_URL + OAuth files + TOKEN_ENCRYPTION_KEY + OPS_PURGE_TOKEN en mounts 1-secreto-por-directorio, `SECRET_DIRS`, 10 volúmenes); `PROVIDERS=youtube,kick,twitch,facebook`; rev documentada `00036-cjj` con `/health` 200 y `/version.production` (subagente GCP, verificado 2026-10-24 por lectura; no re-verificado en esta sesión).
+Drift conocido [D]: la URL pública vigente es `https://obs-stream-metadata-service-mdurv2xfsa-ul.a.run.app`; `DEPLOYMENT.md`, `tools/deploy.ps1` y el job `obs-stream-metadata-purge` (us-east1) aún referencian la URL anterior `https://obs-stream-metadata-service-364043334054.us-east5.run.app` — no asumir que sigue válida. Callbacks `/connect/{youtube,kick,twitch,facebook}/callback`.
+Distinguir [I]: app de Meta en Development sin App Review (solo usuarios con rol) ≠ backend desplegado en Cloud Run.
 
 ## 9. Build / Development
 
@@ -73,9 +86,9 @@ Windows + VS2022 + CMake ≥3.28 + OBS SDK 32.2.2 + Qt6 obs-deps (`buildspec.jso
 
 ## 10. Testing
 
-- `metadata-selfcheck.exe`: 125 PASS (límites, §28, DCF `twid/twpoll`, snapshots, modo, envbind).
-- `python -m unittest discover -s backend/tests`: 134 OK (7 skips PG-sin-servidor por diseño; CI usa servicio `postgres:18` → 134 sin skips).
-- E2E [D]: YT+Kick Managed en prod (`connected`, sin tokens), Twitch DCF real (prefill, consent, restart DPAPI, revoke 200), install/uninstall reales en OBS normal.
+- `metadata-selfcheck.exe`: 180 invocaciones `CHECK(` contadas en fuente [C] (+1 `#define`; último resultado documentado: SELFCHECK OK, T-073 [D]).
+- `python -m unittest discover -s backend/tests`: 250 métodos `def test_*` contados en fuente [C] (último resultado documentado: 250 OK, T-076 2026-10-24 [D]; skips PG-sin-servidor por diseño; CI usa servicio `postgres:18`).
+- E2E [D]: YT/Kick/Twitch Managed en prod (`connected`, sin tokens), FB Managed perfil (create+ID, status, Apply+read-back, end, delete, restart, Disconnect), Twitch DCF real, install/uninstall reales en OBS normal.
 - CI (`ci-phase0.yml`): `phase0-gates` (docs + secret-scan) y `backend-tests` (stdlib + PG service). Negativos: 204/401/429, state expirado/replay/mismatch, wrong-provider, credenciales ausentes, TLS a medias.
 - Motor de secret-scan: GNU grep (el workflow); PowerShell/.NET da falsos positivos sobre `*_token=` — no accionable.
 
@@ -85,35 +98,55 @@ NSIS 3.12, `cmake/windows-installer.nsi.in` (versión de buildspec vía configur
 
 ## 12. Documentation / Privacy
 
-`docs/PRIVACY.md` (inventario trazable + limitaciones honestas: sesiones flag-no-purge, uninstall≠borrado backend, sin contacto designado). Findings: F-001…F-062; relevantes cerrados; INFO (en-US.ini vacío, UI-cache revoke Twitch, ramas release remotas). Docs normativas: `AGENTS.md` (investigación histórica + §50 done-definition), `ARCHITECTURE-BACKEND.md` (§18 matriz, §19 env, §20 PG), `DEPLOYMENT.md` (contrato + estado + migración Neon→Cloud SQL), `SECURITY.md`, `VALIDATION.md`, `TROUBLESHOOTING.md`, ADR-001…ADR-014.
+`docs/PRIVACY.md` (inventario trazable + limitaciones honestas; nota:
+declara "Twitch Managed is unsupported", desactualizado frente a T-062 —
+ver STATE discrepancias residuales). Findings: F-001…F-086; relevantes
+cerrados. Docs normativas: `AGENTS.md` (reglas duraderas + jerarquía
+§55), `ARCHITECTURE-BACKEND.md` (§18 matriz —nota: fila Twitch
+desactualizada, ver STATE—, §19 env, §20 PG), `DEPLOYMENT.md`
+(contrato + estado + migración Neon→Cloud SQL), `SECURITY.md`,
+`VALIDATION.md`, `TROUBLESHOOTING.md`, ADR-001…ADR-015.
 
 ## 13. Current Backlog
 
 Fuente: `docs/BACKLOG.md` (única autoritativa, ADR-001).
-DONE: T-001,10-13,20,30-32,35-41,43-58 (infra completa), T-060, T-061 simile.
-SATISFIED DE FACTO: T-034 (por T-061). STALE/SUPERSEDED: T-042, dupe-T-058.
-OPTIONAL/meta: T-002, T-033 (gate §50 GREEN evidenciado). FUTURE: T-059 (licencias/comercial).
+DONE: T-001,10-13,20,30-33,35-41,43-58,60-65,67,68,70-76 (incl. F-C1/F-C2/F-C4, Facebook T-069–T-073, T-074, T-075, T-076).
+SATISFIED DE FACTO: T-034 (por T-061), T-062 (por T-063).
+STALE/SUPERSEDED: T-042, dupe-T-058.
+OPTIONAL/meta: T-002 (en-progreso, informe; no bloquea).
+FUTURE: T-059 (licencias/comercial), T-066 (firma).
 PENDING REAL: ninguno funcional.
+PENDING OPERADOR [P, intención comunicada por el usuario 2026-10-24]:
+pruebas de Facebook con usuarios reales y streams reales durante octubre
+de 2026. Sin afirmar Live/App Review/requisitos (sin evidencia);
+separado del despliegue del backend en Cloud Run; requiere confirmación
+y alcance explícito antes de ejecutar nada.
 NEXT REQUIRED TECHNICAL TASK: NONE.
 
 ## 14. Known Findings / Limitations
 
-Ningún BLOCKER/HIGH. INFO: en-US.ini vacío en repo (dock funciona); UI Twitch cachea revoke (tokens invalidados, HTTP 200); sesiones revocadas/expiradas se flaggean, no se purgan; contacto privacy pendiente del operador; ramas `origin/feat/*` y `release/*` sin borrar (higiene); 5 untracked ajenos en raíz (no tocar). Deuda futura: monitoreo/backups gestionados, purga programada, contador distribuido multi-instancia.
+Ningún BLOCKER/HIGH. INFO: en-US.ini vacío en repo (dock funciona); UI Twitch cachea revoke (tokens invalidados, HTTP 200); contacto privacy designado (`horangelmillan@gmail.com`, F-C2); ramas `origin/feat/*` y `release/*` sin borrar (higiene); `staging/` en raíz preexistente sin seguimiento, no modificado. Deuda futura: monitoreo/backups gestionados, contador distribuido multi-instancia, firma (T-066), licencias (T-059).
 
 ## 15. Important Design Decisions (DO NOT VIOLATE WITHOUT EXPLICIT ADR)
 
-Un solo plugin; Independent+Managed; `ConnectionMode != environment`; Twitch Managed unsupported; sin fallback provider/modo; `Account != ManagedConn`; ManagedConn sin tokens; plugin Managed sin secrets; `loadStore` sin auto-fetch; Apply consume `Account` Independent; prod = PostgreSQL vía `DATABASE_URL` genérica (nunca `NEON_*`); secrets files-only; `backend_auth` como boundary; SQLite solo DEV/TEST; `PORT`/`0.0.0.0`-prod por entorno con override explícito.
+Un solo plugin; Independent+Managed; `ConnectionMode != environment`; Twitch Managed soportado (T-062; la mención contraria en §4/§15 antiguos y en ARCH §18/PRIVACY está desactualizada, ver STATE); sin fallback provider/modo; `Account != ManagedConn`; ManagedConn sin tokens; plugin Managed sin secrets; `loadStore` sin auto-fetch; prod = PostgreSQL vía `DATABASE_URL` genérica (nunca `NEON_*`); secrets files-only; `backend_auth` como boundary; SQLite solo DEV/TEST; `PORT`/`0.0.0.0`-prod por entorno con override explícito.
 
 ## 16. Known Non-Goals
 
-Twitch Managed; multichat/multistream/categorías/tags/thumbnails/analytics/chat-bots/EventSub; cuentas múltiples por proveedor; release pública (no definida); billing/pagos; HA/multi-región/K8s/Redis/réplicas; migración automática Neon→Cloud SQL; monitoring empresarial; purga automática.
+Multichat/multistream/categorías/tags/thumbnails/analytics/chat-bots/EventSub; cuentas múltiples por proveedor; release pública (no definida); billing/pagos; HA/multi-región/K8s/Redis/réplicas; migración automática Neon→Cloud SQL; monitoring empresarial; integración de Pages de Facebook (diferida, sin fechas; estado de la app de Meta y requisitos de acceso para las pruebas del operador pendientes de confirmar, sin afirmar Live, App Review ni acciones iniciadas); firma del instalador (T-066 aparcada).
 
 ## 17. Current Git Baseline [C]
 
-- branch: `master`; HEAD = origin/master = `b2dae75` (`docs: close MVP backlog (#28)`)
-- Cadena: `#20` T-055 → `#21` T-056 → `#22` T-057 → `#23` T-058 → `#24` docs E2E → `#25` installer → `#26` T-047 → `#27` T-060 → `#28` cierre MVP.
-- working tree CLEAN salvo 5 untracked ajenos (no son proyecto; no tocar).
-- Sin cambios locales de proyecto.
+- Baseline al inicio de la tarea documental (2026-10-24) [C]: HEAD =
+  origin/master = `c6b5b26`; árbol limpio salvo `staging/`
+  preexistente sin seguimiento (no modificado).
+- Estado actual del checkout [C]: mismo HEAD; 8 archivos documentales
+  modificados sin commitear (`AGENTS.md`, `README.md`, `docs/STATE.md`,
+  `docs/PROJECT_CONTEXT.md`, `docs/DEPLOYMENT.md`,
+  `docs/VALIDATION.md`, `docs/TOOLS.md`, `docs/WORKFLOW.md`);
+  `staging/` preexistente sin seguimiento, no modificado; sin
+  commit/push en esta tarea.
+- Cadena reciente [C]: `#54` T-075 → `#55` T-076 → `#56` docs T-076 → `#57/#58` subagente GCP.
 
 ## 18. How to Use This Document
 
