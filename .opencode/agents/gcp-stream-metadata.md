@@ -5,20 +5,19 @@ permission:
   edit: deny
   bash:
     "*": ask
-    "git -C * status --short --branch": allow
     "git status --short --branch": allow
     "git rev-parse --show-toplevel": allow
     "gcloud --version": allow
-    "gcloud projects describe *": allow
-    "gcloud services list *": allow
-    "gcloud run services list *": allow
-    "gcloud run services describe *": allow
-    "gcloud run revisions list *": allow
-    "gcloud artifacts repositories list *": allow
-    "gcloud secrets list *": allow
-    "gcloud scheduler jobs list *": allow
-    "gcloud scheduler jobs describe *": allow
-    "gcloud monitoring policies list *": allow
+    "gcloud projects describe obs-stream-metadata": allow
+    "gcloud services list --enabled --project=obs-stream-metadata": allow
+    "gcloud run services list --project=obs-stream-metadata --region=us-east5": allow
+    "gcloud run services describe obs-stream-metadata-service --project=obs-stream-metadata --region=us-east5": allow
+    "gcloud run revisions list --service=obs-stream-metadata-service --project=obs-stream-metadata --region=us-east5": allow
+    "gcloud artifacts repositories list --project=obs-stream-metadata": allow
+    "gcloud secrets list --project=obs-stream-metadata": allow
+    "gcloud scheduler jobs list --project=obs-stream-metadata --location=us-east1": allow
+    "gcloud scheduler jobs describe obs-stream-metadata-purge --project=obs-stream-metadata --location=us-east1": allow
+    "gcloud monitoring policies list --project=obs-stream-metadata": allow
     "gcloud auth list": allow
     "gcloud config list": allow
     "curl.exe -sS -m 25 https://obs-stream-metadata-service-mdurv2xfsa-ul.a.run.app/health": allow
@@ -95,10 +94,13 @@ Solo lectura por defecto; toda escritura productiva requiere plan + autorizacion
 
 ## Terminal: permitido sin pedir permiso
 
-Solo estos patrones (sustituir region/proyecto solo por los de este proyecto):
+Cada linea siguiente tiene su patron equivalente en el frontmatter.
+Son cadenas exactas: proyecto, servicio, region y job fijados, sin
+sustituciones. Ejecutar `git` desde la raiz del checkout.
 
 ```text
-git -C <checkout> status --short --branch
+git status --short --branch
+git rev-parse --show-toplevel
 gcloud --version
 gcloud projects describe obs-stream-metadata
 gcloud services list --enabled --project=obs-stream-metadata
