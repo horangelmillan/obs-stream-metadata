@@ -1,5 +1,18 @@
 # TROUBLESHOOTING — resolución de problemas
 
+## T-075 — comodidad Managed (no pedir Connect a cada rato)
+
+Nuestra llave interna dura 30 minutos y se renueva sola. Las de los
+proveedores las renueva el servidor solo: Twitch unas 4 horas
+(repuesto largo), YouTube 1 hora (repuesto largo si la app Google está
+en Producción; en Prueba caduca cada 7 días con `invalid_grant`), Kick
+2 horas con repuesto de 30 días que se alarga solo al usarse.
+
+Si ves `Needs reconnection` justo después de 7 días en YouTube, pasa tu
+OAuth consent de Testing a In production en Google Cloud. No es código,
+es configuración. Lo demás lo reintenta el programa una vez en silencio;
+solo pide Connect cuando el proveedor revocó el permiso.
+
 ## T-074 — outage Managed 20–22/09/2026 (todo en rojo con "network")
 
 Síntoma: `Error: Could not reach the managed backend (network).` en

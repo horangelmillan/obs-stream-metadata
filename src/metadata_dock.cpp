@@ -936,6 +936,77 @@ void MetadataDock::initManaged()
 	managedPollTimer_->setSingleShot(false);
 	connect(managedPollTimer_, &QTimer::timeout, this,
 		&MetadataDock::onManagedPollTimeout);
+	silentRevalidateManaged();
+}
+
+// T-075: silent startup revalidation. No browser, no polling loop:
+// one ensureSession + one status per platform with a snapshot. Keeps
+// Connected on success, marks Needs reconnection otherwise. Never
+// wipes snapshots here; Connect/Apply decide.
+void MetadataDock::silentRevalidateManaged()
+{
+	if (!isManaged() || !managedAuth_)
+		return;
+	bool any = false;
+	for (meta::Platform p :
+	     {meta::Platform::Twitch, meta::Platform::YouTube,
+	      meta::Platform::Kick, meta::Platform::Facebook}) {
+		if (managedAccount(p).connected)
+			any = true;
+	}
+	if (!any)
+		return;
+	obs_log(LOG_INFO, "managed silent revalidate started");
+	managedAuth_->ensureSession([this](backend_auth::Result r) {
+		if (!isManaged())
+			return;
+		if (r != backend_auth::Result::Ok) {
+			obs_log(LOG_WARNING,
+				"managed silent revalidate session failed");
+			return;
+		}
+		for (meta::Platform p :
+		     {meta::Platform::Twitch, meta::Platform::YouTube,
+		      meta::Platform::Kick, meta::Platform::Facebook}) {
+			if (!managedAccount(p).connected)
+				continue;
+			managedAuth_->apiGet(
+				QStringLiteral("/connect/%1/status")
+					.arg(providerSlug(p)),
+				[this, p](const backend_auth::Client::ApiReply &rep) {
+					if (!isManaged())
+						return;
+					if (rep.result !=
+					    backend_auth::Result::Ok) {
+						obs_log(LOG_WARNING,
+							"managed silent revalidate status failed: %s",
+							meta::platformName(p));
+						return;
+					}
+					if (rep.body.value(QStringLiteral("status"))
+						    .toString() !=
+					    QStringLiteral("connected")) {
+						setStatus(p,
+							tr("Needs reconnection."));
+						return;
+					}
+					const QJsonObject acc =
+						rep.body.value(QStringLiteral(
+								"account"))
+							.toObject();
+					ManagedConn &m = managedAccount(p);
+					m.userId = acc.value(QStringLiteral("id"))
+							   .toString();
+					m.display =
+						acc.value(QStringLiteral(
+								"displayName"))
+							.toString();
+					setStatus(p, tr("Connected as %1")
+								     .arg(m.display));
+					saveStore();
+				});
+		}
+	});
 }
 
 MetadataDock::MetadataDock::ManagedConn &MetadataDock::managedAccount(meta::Platform p)
@@ -1153,8 +1224,12 @@ QString MetadataDock::managedAuthError(meta::Platform p, backend_auth::Result r,
 		return tr("Could not reach the managed backend (network).");
 	case backend_auth::Result::StorageError:
 		return tr("Local installation storage failed (DPAPI).");
+	case backend_auth::Result::Unauthorized:
+		return tr("Session expired. Retrying silently… (press Connect only if it persists).");
+	case backend_auth::Result::ServerError:
+		return tr("Managed backend error (temporary). Retrying once…");
 	default:
-		return tr("Backend authentication failed.");
+		return tr("Unexpected backend reply. Retrying once…");
 	}
 }
 
@@ -1437,6 +1512,8 @@ void MetadataDock::startManagedYouTubeApply()
 								    : rep.http);
 				      if (scheduleBackoff(p, oc, rep.http))
 					      return;
+				      if (autoRetryManagedSession(p, rep.http))
+					      return;
 				      if (oc == meta::Outcome::AuthRequired) {
 					      ManagedConn &m =
 						      managedAccount(p);
@@ -1507,6 +1584,8 @@ void MetadataDock::startManagedTwitchApply()
 								    : rep.http);
 				      if (scheduleBackoff(p, oc, rep.http))
 					      return;
+				      if (autoRetryManagedSession(p, rep.http))
+					      return;
 				      if (oc == meta::Outcome::AuthRequired) {
 					      ManagedConn &mm =
 						      managedAccount(p);
@@ -1525,6 +1604,44 @@ void MetadataDock::startManagedTwitchApply()
 }
 
 // --- helpers ----------------------------------------------------------
+
+// T-075: one silent plugin-session retry. Returns true when the retry
+// was scheduled (caller must return without finishing the platform).
+bool MetadataDock::autoRetryManagedSession(meta::Platform p, int http)
+{
+	if (http != 0 || retried_)
+		return false;
+	retried_ = true;
+	obs_log(LOG_INFO, "managed apply auto-retry session: %s",
+		meta::platformName(p));
+	managedAuth_->ensureSession([this, p](backend_auth::Result sr) {
+		if (!isManaged())
+			return;
+		if (sr != backend_auth::Result::Ok) {
+			ManagedConn &mm = managedAccount(p);
+			mm.connected = false;
+			mm.userId.clear();
+			mm.display.clear();
+			setStatus(p, tr("Needs reconnection."));
+			saveStore();
+			finishPlatform(
+				p, false,
+				meta::userMessage(meta::Outcome::AuthRequired,
+						  p));
+			startApplyNext();
+			return;
+		}
+		if (p == meta::Platform::YouTube)
+			startManagedYouTubeApply();
+		else if (p == meta::Platform::Twitch)
+			startManagedTwitchApply();
+		else if (p == meta::Platform::Kick)
+			startManagedKickApply();
+		else
+			startManagedFacebookApply();
+	});
+	return true;
+}
 
 void MetadataDock::setStatus(meta::Platform p, const QString &text)
 {
@@ -3131,6 +3248,8 @@ void MetadataDock::startManagedKickApply()
 								    : rep.http);
 				      if (scheduleBackoff(p, oc, rep.http))
 					      return;
+				      if (autoRetryManagedSession(p, rep.http))
+					      return;
 				      if (oc == meta::Outcome::AuthRequired) {
 					      ManagedConn &mm =
 						      managedAccount(p);
@@ -3308,6 +3427,8 @@ void MetadataDock::startManagedFacebookApply()
 						      rep.http == 0 ? -1
 								    : rep.http);
 				      if (scheduleBackoff(p, oc, rep.http))
+					      return;
+				      if (autoRetryManagedSession(p, rep.http))
 					      return;
 				      if (oc == meta::Outcome::AuthRequired) {
 					      ManagedConn &mm =
