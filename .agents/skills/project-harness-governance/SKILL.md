@@ -23,9 +23,17 @@ tocar docs. No sustituye a `AGENTS.md` §55; lo aplica.
 | Recuperación de contexto | `docs/PROJECT_CONTEXT.md` | Resumen con enlaces |
 | Resumen para personas | `README.md` | Refleja capacidades, enlaza |
 | Hallazgos | `docs/FINDINGS.md` (añadir F-###) | No reescribir filas |
+| Principios/restricciones duraderas de privacidad | `AGENTS.md` (normativo) | PRIVACY describe; código/ARCH implementan |
+| Tratamiento, retención, datos, comunicaciones al usuario | `docs/PRIVACY.md` (descriptivo) | No es norma; se corrige hacia código/ARCH |
+| Implementación técnica de la privacidad | código vigente + `docs/ARCHITECTURE-BACKEND.md` | PRIVACY enlaza; no la redefine |
 
 Si dos documentos discrepan, manda la fuente canónica y se registra la
-discrepancia en el informe (y en FINDINGS si es doc-vs-código).
+discrepancia en el informe (y en FINDINGS si es doc-vs-código). En
+privacidad, el principio de `AGENTS.md` prevalece; el detalle
+descriptivo se corrige hacia el código/la arquitectura. Si no hay base
+para una jerarquía coherente, documentar el hueco como `[P] provisional`
+sin inventar decisiones de producto. No resolver contradicciones
+concretas ni reescribir `PRIVACY.md` al definir autoridad.
 
 ## 2. Procedimiento de discrepancias
 
@@ -49,6 +57,15 @@ discrepancia en el informe (y en FINDINGS si es doc-vs-código).
 Los datos fechados (revisiones, URLs, E2E, dictámenes GCP) son
 evidencia histórica hasta volver a verificarlos; nunca se convierten
 en reglas permanentes.
+
+Rutas excluidas (`staging/`, `dev.env` y análogas; AGENTS.md §55.10):
+registrar `git status --porcelain` inicial y final solo por lectura y
+usar solo la formulación sostenible: (a) alcance del procedimiento
+("no dirigido a esta ruta") = [C] de procedimiento; (b) igualdad del
+`status` inicial/final = [C] de observación, nunca de contenido;
+(c) identidad de contenido = solo con comprobación de contenido
+autorizada; sin ella, el salto es [I] y sin base es [P]. Si la lectura
+o huella está prohibida, reportar la limitación y quedarse en (a)/(b).
 
 ## 4. Documentación oficial con MCP/web
 
@@ -76,6 +93,10 @@ SDK o API (OBS, Qt, CMake, OAuth de Twitch/YouTube/Kick/Meta, GCP):
   fecha; sin afirmar estados, aprobaciones, requisitos ni acciones
   no evidenciadas. La preparación de la app de Meta y las acciones
   del operador no son tareas de agentes.
+- Verificación operativa (AGENTS.md §55.11): `/health`, `/ready` o
+  `/version` no prueban el destino de un job de Cloud Scheduler. El
+  destino operativo exige evidencia del propio job por consulta de solo
+  lectura autorizada; sin ella, [D] o [P] según lo disponible.
 
 ## 6. Límites duros
 

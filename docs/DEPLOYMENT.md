@@ -82,17 +82,34 @@ PENDIENTE / FALLIDO).
   `.opencode/agents/gcp-stream-metadata.md` verificado por lectura ese
   día]: rev-00036-cjj al 100% (imagen `master-ee5a402`); E2E operador
   PASS (combo elige el activo/próximo, sin error FB). URL pública
-  vigente DOCUMENTADA:
+  vigente DOCUMENTADA [D]:
   `https://obs-stream-metadata-service-mdurv2xfsa-ul.a.run.app`
   (`/version` → `env=production`, `/health` → ok).
-- DRIFT CONOCIDO [DOCUMENTADO 2026-10-24]: este archivo, la línea
-  `STREAM_META_BACKEND_PUBLIC_URL` de ejemplo y `tools/deploy.ps1` aún
-  referencian la URL anterior
+  Última observación histórica reportada [D histórico 2026-10-24,
+  origen: informe gcp-stream-metadata de sesión anterior con los dos
+  comandos exactos citados en `docs/VALIDATION.md`
+  (`gcloud run services describe obs-stream-metadata-service --project=obs-stream-metadata --region=us-east5`
+  y `gcloud scheduler jobs describe obs-stream-metadata-purge --project=obs-stream-metadata --location=us-east1`)]:
+  dicha salida reportada mostraba la URL antigua
   `https://obs-stream-metadata-service-364043334054.us-east5.run.app`;
-  el job `obs-stream-metadata-purge` (us-east1) también apunta a la
+  no se afirma que sea URL vigente actual, solo observación histórica (ver DRIFT
+  CONOCIDO abajo).
+- DRIFT CONOCIDO [D histórico 2026-10-24, informe gcp-stream-metadata de sesión anterior con los dos comandos exactos citados en `docs/VALIDATION.md` más texto documentado preexistente en este archivo/`tools/deploy.ps1`; no re-verificado hoy]: ese informe reportaba que este archivo, la línea
+  `STREAM_META_BACKEND_PUBLIC_URL` de ejemplo y `tools/deploy.ps1` aún
+  referenciaban la URL anterior
+  `https://obs-stream-metadata-service-364043334054.us-east5.run.app`;
+  y que el job `obs-stream-metadata-purge` (us-east1) apuntaba a la
   URL anterior. No asumir que la URL vieja sigue válida. Re-verificación
   en vivo de URL/revisión/tráfico: PENDIENTE en esta sesión documental
-  (no se ejecutó `gcloud`/`curl` aquí).
+  (no se ejecutó `gcloud`/`curl` aquí) [P].
+  [P] Discrepancia entre la observación histórica (URL antigua
+  reportada 2026-10-24) [D histórico] y la URL T-076 DOCUMENTADA [D]
+  pendiente de aclarar; destino actual del job pendiente de
+  re-verificación [P]; estado operativo actual pendiente de
+  re-verificación en vivo [P]. No se afirma que ningún
+  endpoint responda ni que la URL antigua siga siendo la actual.
+  [P] URL a usar en futura edición pendiente hasta reconciliar
+  discrepancia; ver bloque canónico T-076/DRIFT.
 
 ## Topología
 
@@ -174,11 +191,15 @@ Reglas:
   de escuchar — un mount incompleto no se descubre en el primer OAuth.
 - Habilitar YouTube/Kick = montar sus 2 ficheros + listar el provider
   en `STREAM_META_BACKEND_PROVIDERS`. Sin mount, el provider no arranca.
-- Estado documentado 2026-10-24 (subagente GCP, solo lectura):
+- Estado documentado 2026-10-24 (subagente GCP, solo lectura) [D]:
   `DATABASE_URL` enlazado; 10 volúmenes de secretos en `SECRET_DIRS`
   (OAuth YT/Kick/Twitch/FB + `TOKEN_ENCRYPTION_KEY` + `OPS_PURGE_TOKEN`);
-  `PROVIDERS=youtube,kick,twitch,facebook`; `PUBLIC_URL` = URL vigente
-  de arriba. Sin re-verificación en vivo en esta sesión documental.
+  `PROVIDERS=youtube,kick,twitch,facebook`; `PUBLIC_URL` = URL T-076
+  DOCUMENTADA de arriba [D]. Se distingue de la observación histórica
+  de la sesión anterior (URL antigua reportada 2026-10-24) [D histórico,
+  ver bloque T-076/DRIFT]. Valor operativo actual pendiente de
+  re-verificación en vivo [P]; no se afirma que ningún endpoint o el job
+  respondan. Ver bloque canónico T-076/DRIFT arriba.
 
 ## Múltiples directorios (T-058)
 
@@ -294,10 +315,13 @@ crearlo (Console → Cloud Scheduler → job → Edit → Headers; el valor
 queda guardado como parte del job: es un secreto de un solo proposito,
 rotable regenerando el secreto y editando el job).
 
-> DRIFT 2026-10-24 [DOCUMENTADO, agente GCP]: el job existente
-> `obs-stream-metadata-purge` (us-east1) aún apunta a la URL anterior;
-> al recrear o editar el job, usar la URL vigente DOCUMENTADA arriba.
-> Re-verificación en vivo: PENDIENTE en esta sesión.
+> DRIFT 2026-10-24 [D histórico, informe gcp-stream-metadata de sesión
+> anterior con los dos comandos exactos citados en `docs/VALIDATION.md`;
+> no re-verificado hoy]: ese informe reportaba que el job existente
+> `obs-stream-metadata-purge` (us-east1) apuntaba a la URL anterior.
+> [P] URL a usar en futura edición pendiente hasta reconciliar
+> discrepancia; ver bloque canónico T-076/DRIFT. Destino actual del job
+> y estado operativo actual pendientes de re-verificación en vivo [P].
 Sin `OPS_PURGE_TOKEN`
 montado, el endpoint responde `500 purge not configured` (fail-closed).
 Rate-limit propio `ops: 10/min`. Ejecución manual (solo DBs de prueba o

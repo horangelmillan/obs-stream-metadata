@@ -77,6 +77,29 @@ extensión); rutas evaluadas como relativas a la raíz según los
 ejemplos oficiales (sin prueba de edición real en esta sesión);
 `ask` en subagentes equivale a bloqueo.
 
+`release-tooling` [C] (`opencode debug agents`, 2026-10-24): subagente
+de herramientas de publicación; modifica `tools/deploy.ps1`, no lo
+ejecuta. `edit`: `*`→deny + `tools/deploy.ps1`→allow exacto (sin
+`tools/**`); `read`: `*`→allow + secretos idénticos a especialistas
+(`dev.env`, `*.env`, `*.env.*`, `*.envrc`, `*.key/.pem/.p12`,
+`*token*/*secret*` en `.json/.txt/.yaml/.yml/.key`,
+`credentials.json/.yaml/.yml`, `*credential*`, `client_secret*`→deny;
+`*.env.example`→allow); `bash`: `*`→ask + `git status/diff/log/
+rev-parse/branch`→allow y `commit/push/merge/rebase/reset/clean/
+checkout`, `gh`, `gcloud`, `curl`, `Invoke-WebRequest`, `npm/npx`→deny;
+`glob/grep/list`→allow; `webfetch`→allow; `websearch`→deny (docs vía
+`context7`); `question/browser`→deny; `subagent`: `*`→deny (sin
+delegación anidada). `skill`: `*`→deny +
+`project-harness-governance`→allow (única verificada en
+`.agents/skills/`, 2026-10-24). MCP lectura: `context7_resolve-
+library-id/query-docs` + `codebase-memory_search_graph/trace_path/
+query_graph/get_graph_schema/search_code/get_code_snippet`→allow;
+resto `codebase-memory_*`, `github_*`, `playwright_*`, `eslint_*`,
+`chrome-devtools_*`→deny. Orquestador lo invoca vía
+`subagent: release-tooling: allow` (sin regla `task`: el runtime la
+ignora). Límites: sin ejecución, despliegues, red/producción ni Git
+mutante.
+
 ## Skills (solo si aportan; compatibles con el proyecto)
 
 - Siempre: `ponytail` (full) + `clean-code` — YAGNI, stdlib antes que dependencia, diff mínimo.
@@ -92,3 +115,8 @@ ejemplos oficiales (sin prueba de edición real en esta sesión);
 - Lectura: `read`/`glob`/`grep`; `bash` solo para comandos de sistema (git, gh) o cómputo puntual.
 - Edición: `read` antes de `edit`; `oldString` mínimo; verificar región editada.
 - Destructivos: requieren autorización explícita del usuario.
+- Rutas excluidas (`staging/`, `dev.env`): no inspeccionar contenido;
+  evidencia solo según Skill (`project-harness-governance` §3) y
+  `AGENTS.md` §55.10.
+- Estado operativo (Scheduler): `/health`, `/ready`, `/version` no
+  sustituyen la evidencia del propio job (`AGENTS.md` §55.11).
