@@ -1,0 +1,24 @@
+# T-078 fase A — config mínima de lab (throwaway). SIN forwards reales a Meta.
+# RTMP :1935, Control API en 127.0.0.1:9997, path "live" con source publisher.
+# Todo lo demás apagado para superficie mínima.
+logLevel: info
+logDestinations: [stdout]
+
+api: true
+apiAddress: 127.0.0.1:9997
+
+metrics: false
+pprof: false
+playback: false
+
+rtsp: false
+rtmp: true
+rtmpAddress: :1935
+hls: false
+webrtc: false
+srt: false
+moq: false
+
+paths:
+  live:
+    source: publisher
