@@ -132,6 +132,25 @@ def _meta_subcode(payload) -> int:
         return 0
 
 
+def _meta_message(payload) -> str:
+    """Mensaje Meta de un error Graph ("" si ausente).
+
+    Forma Graph: {"error": {"message": ...}}; algunos transportes
+    aplanan a {"message": ...}. Se acepta anidado o plano.
+    """
+    if not isinstance(payload, dict):
+        return ""
+    err = payload.get("error", {})
+    if isinstance(err, dict) and "message" in err:
+        msg = err["message"]
+        return str(msg) if isinstance(msg, str) else (
+            str(msg) if msg is not None else "")
+    msg = payload.get("message", "")
+    if isinstance(msg, str):
+        return msg
+    return str(msg) if msg is not None else ""
+
+
 def classify_facebook_error(payload: dict, status: int) -> AppError:
     """Mapeo errores Meta -> modelo backend (detalle solo en logs)."""
     code = _meta_code(payload)
@@ -143,6 +162,9 @@ def classify_facebook_error(payload: dict, status: int) -> AppError:
                         "facebook:not-manageable:33")
     if code == 190:
         return AppError(ErrorCode.SESSION_EXPIRED, "facebook:auth-expired")
+    if "persistent stream key" in _meta_message(payload).lower():
+        return AppError(ErrorCode.PROVIDER_REJECTED,
+                        "facebook:persistent-key-not-allowed")
     if code in (1363120, 1363144):
         # Elegibilidad: cuenta <60 dias / Page <100 seguidores.
         return AppError(ErrorCode.AUTHORIZATION, f"facebook:eligibility:{code}")
@@ -311,33 +333,123 @@ class FacebookProvider(OAuthProvider):
         return out
 
     def get_live_status(self, access_token: str, live_id: str) -> dict:
-        """GET /{live-video-id}?fields=id,title,description,status.
+        """GET /{live-video-id}?fields=id,title,description,status,privacy.
 
         Base del indicador en-vivo FB-4 (D7). Sin polling: solo a
-        peticion del dock (Refresh/Apply).
+        peticion del dock (Refresh/Apply). `privacy` se normaliza a
+        string (`{"value": ...}` o string directo; `""` si ausente) para
+        que el dock distinga fallo de lectura (excepcion) de audiencia
+        ausente (`""` -> "audiencia no verificada").
+
+        Fallback minimo ante fallo por `privacy`: si el intento con
+        `privacy` falla (`status != 200` o `"error"` en body) se hace
+        UNA sola relectura del MISMO ID sin `privacy`. Si funciona se
+        retorna `privacy=""` + `privacy_fallback=True` (sin reutilizar
+        privacy previa); si tambien falla se eleva el error del
+        segundo intento. Exito del intento 1 -> `privacy_fallback=False`.
         """
+
+        def _privacy_of(resp: dict) -> str:
+            raw_privacy = resp.get("privacy", "")
+            if isinstance(raw_privacy, dict):
+                return str(raw_privacy.get("value", "") or "")
+            if isinstance(raw_privacy, str):
+                return raw_privacy
+            return ""
+
+        def _ok(resp) -> bool:
+            return isinstance(resp, dict) and "error" not in resp
+
         live_id = (live_id or "").strip()
         if not live_id:
             raise AppError(ErrorCode.INVALID_REQUEST, "live video required")
         url = (f"{GRAPH_URL}/{live_id}?" + urllib.parse.urlencode(
-            {"fields": "id,title,description,status"}))
+            {"fields": "id,title,description,status,privacy"}))
         status, resp = _graph("GET", url, access_token, None,
                               self._transport)
-        if status != 200 or "error" in resp:
-            raise classify_facebook_error(resp, status)
-        return {"id": str(resp.get("id", live_id)),
-                "title": str(resp.get("title", "")),
-                "description": str(resp.get("description", "")),
-                "status": str(resp.get("status", ""))}
+        if status == 200 and _ok(resp):
+            return {"id": str(resp.get("id", live_id)),
+                    "title": str(resp.get("title", "")),
+                    "description": str(resp.get("description", "")),
+                    "status": str(resp.get("status", "")),
+                    "privacy": _privacy_of(resp),
+                    "privacy_fallback": False}
+        url2 = (f"{GRAPH_URL}/{live_id}?" + urllib.parse.urlencode(
+            {"fields": "id,title,description,status"}))
+        status2, resp2 = _graph("GET", url2, access_token, None,
+                                self._transport)
+        if status2 != 200 or not _ok(resp2):
+            raise classify_facebook_error(
+                resp2 if isinstance(resp2, dict) else {}, status2)
+        return {"id": str(resp2.get("id", live_id)),
+                "title": str(resp2.get("title", "")),
+                "description": str(resp2.get("description", "")),
+                "status": str(resp2.get("status", "")),
+                "privacy": "",
+                "privacy_fallback": True}
+
+    def find_active_live_video(self, access_token: str) -> dict:
+        """Adopta el LiveVideo en vivo actual (solo lectura, sin escribir).
+
+        GET /me/live_videos?fields=id,title,status&limit=25; filtra
+        status normalizado (upper/trim) en {"LIVE", "LIVE_NOW"}.
+        Contrato outcome (coherente con `list_resources` que retorna
+        vacio en vez de fallar): exactamente uno -> adopted True;
+        cero -> adopted False no-active-live; varios -> adopted False
+        ambiguous con candidates [{id,title}] (sin secretos/URLs/keys,
+        sin ingestion); fallo de transporte/proveedor (status != 200
+        o "error" en body) -> eleva `classify_facebook_error`.
+        """
+        url = GRAPH_URL + "/me/live_videos?" + urllib.parse.urlencode(
+            {"fields": "id,title,status", "limit": "25"})
+        status, payload = _graph("GET", url, access_token, None,
+                                 self._transport)
+        if status != 200 or "error" in payload:
+            raise classify_facebook_error(payload, status)
+        live = []
+        for item in payload.get("data", []):
+            norm = str(item.get("status", "") or "").strip().upper()
+            if norm in ("LIVE", "LIVE_NOW"):
+                live.append(item)
+        if not live:
+            return {"adopted": False, "reason": "no-active-live",
+                    "count": 0}
+        if len(live) > 1:
+            return {"adopted": False,
+                    "reason": "ambiguous-active-live",
+                    "count": len(live),
+                    "candidates": [
+                        {"id": str(item.get("id", "")),
+                         "title": str(item.get("title", ""))}
+                        for item in live]}
+        item = live[0]
+        return {"adopted": True,
+                "id": str(item.get("id", "")),
+                "title": str(item.get("title", "")),
+                "status": str(item.get("status", ""))}
 
     def create_live_video(self, access_token: str, title: str,
-                          description: str = "", target: str = "") -> dict:
+                          description: str = "", target: str = "",
+                          persistent: bool = False) -> dict:
         """POST /{me|page}/live_videos (creación-por-dock, F-075).
 
         Via de producto ID-centrica: el dock crea su propio objeto y
         recuerda el ID (jamas el preview web H1). Limpieza con
         `delete_live_video` (F-075). Jamas `stream_title`/`snippet`/
         `channel_description`.
+
+        Ingestion por evento (por defecto, `persistent=False`): la ruta
+        de ingesta vive y muere con el objeto creado. Ruta persistente
+        (`persistent=True` -> `persistent_stream_key_status="ENABLE"`):
+        via de ingesta separada reutilizable; no implica Aitum ni
+        multistream, solo la llave del objeto propio.
+
+        PoC ingestión (excepción acotada §23/§51): si Meta devuelve
+        `secure_stream_url` se reenvia TAL CUAL en el dict retornado,
+        SOLO en memoria/transit durante la creacion. No persistir (ni
+        stores/DB/disco), no loguear, no dividir en server/key: el
+        plugin muestra/copia el valor completo. `stream_url` plano
+        jamas se expone.
         """
         title = str(title or "")
         if not (1 <= len(title) <= FB_TITLE_MAX):
@@ -351,7 +463,10 @@ class FacebookProvider(OAuthProvider):
         payload: dict = {"title": title}
         if description:
             payload["description"] = description
+        payload["status"] = "UNPUBLISHED"
         payload["privacy"] = {"value": "EVERYONE"}
+        if persistent is True:
+            payload["persistent_stream_key_status"] = "ENABLE"
         url = f"{GRAPH_URL}/{target}/live_videos"
         status, resp = _graph("POST", url, token, payload,
                               self._transport)
@@ -361,7 +476,13 @@ class FacebookProvider(OAuthProvider):
         if not new_id:
             raise AppError(ErrorCode.PROVIDER_REJECTED,
                            "facebook:no-live-id")
-        return {"id": new_id, "title": title, "description": description}
+        out: dict = {"id": new_id, "title": title,
+                     "description": description,
+                     "persistent_requested": bool(persistent is True)}
+        secure = str(resp.get("secure_stream_url", "") or "")
+        if secure:
+            out["secure_stream_url"] = secure
+        return out
 
     def end_live_video(self, access_token: str, live_id: str) -> dict:
         """POST /{live-video-id}?end_live_video=true -> VOD (D7 OFF)."""
@@ -414,7 +535,9 @@ class FacebookProvider(OAuthProvider):
 
         FB-4 sin cambios de routing: `op` dispatcha el ciclo de vida
         sobre la ruta generica POST /metadata/facebook:
-        update (defecto) / status / create / go_live / end / delete.
+        update (defecto) / status / create / go_live / end / delete /
+        adopt (solo lectura: reutiliza el LiveVideo en vivo actual y
+        retorna su outcome tal cual, sin envolver).
         """
         data = data or {}
         op = str(data.get("op", "update") or "update").strip().lower()
@@ -422,10 +545,22 @@ class FacebookProvider(OAuthProvider):
             live_id = str(data.get("live_video_id", "") or "").strip()
             return self.get_live_status(access_token, live_id)
         if op == "create":
+            raw = data.get("persistent", False)
+            if raw is True:
+                persistent = True
+            elif isinstance(raw, bool):
+                persistent = False
+            elif isinstance(raw, int):
+                persistent = (raw == 1)
+            elif isinstance(raw, str):
+                persistent = raw in ("1", "true", "True")
+            else:
+                persistent = False
             return self.create_live_video(
                 access_token, str(data.get("title", "") or ""),
                 data.get("description", ""),
-                str(data.get("target", "") or "").strip())
+                str(data.get("target", "") or "").strip(),
+                persistent)
         if op in ("go_live", "golive", "live"):
             live_id = str(data.get("live_video_id", "") or "").strip()
             return self._go_live(access_token, live_id)
@@ -435,6 +570,8 @@ class FacebookProvider(OAuthProvider):
         if op == "delete":
             live_id = str(data.get("live_video_id", "") or "").strip()
             return self.delete_live_video(access_token, live_id)
+        if op == "adopt":
+            return self.find_active_live_video(access_token)
         if op != "update":
             raise AppError(ErrorCode.INVALID_REQUEST, "unknown op")
         live_id = str(data.get("live_video_id", "") or "").strip()
