@@ -11,6 +11,8 @@ Wire formats mirror the P3-validated ones (F-020, F-021, F-023).
 
 #pragma once
 
+#include <QJsonValue>
+#include <QList>
 #include <QString>
 #include <QStringList>
 
@@ -112,6 +114,19 @@ QString fbEligibilityMessage(int metaCode);
 enum class FbLiveState { Unknown, Preview, Live, Ended };
 FbLiveState fbLiveState(const QString &status);
 QString fbLiveStateLabel(FbLiveState s);
+// Adopt explicito (solo lectura): normaliza status (trim+upper);
+// LIVE/LIVE_NOW cuentan; exactamente uno -> ok+id; cero -> no-active;
+// varios -> ambiguous; vacios ignorados. Puro QtCore, sin I/O/logs/red.
+struct FbLiveItem {
+	QString id;
+	QString status;
+};
+struct FbAdoptResult {
+	bool ok = false;
+	QString id;
+	QString reason; // "", "no-active" o "ambiguous"
+};
+FbAdoptResult facebookAdoptActive(const QList<FbLiveItem> &items);
 // T-071 FB-2: scopes minimos (D3). Perfil -> publish_video; Page ->
 // pages_manage_posts + pages_read_engagement + pages_show_list.
 // Jamas publish_to_groups/email.
@@ -121,6 +136,23 @@ QStringList fbRequiredScopes(bool page);
 QString facebookAuthUrl(const QString &clientId, const QString &redirectUri,
 			const QString &state, const QString &scope,
 			const QString &challenge);
+// Verificacion previa a GoLive (puro, sin I/O): la audiencia solo se da
+// por verificada con privacy EVERYONE devuelta por la API; "" nunca es
+// exito. dict {"value":X} -> X trim; string -> trim; resto -> "".
+QString facebookPrivacyValue(const QJsonValue &v);
+enum class FbVerify { Verified, AudienceUnverified, Blocked };
+struct FbVerifyResult {
+	FbVerify outcome;
+	QString reason;
+};
+// Exacto y case-sensitive en status ("UNPUBLISHED"); titulo/descripcion
+// exactos contra lo enviado al crear; EVERYONE case-insensitive.
+FbVerifyResult facebookVerifyPrepared(const QString &expTitle,
+				     const QString &expDesc,
+				     const QString &actTitle,
+				     const QString &actDesc,
+				     const QString &actStatus,
+				     const QString &actPrivacy);
 
 // User-facing message. Never leaks JSON, headers, tokens or URLs (§16).
 QString userMessage(Outcome o, Platform p);

@@ -10,6 +10,7 @@
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonValue>
 #include <QTemporaryDir>
 #include <cstdio>
 
@@ -884,6 +885,199 @@ int main(int argc, char **argv)
 		      "fb-store-clear");
 	}
 #endif
+
+	// Verificacion previa a GoLive (pura, sin red/UI). La audiencia
+	// solo se verifica con privacy EVERYONE devuelta por la API.
+	{
+		using meta::FbVerify;
+		QJsonObject pd;
+		pd[QStringLiteral("value")] =
+			QStringLiteral("  EVERYONE  ");
+		CHECK(meta::facebookPrivacyValue(QJsonValue(pd)) ==
+			      QStringLiteral("EVERYONE"),
+		      "fbpriv-dict-trim");
+		CHECK(meta::facebookPrivacyValue(QJsonValue(
+				QStringLiteral(" everyone "))) ==
+			      QStringLiteral("everyone"),
+		      "fbpriv-str-trim");
+		CHECK(meta::facebookPrivacyValue(QJsonValue(42)).isEmpty() &&
+			      meta::facebookPrivacyValue(QJsonValue())
+				      .isEmpty(),
+		      "fbpriv-other-empty");
+		CHECK(meta::facebookVerifyPrepared(
+				QStringLiteral("T"), QStringLiteral("D"),
+				QStringLiteral("T"), QStringLiteral("D"),
+				QStringLiteral("UNPUBLISHED"),
+				QStringLiteral("EVERYONE"))
+			      .outcome == FbVerify::Verified,
+		      "fbverify-ok");
+		CHECK(meta::facebookVerifyPrepared(
+				QStringLiteral("T"), QStringLiteral("D"),
+				QStringLiteral("T"), QStringLiteral("D"),
+				QStringLiteral("UNPUBLISHED"),
+				meta::facebookPrivacyValue(QJsonValue(pd)))
+			      .outcome == FbVerify::Verified,
+		      "fbverify-dict-everyone");
+		CHECK(meta::facebookVerifyPrepared(
+				QStringLiteral("T"), QStringLiteral("D"),
+				QStringLiteral("T"), QStringLiteral("D"),
+				QStringLiteral("UNPUBLISHED"),
+				QStringLiteral("everyone"))
+			      .outcome == FbVerify::Verified,
+		      "fbverify-case-insensitive");
+		{
+			const meta::FbVerifyResult r =
+				meta::facebookVerifyPrepared(
+					QStringLiteral("T"),
+					QStringLiteral("D"),
+					QStringLiteral("T"),
+					QStringLiteral("D"),
+					QStringLiteral("UNPUBLISHED"),
+					QString());
+			CHECK(r.outcome ==
+				      FbVerify::AudienceUnverified &&
+			      r.reason ==
+				      QStringLiteral("privacy-unverified"),
+			      "fbverify-no-privacy");
+		}
+		{
+			const meta::FbVerifyResult r =
+				meta::facebookVerifyPrepared(
+					QStringLiteral("T"),
+					QStringLiteral("D"),
+					QStringLiteral("T"),
+					QStringLiteral("D"),
+					QStringLiteral("UNPUBLISHED"),
+					QStringLiteral("SELF"));
+			CHECK(r.outcome ==
+				      FbVerify::AudienceUnverified &&
+			      r.reason ==
+				      QStringLiteral("privacy-not-public"),
+			      "fbverify-privacy-other");
+		}
+		{
+			const meta::FbVerifyResult r =
+				meta::facebookVerifyPrepared(
+					QStringLiteral("T"),
+					QStringLiteral("D"),
+					QStringLiteral("T"),
+					QStringLiteral("D"), QString(),
+					QStringLiteral("EVERYONE"));
+			CHECK(r.outcome == FbVerify::Blocked &&
+			      r.reason ==
+				      QStringLiteral("status-missing"),
+			      "fbverify-status-missing");
+		}
+		CHECK(meta::facebookVerifyPrepared(
+				QStringLiteral("T"), QStringLiteral("D"),
+				QStringLiteral("T"), QStringLiteral("D"),
+				QStringLiteral("LIVE"),
+				QStringLiteral("EVERYONE"))
+			      .outcome == FbVerify::Blocked,
+		      "fbverify-status-live");
+		CHECK(meta::facebookVerifyPrepared(
+				QStringLiteral("T"), QStringLiteral("D"),
+				QStringLiteral("T"), QStringLiteral("D"),
+				QStringLiteral("unpublished"),
+				QStringLiteral("EVERYONE"))
+			      .outcome == FbVerify::Blocked,
+		      "fbverify-status-case");
+		{
+			const meta::FbVerifyResult r =
+				meta::facebookVerifyPrepared(
+					QStringLiteral("T"),
+					QStringLiteral("D"),
+					QStringLiteral("X"),
+					QStringLiteral("D"),
+					QStringLiteral("UNPUBLISHED"),
+					QStringLiteral("EVERYONE"));
+			CHECK(r.outcome == FbVerify::Blocked &&
+			      r.reason == QStringLiteral("mismatch"),
+			      "fbverify-title-mismatch");
+		}
+		{
+			const meta::FbVerifyResult r =
+				meta::facebookVerifyPrepared(
+					QStringLiteral("T"),
+					QStringLiteral("D"),
+					QStringLiteral("T"),
+					QStringLiteral("X"),
+					QStringLiteral("UNPUBLISHED"),
+					QStringLiteral("EVERYONE"));
+			CHECK(r.outcome == FbVerify::Blocked &&
+			      r.reason == QStringLiteral("mismatch"),
+			      "fbverify-desc-mismatch");
+		}
+	}
+
+	// Adopt explicito (puro, sin red): LIVE/LIVE_NOW cuentan (trim+upper);
+	// exactamente uno -> ok; cero -> no-active; varios -> ambiguous.
+	{
+		using meta::FbAdoptResult;
+		using meta::FbLiveItem;
+		CHECK(meta::facebookAdoptActive(
+			      {FbLiveItem{QStringLiteral("A1"),
+					  QStringLiteral("LIVE")},
+			       FbLiveItem{QStringLiteral("A2"),
+					  QStringLiteral("VOD")}})
+			      .ok,
+		      "adopt-single-live");
+		{
+			const FbAdoptResult r =
+				meta::facebookAdoptActive(
+					{FbLiveItem{QStringLiteral("B1"),
+						    QStringLiteral(
+							    " live_now ")}});
+			CHECK(r.ok && r.id == QStringLiteral("B1") &&
+				      r.reason.isEmpty(),
+			      "adopt-live-now-spaces");
+		}
+		{
+			const FbAdoptResult r =
+				meta::facebookAdoptActive(
+					{FbLiveItem{QStringLiteral("C1"),
+						    QStringLiteral("VOD")},
+					 FbLiveItem{QStringLiteral("C2"),
+						    QStringLiteral(
+							    "UNPUBLISHED")}});
+			CHECK(!r.ok && r.id.isEmpty() &&
+				      r.reason ==
+					      QStringLiteral("no-active"),
+			      "adopt-zero-no-active");
+		}
+		{
+			const FbAdoptResult r =
+				meta::facebookAdoptActive(
+					{FbLiveItem{QStringLiteral("D1"),
+						    QStringLiteral("LIVE")},
+					 FbLiveItem{QStringLiteral("D2"),
+						    QStringLiteral(
+							    "live_now")}});
+			CHECK(!r.ok && r.id.isEmpty() &&
+				      r.reason ==
+					      QStringLiteral("ambiguous"),
+			      "adopt-multi-ambiguous");
+		}
+		{
+			// Ids vacios ignorados (no cuentan ni como LIVE).
+			const FbAdoptResult r =
+				meta::facebookAdoptActive(
+					{FbLiveItem{QString(), QStringLiteral(
+								      "LIVE")},
+					 FbLiveItem{QStringLiteral("  "),
+						    QStringLiteral(
+							    "LIVE_NOW")},
+					 FbLiveItem{QStringLiteral("E1"),
+						    QStringLiteral("live")}});
+			CHECK(r.ok && r.id == QStringLiteral("E1"),
+			      "adopt-empty-ignored");
+		}
+		CHECK(meta::facebookAdoptActive(
+			      {FbLiveItem{QStringLiteral("F1"),
+					  QStringLiteral("Live")}})
+			      .ok,
+		      "adopt-case-insensitive");
+	}
 
 	std::printf("SELFCHECK OK\n");
 	return 0;

@@ -11,7 +11,9 @@ secrets in memory + DPAPI-encrypted store, never plaintext/printed/logged.
 #include <plugin-support.h>
 #include <util/bmem.h>
 
+#include <QApplication>
 #include <QCheckBox>
+#include <QClipboard>
 #include <QComboBox>
 #include <QCryptographicHash>
 #include <QDesktopServices>
@@ -379,10 +381,20 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 	fbStateLabel_ = new QLabel(tr("Status: —"), fbDetail_);
 	fbStateLabel_->setWordWrap(true);
 	fbDetailLayout->addWidget(fbStateLabel_);
+	fbVerifyLabel_ = new QLabel(tr("Verification: —"), fbDetail_);
+	fbVerifyLabel_->setWordWrap(true);
+	fbDetailLayout->addWidget(fbVerifyLabel_);
 	fbStatusButton_ =
 		new QPushButton(tr("Check live status"), fbDetail_);
 	connect(fbStatusButton_, &QPushButton::clicked, this,
 		&MetadataDock::onFbStatus);
+	fbAdoptButton_ =
+		new QPushButton(tr("Adopt active live"), fbDetail_);
+	fbAdoptButton_->setToolTip(
+		tr("Binds the single LIVE video on your profile (e.g. "
+		   "started via persistent key). Never changes Aitum."));
+	connect(fbAdoptButton_, &QPushButton::clicked, this,
+		&MetadataDock::onFbAdopt);
 	fbCreateButton_ =
 		new QPushButton(tr("Create live video (dock)"), fbDetail_);
 	fbCreateButton_->setToolTip(
@@ -406,10 +418,37 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 	connect(fbDeleteButton_, &QPushButton::clicked, this,
 		&MetadataDock::onFbDelete);
 	fbDetailLayout->addWidget(fbStatusButton_);
+	fbDetailLayout->addWidget(fbAdoptButton_);
 	fbDetailLayout->addWidget(fbCreateButton_);
 	fbDetailLayout->addWidget(fbGoLiveButton_);
 	fbDetailLayout->addWidget(fbEndButton_);
 	fbDetailLayout->addWidget(fbDeleteButton_);
+	// PoC ingestión: valor completo del create, oculto por defecto
+	// (Password + oculto hasta haber valor). Solo sesión, sin
+	// persistencia; el operador lo pega a mano en Aitum (§23/§51).
+	fbIngestLabel_ = new QLabel(
+		tr("Ingest URL (session only — paste into Aitum manually)"),
+		fbDetail_);
+	fbIngestLabel_->setWordWrap(true);
+	fbIngestEdit_ = new QLineEdit(fbDetail_);
+	fbIngestEdit_->setReadOnly(true);
+	fbIngestEdit_->setEchoMode(QLineEdit::Password);
+	fbIngestEdit_->setPlaceholderText(
+		tr("Shown only after creating a live video"));
+	fbIngestShowButton_ = new QPushButton(tr("Show"), fbDetail_);
+	connect(fbIngestShowButton_, &QPushButton::clicked, this,
+		&MetadataDock::onFbIngestToggled);
+	fbIngestCopyButton_ = new QPushButton(tr("Copy"), fbDetail_);
+	connect(fbIngestCopyButton_, &QPushButton::clicked, this,
+		&MetadataDock::onFbIngestCopy);
+	fbDetailLayout->addWidget(fbIngestLabel_);
+	fbDetailLayout->addWidget(fbIngestEdit_);
+	fbDetailLayout->addWidget(fbIngestShowButton_);
+	fbDetailLayout->addWidget(fbIngestCopyButton_);
+	fbIngestLabel_->setVisible(false);
+	fbIngestEdit_->setVisible(false);
+	fbIngestShowButton_->setVisible(false);
+	fbIngestCopyButton_->setVisible(false);
 
 	// Twitch device-flow prompt lives inside the Twitch card detail
 	// (same show/hide call sites as before).
@@ -512,6 +551,8 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 
 MetadataDock::~MetadataDock()
 {
+	// PoC ingestión: memoria de sesión, se olvida al cerrar.
+	fbIngest_.clear();
 	delete store_;
 	store_ = nullptr;
 }
@@ -726,8 +767,12 @@ void MetadataDock::refreshContentVisibility()
 	// Sin conexion no hay ID que leer/crear/publicar/terminar/borrar.
 	if (fbStateLabel_)
 		fbStateLabel_->setVisible(fb);
+	if (fbVerifyLabel_)
+		fbVerifyLabel_->setVisible(fb);
 	if (fbStatusButton_)
 		fbStatusButton_->setVisible(fb);
+	if (fbAdoptButton_)
+		fbAdoptButton_->setVisible(fb);
 	if (fbCreateButton_)
 		fbCreateButton_->setVisible(fb);
 	if (fbGoLiveButton_)
@@ -736,6 +781,17 @@ void MetadataDock::refreshContentVisibility()
 		fbEndButton_->setVisible(fb);
 	if (fbDeleteButton_)
 		fbDeleteButton_->setVisible(fb);
+	// PoC ingestión: solo con sesión Y valor en memoria (oculta por
+	// defecto; jamas en disco ni logs).
+	const bool showIngest = fb && !fbIngest_.isEmpty();
+	if (fbIngestLabel_)
+		fbIngestLabel_->setVisible(showIngest);
+	if (fbIngestEdit_)
+		fbIngestEdit_->setVisible(showIngest);
+	if (fbIngestShowButton_)
+		fbIngestShowButton_->setVisible(showIngest);
+	if (fbIngestCopyButton_)
+		fbIngestCopyButton_->setVisible(showIngest);
 	// T-073 FB-4 (F-086): Connect solo sin sesion, Disconnect solo con
 	// sesion, en las cuatro tarjetas y en ambos modos (usable == connected
 	// en el modo activo). Evita flujos con conflicto (p. ej. Disconnect
@@ -855,6 +911,11 @@ bool MetadataDock::eventFilter(QObject *watched, QEvent *event)
 // bounded lifecycle). Stored accounts are never wiped, nothing revoked.
 void MetadataDock::cancelPendingForModeSwitch()
 {
+	// PoC ingestión: el valor pertenece al contexto anterior; al
+	// cambiar de modo se olvida (sesión, sin persistencia).
+	clearFbIngest();
+	// La verificacion tambien pertenece al contexto anterior.
+	clearFbVerify();
 	if (managedPollTimer_)
 		managedPollTimer_->stop();
 	twPollsLeft_ = 0; // onTwitchPollTimeout re-checks pending_/count
@@ -880,10 +941,12 @@ void MetadataDock::cancelPendingForModeSwitch()
 	case Op::FbList:
 	case Op::FbRead:
 	case Op::FbStatus:
+	case Op::FbStatusRetry:
 	case Op::FbCreate:
 	case Op::FbGoLive:
 	case Op::FbEnd:
 	case Op::FbDelete:
+	case Op::FbAdopt:
 		pending_ = Op::None;
 		devicePrompt_->setVisible(false);
 		// Repaint from the real state: a finished connection was
@@ -1280,6 +1343,11 @@ void MetadataDock::onDisconnectManaged(meta::Platform p)
 	m.connected = false;
 	m.userId.clear();
 	m.display.clear();
+	// PoC ingestión: memoria de sesión, se olvida al desconectar.
+	if (p == meta::Platform::Facebook) {
+		clearFbIngest();
+		clearFbVerify();
+	}
 	setStatus(p, tr("Not connected"));
 	setResult(p, true, tr("disconnected"));
 	saveStore(); // drop the snapshot; Independent records untouched
@@ -1340,6 +1408,9 @@ void MetadataDock::onEraseManagedData()
 						  tr("data erased"));
 				}
 				broadcastCombo_->clear();
+				// PoC ingestión: borrado total Managed también
+				// olvida la URL de sesión.
+				clearFbIngest();
 				// La fila installation ya no existe en el
 				// backend: el secreto local queda huérfano y
 				// debe caer (próximo connect = bootstrap
@@ -2092,6 +2163,11 @@ void MetadataDock::wipeLocal(meta::Platform p)
 		// (el objeto Meta sigue existiendo; ID-centrico F-075). Solo
 		// se limpian credenciales/targets en memoria; el combo y el
 		// ID persistido sobreviven para reconectar.
+		// PoC ingestión: el secure_stream_url SÍ se olvida siempre
+		// (solo sesión, jamás persistido).
+		clearFbIngest();
+		// La verificacion es de sesion: muere con la conexion.
+		clearFbVerify();
 		fbTargetCombo_->clear();
 		fbPageTokens_.clear();
 		fbTarget_.clear();
@@ -2707,6 +2783,200 @@ void MetadataDock::setFbState(const QString &status)
 		dot, status.isEmpty() ? QStringLiteral("—") : status));
 }
 
+void MetadataDock::setFbVerifyLabel(const QString &text)
+{
+	if (fbVerifyLabel_)
+		fbVerifyLabel_->setText(text);
+}
+
+void MetadataDock::clearFbVerify()
+{
+	fbExpectedTitle_.clear();
+	fbExpectedDesc_.clear();
+	fbVerifyId_.clear();
+	fbLastPrivacy_.clear();
+	fbGoLiveConfirm_ = false;
+	fbVerify_ = {meta::FbVerify::Blocked,
+		     QStringLiteral("not-verified")};
+	setFbVerifyLabel(tr("Verification: —"));
+}
+
+// Cambio A: sincroniza la referencia con lo ENVIADO en un update
+// exitoso para el MISMO liveId (el de la request, no otro). Si la
+// respuesta trae lectura autoritativa se prefiere (la elige el
+// llamante); si no, los enviados. Deja verificacion pendiente:
+// Blocked write-accepted + etiqueta, jamas Verified aqui. Un mismatch
+// real posterior sigue bloqueando en la siguiente lectura. Sin red,
+// sin secretos, sin valores en logs; secure_stream_url intacto.
+void MetadataDock::noteFbUpdated(const QString &liveId,
+				 const QString &title, const QString &desc)
+{
+	if (liveId.isEmpty())
+		return;
+	fbExpectedTitle_ = title;
+	fbExpectedDesc_ = desc;
+	fbVerifyId_ = liveId;
+	fbLastPrivacy_.clear();
+	fbVerify_ = {meta::FbVerify::Blocked,
+		     QStringLiteral("write-accepted")};
+	setFbVerifyLabel(
+		tr("Updated — press Check live status to verify before "
+		   "Go live."));
+}
+
+// Cambio B: la relectura encadenada tras go_live manda. Solo el estado
+// LIVE leido (LIVE/LIVE_NOW) afirma publicado; otro estado queda no
+// confirmado y sigue bloqueado (reintentar exige nueva verificacion).
+void MetadataDock::reportFbGoLiveObserved(const QString &status)
+{
+	fbGoLiveConfirm_ = false;
+	setFbState(status);
+	if (meta::fbLiveState(status) == meta::FbLiveState::Live) {
+		generalMsg_->setText(tr("Facebook is LIVE."));
+	} else {
+		generalMsg_->setText(
+			tr("Facebook go-live not confirmed (status=%1) — "
+			   "still blocked; verify again before retrying.")
+				.arg(status.isEmpty() ? tr("unknown")
+						     : status));
+	}
+}
+
+void MetadataDock::runFbVerification(const QString &id,
+				     const QString &actTitle,
+				     const QString &actDesc,
+				     const QString &actStatus,
+				     const QString &actPrivacy)
+{
+	const QString rid = id.trimmed();
+	// Solo el video pendiente del ultimo create se verifica contra su
+	// expected; cualquier otro ID es solo lectura (sin marcar preparado).
+	if (!rid.isEmpty() && !fbVerifyId_.isEmpty() &&
+	    rid == fbVerifyId_ && !fbExpectedTitle_.isEmpty()) {
+		fbVerify_ = meta::facebookVerifyPrepared(
+			fbExpectedTitle_, fbExpectedDesc_, actTitle,
+			actDesc, actStatus, actPrivacy);
+		fbVerifyId_ = rid;
+		fbLastPrivacy_ = actPrivacy;
+		if (fbVerify_.outcome == meta::FbVerify::Verified) {
+			setFbVerifyLabel(
+				tr("Prepared UNPUBLISHED ✓ / title ✓ / "
+				   "desc ✓ / audience %1 ✓")
+					.arg(actPrivacy));
+		} else if (fbVerify_.outcome ==
+			   meta::FbVerify::AudienceUnverified) {
+			if (actPrivacy.isEmpty())
+				setFbVerifyLabel(tr("Audience unverified "
+						    "(privacy not returned)"));
+			else
+				setFbVerifyLabel(
+					tr("Audience unverified (privacy=%1, "
+					   "expected EVERYONE)")
+						.arg(actPrivacy));
+		} else if (fbVerify_.reason ==
+			   QStringLiteral("status-missing")) {
+			setFbVerifyLabel(tr("Blocked: status missing"));
+		} else if (fbVerify_.reason ==
+			   QStringLiteral("status-not-unpublished")) {
+			setFbVerifyLabel(
+				tr("Blocked: status=%1 (expected UNPUBLISHED)")
+					.arg(actStatus));
+		} else {
+			setFbVerifyLabel(
+				tr("Blocked: title/description mismatch"));
+		}
+		return;
+	}
+	if (fbVerifyId_.isEmpty() && fbExpectedTitle_.isEmpty()) {
+		// Lectura sin expected (ID pegado antiguo): valores reales,
+		// sin marcar preparado; audiencia ausente nunca es exito.
+		fbVerify_ = {meta::FbVerify::Blocked,
+			     QStringLiteral("no-expected")};
+		fbLastPrivacy_ = actPrivacy;
+		const QString st =
+			actStatus.isEmpty() ? tr("unknown") : actStatus;
+		if (actPrivacy.isEmpty())
+			setFbVerifyLabel(
+				tr("Status %1 / audience not returned — not "
+				   "prepared.")
+					.arg(st));
+		else
+			setFbVerifyLabel(tr("Status %1 / audience %2 — not "
+					    "prepared.")
+						 .arg(st, actPrivacy));
+		return;
+	}
+	// Expected de otro video: solo lectura, verify intacto.
+	const QString st = actStatus.isEmpty() ? tr("unknown") : actStatus;
+	if (actPrivacy.isEmpty())
+		setFbVerifyLabel(tr("Status %1 / audience not returned (not "
+				    "the prepared video).")
+					 .arg(st));
+	else
+		setFbVerifyLabel(tr("Status %1 / audience %2 (not the "
+				    "prepared video).")
+					 .arg(st, actPrivacy));
+}
+
+// --- PoC ingestión (secure_stream_url del create, solo sesión) --------
+
+void MetadataDock::setFbIngest(const QString &url)
+{
+	// Sin logs ni persistencia: el valor vive en fbIngest_ y en el
+	// QLineEdit (Password) hasta disconnect/delete/mode-switch.
+	fbIngest_ = url;
+	if (fbIngestEdit_) {
+		fbIngestEdit_->setText(url);
+		fbIngestEdit_->setEchoMode(QLineEdit::Password);
+	}
+	if (fbIngestShowButton_)
+		fbIngestShowButton_->setText(tr("Show"));
+	refreshContentVisibility();
+}
+
+void MetadataDock::clearFbIngest()
+{
+	// Olvido directo (oculta sin refresh global: los llamantes ya
+	// están en transición de estado).
+	fbIngest_.clear();
+	if (fbIngestEdit_) {
+		fbIngestEdit_->clear();
+		fbIngestEdit_->setEchoMode(QLineEdit::Password);
+		fbIngestEdit_->setVisible(false);
+	}
+	if (fbIngestLabel_)
+		fbIngestLabel_->setVisible(false);
+	if (fbIngestShowButton_) {
+		fbIngestShowButton_->setText(tr("Show"));
+		fbIngestShowButton_->setVisible(false);
+	}
+	if (fbIngestCopyButton_)
+		fbIngestCopyButton_->setVisible(false);
+}
+
+void MetadataDock::onFbIngestToggled()
+{
+	if (!fbIngestEdit_ || !fbIngestShowButton_ ||
+	    fbIngest_.isEmpty())
+		return;
+	const bool showing =
+		fbIngestEdit_->echoMode() == QLineEdit::Normal;
+	fbIngestEdit_->setEchoMode(showing ? QLineEdit::Password
+					  : QLineEdit::Normal);
+	fbIngestShowButton_->setText(showing ? tr("Show") : tr("Hide"));
+}
+
+void MetadataDock::onFbIngestCopy()
+{
+	if (fbIngest_.isEmpty())
+		return;
+	if (QClipboard *cb = QApplication::clipboard())
+		cb->setText(fbIngest_);
+	// Sin valor en el mensaje ni en logs: confirmación genérica.
+	generalMsg_->setText(
+		tr("Copied — paste into Aitum manually"));
+}
+
 void MetadataDock::onFbStatus()
 {
 	const QString liveId = currentFbLiveId();
@@ -2763,14 +3033,59 @@ void MetadataDock::onFbGoLive()
 			meta::Outcome::NotFound, meta::Platform::Facebook));
 		return;
 	}
-	QMessageBox::StandardButton ok = QMessageBox::warning(
-		this, tr("Go live on Facebook"),
-		tr("This will PUBLISH the video %1 as LIVE_NOW, visible to "
-		   "its audience. Continue?")
-			.arg(liveId),
-		QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-	if (ok != QMessageBox::Yes)
+	// Gate previo a cualquier confirmacion u operacion remota. Reglas
+	// que se mantienen: mismo ID que el verificado, estado leido
+	// UNPUBLISHED y titulo/descripcion coincidentes. La lectura con
+	// fallo, otro estado, otro ID o mismatch siguen bloqueando.
+	// Excepcion con consentimiento: si fbVerify_ es AudienceUnverified
+	// SOLO por privacy ausente/vacia (Meta no devolvio privacy, resto
+	// ya verificado por construccion de facebookVerifyPrepared) se
+	// pide confirmacion explicita y, solo con Si, se envia go_live
+	// para ese MISMO ID por el camino existente (sin cambiar su
+	// payload). Privacy explicita distinta de EVERYONE sigue
+	// bloqueando. Sin LIVE_NOW en estos caminos.
+	if (fbVerifyId_.isEmpty() || liveId != fbVerifyId_) {
+		QString motive;
+		if (fbVerifyId_.isEmpty())
+			motive = tr("no verified video yet");
+		else
+			motive = tr("not the verified video");
+		generalMsg_->setText(
+			tr("Facebook: blocked — verify UNPUBLISHED + "
+			   "title/description/audience first."));
+		setFbVerifyLabel(tr("Blocked: %1").arg(motive));
 		return;
+	}
+	if (fbVerify_.outcome == meta::FbVerify::Verified) {
+		QMessageBox::StandardButton ok = QMessageBox::warning(
+			this, tr("Go live on Facebook"),
+			tr("This will PUBLISH the video %1 as LIVE_NOW, visible to "
+			   "its audience. Continue?")
+				.arg(liveId),
+			QMessageBox::Yes | QMessageBox::No,
+			QMessageBox::No);
+		if (ok != QMessageBox::Yes)
+			return;
+	} else if (fbVerify_.outcome ==
+			   meta::FbVerify::AudienceUnverified &&
+		   fbVerify_.reason ==
+			   QStringLiteral("privacy-unverified")) {
+		QMessageBox::StandardButton ok = QMessageBox::warning(
+			this, tr("Go live with unverified audience"),
+			tr("The audience could not be verified — Meta did not "
+			   "return privacy, so this broadcast might not be "
+			   "public. Continue?"),
+			QMessageBox::Yes | QMessageBox::No,
+			QMessageBox::No);
+		if (ok != QMessageBox::Yes)
+			return; // sin operacion remota, estado intacto
+	} else {
+		generalMsg_->setText(
+			tr("Facebook: blocked — verify UNPUBLISHED + "
+			   "title/description/audience first."));
+		setFbVerifyLabel(tr("Blocked: %1").arg(fbVerify_.reason));
+		return;
+	}
 	if (isManaged()) {
 		if (!managedAccount(meta::Platform::Facebook).connected) {
 			generalMsg_->setText(meta::userMessage(
@@ -2857,13 +3172,63 @@ void MetadataDock::onFbDelete()
 	startFbDeleteIndependent(liveId);
 }
 
-void MetadataDock::startFbStatusIndependent(const QString &liveId)
+// --- facebook adopt explicito (asocia la señal entrante al LiveVideo
+// correcto; jamas silencioso, jamas en Apply/Check/GoLive). Solo bindea
+// el ID: sin LIVE optimista, sin Aitum, sin cambiar expected (queda
+// pendiente de Apply+Check).
+void MetadataDock::onFbAdopt()
 {
+	if (isManaged()) {
+		if (!managedAccount(meta::Platform::Facebook).connected) {
+			generalMsg_->setText(meta::userMessage(
+				meta::Outcome::AuthRequired,
+				meta::Platform::Facebook));
+			return;
+		}
+		startManagedFbOp(QStringLiteral("adopt"), QString());
+		return;
+	}
+	if (!fb_.connected) {
+		generalMsg_->setText(meta::userMessage(
+			meta::Outcome::AuthRequired,
+			meta::Platform::Facebook));
+		return;
+	}
+	startFbAdoptIndependent();
+}
+
+void MetadataDock::startFbAdoptIndependent()
+{
+	const QString target =
+		fbTarget_.isEmpty() ? QStringLiteral("me") : fbTarget_;
+	QString token = fb_.access;
+	if (target != QStringLiteral("me")) {
+		if (!fbPageTokens_.contains(target)) {
+			generalMsg_->setText(meta::userMessage(
+				meta::Outcome::AuthRequired,
+				meta::Platform::Facebook));
+			return;
+		}
+		token = fbPageTokens_.value(target);
+	}
+	QUrl url(QString::fromLatin1(kFbGraph) + QStringLiteral("/") +
+		 target + QStringLiteral("/live_videos"));
+	QUrlQuery q;
+	q.addQueryItem(QStringLiteral("fields"),
+		       QStringLiteral("id,title,status"));
+	q.addQueryItem(QStringLiteral("limit"), QStringLiteral("25"));
+	url.setQuery(q);
+	generalMsg_->setText(tr("Looking for the active live video…"));
+	sendGet(url, Op::FbAdopt, token);
+}
+
+void MetadataDock::startFbStatusIndependent(const QString &liveId) {
+	fbStatusId_ = liveId;
 	QUrl url(QString::fromLatin1(kFbGraph) + QStringLiteral("/") +
 		 liveId);
 	QUrlQuery q;
 	q.addQueryItem(QStringLiteral("fields"),
-		       QStringLiteral("id,title,description,status"));
+		       QStringLiteral("id,title,description,status,privacy"));
 	url.setQuery(q);
 	setFbState(QString());
 	generalMsg_->setText(tr("Checking Facebook status…"));
@@ -2878,6 +3243,11 @@ void MetadataDock::startFbCreateIndependent()
 			meta::Outcome::BadRequest, meta::Platform::Facebook));
 		return;
 	}
+	// Nuevo create: limpia la verificacion previa y guarda el expected
+	// (exactamente lo enviado) para verificar el estado real despues.
+	clearFbVerify();
+	fbExpectedTitle_ = title;
+	fbExpectedDesc_ = descEdit_->toPlainText();
 	const QString target =
 		fbTarget_.isEmpty() ? QStringLiteral("me") : fbTarget_;
 	QString token = fb_.access;
@@ -2893,6 +3263,8 @@ void MetadataDock::startFbCreateIndependent()
 	QJsonObject privacy;
 	privacy[QStringLiteral("value")] = QStringLiteral("EVERYONE");
 	body[QStringLiteral("privacy")] = privacy;
+	// Preview propiedad del dock: jamas LIVE_NOW en create/verify.
+	body[QStringLiteral("status")] = QStringLiteral("UNPUBLISHED");
 	generalMsg_->setText(tr("Creating Facebook live video…"));
 	sendJson(url, QStringLiteral("POST"),
 		 QString::fromUtf8(
@@ -2945,8 +3317,11 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 		body[QStringLiteral("title")] = titleEdit_->text();
 		body[QStringLiteral("description")] =
 			descEdit_->toPlainText();
-		if (!fbTarget_.isEmpty())
-			body[QStringLiteral("target")] = fbTarget_;
+		// Nuevo create: limpia la verificacion previa y guarda el
+		// expected (exactamente lo enviado) para verificar despues.
+		clearFbVerify();
+		fbExpectedTitle_ = titleEdit_->text();
+		fbExpectedDesc_ = descEdit_->toPlainText();
 	}
 	generalMsg_->setText(tr("Facebook %1…").arg(op));
 	managedAuth_->apiPost(
@@ -2975,17 +3350,235 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 			const QJsonObject res =
 				rep.body.value(QStringLiteral("result"))
 					.toObject();
+			// Adopt Managed (solo lectura, backend): outcome en
+			// result.adopted. true + id -> bindea igual que
+			// Independent; false + reason conocido -> bloqueado
+			// con mensaje especifico (jamas enlaza); outcome
+			// irreconocible -> fallo general clasificado.
+			// Sin secure_stream_url ni privacy_fallback en adopt.
+			if (op == QStringLiteral("adopt")) {
+				const bool adopted =
+					res.value(QStringLiteral("adopted")).toBool();
+				const QString reason =
+					res.value(QStringLiteral("reason")).toString();
+				const QString aid =
+					res.value(QStringLiteral("id"))
+						.toString();
+				if (adopted && !aid.isEmpty()) {
+					setFbLiveId(aid);
+					fbVerifyId_ = aid;
+					setFbState(res.value(QStringLiteral(
+									 "status"))
+						.toString());
+					generalMsg_->setText(
+						tr("Adopted active live (%1) "
+						   "— Check live status, then "
+						   "Apply to update "
+						   "title/description. Never "
+						   "changes Aitum.")
+							.arg(aid));
+					return;
+				}
+				if (!adopted &&
+				    reason ==
+					    QStringLiteral("no-active-live")) {
+					setFbState(QString());
+					fbVerify_ = {meta::FbVerify::Blocked,
+						     QStringLiteral(
+							     "adopt-no-active")};
+					setFbVerifyLabel(
+						tr("No active LIVE video found — "
+						   "Go live first (persistent key "
+						   "or new dock video), then "
+						   "Adopt."));
+					generalMsg_->setText(
+						tr("No active LIVE video found — "
+						   "Go live first (persistent key "
+						   "or new dock video), then "
+						   "Adopt."));
+					return;
+				}
+				if (!adopted &&
+				    reason ==
+					    QStringLiteral(
+						    "ambiguous-active-live")) {
+					const int n =
+						res.value(QStringLiteral("count"))
+							.toInt();
+					setFbState(QString());
+					fbVerify_ = {meta::FbVerify::Blocked,
+						     QStringLiteral(
+							     "adopt-ambiguous")};
+					setFbVerifyLabel(
+						tr("More than one LIVE video (%1) "
+						   "— stop the extra one or paste "
+						   "the ID manually.")
+							.arg(n));
+					generalMsg_->setText(
+						tr("More than one LIVE video (%1) "
+						   "— stop the extra one or paste "
+						   "the ID manually.")
+							.arg(n));
+					return;
+				}
+				const meta::Outcome aoc =
+					meta::classifyStatus(
+						rep.http == 0
+							? -1
+							: rep.http);
+				generalMsg_->setText(
+					meta::userMessage(
+						aoc,
+						meta::Platform::
+							Facebook));
+				return;
+			}
 			const QString id =
 				res.value(QStringLiteral("id")).toString();
 			const QString st =
 				res.value(QStringLiteral("status"))
 					.toString();
+			const QString rt =
+				res.value(QStringLiteral("title")).toString();
+			const QString rd = res.value(QStringLiteral("description"))
+						   .toString();
+			const QString rp = meta::facebookPrivacyValue(
+				res.value(QStringLiteral("privacy")));
 			if (!id.isEmpty() &&
 			    (op == QStringLiteral("create") ||
 			     op == QStringLiteral("status")))
 				setFbLiveId(id);
-			if (!st.isEmpty())
+			// El ID creado queda pendiente de verificacion contra
+			// el expected guardado al crear.
+			if (op == QStringLiteral("create") && !id.isEmpty())
+				fbVerifyId_ = id;
+			// Rama status: verifica el ID actual contra el
+			// expected si existe (create reciente); sin expected
+			// es solo lectura real, sin marcar preparado.
+			// privacy_fallback (ausente=false por compat): Meta
+			// no devolvio o no permitio privacy -> forzar ""
+			// (ignorar cualquier privacy devuelta, sin reutilizar
+			// previa) y etiquetar fallback; Go live bloqueado
+			// (gate: solo Verified avanza).
+			if (op == QStringLiteral("status")) {
+				const QString rid =
+					!id.isEmpty() ? id : liveId;
+				const bool fbFallback =
+					res.value(QStringLiteral(
+							"privacy_fallback"))
+						.toBool();
+				runFbVerification(rid, rt, rd, st,
+						  fbFallback ? QString()
+							     : rp);
+				if (fbFallback)
+					setFbVerifyLabel(
+						tr("Audience not verified "
+						   "(Meta did not return/allow "
+						   "privacy — fallback read)"));
+			}
+			// PoC ingestión: solo en create (el backend la
+			// reenvía únicamente ahí). Un create nuevo sin URL
+			// limpia el valor anterior. Jamas en logs.
+			if (op == QStringLiteral("create"))
+				setFbIngest(
+					res.value(QStringLiteral(
+							 "secure_stream_url"))
+						.toString());
+			// go_live Managed: NO pintar res.status ni LIVE optimista;
+			// estado desconocido/pendiente hasta la lectura encadenada
+			// del mismo ID (ella confirma o deja bloqueado).
+			if (op == QStringLiteral("go_live")) {
+				setFbState(QString());
+			} else if (!st.isEmpty()) {
 				setFbState(st);
+				if (op == QStringLiteral("create"))
+					setFbVerifyLabel(
+						tr("Created — press Check live "
+						   "status to verify before Go "
+						   "live."));
+			} else if (op == QStringLiteral("create")) {
+				// Sin status en la respuesta: NO suponer
+				// estado. Lectura encadenada (una vez, sin
+				// polling) que deja el indicador real sin
+				// pisar el mensaje del create.
+				const QString cid = !id.isEmpty()
+							    ? id
+							    : liveId;
+				if (!cid.isEmpty()) {
+					fbQuietStatus_ = true;
+					QJsonObject sbody;
+					sbody[QStringLiteral("op")] =
+						QStringLiteral("status");
+					sbody[QStringLiteral(
+						"live_video_id")] = cid;
+					managedAuth_->apiPost(
+						QStringLiteral(
+							"/metadata/facebook"),
+						sbody,
+						[this, cid](const backend_auth::
+							       Client::
+							       ApiReply
+								       &srep) {
+							if (!isManaged())
+								return;
+							if (srep.result ==
+							    backend_auth::
+								    Result::
+									    Ok) {
+								const QJsonObject
+									sres = srep.body
+										       .value(QStringLiteral(
+											       "result"))
+										       .toObject();
+								const QString sst =
+									sres.value(QStringLiteral(
+											"status"))
+										.toString();
+								setFbState(sst);
+								// Encadenada tras create:
+								// verifica contra el
+								// expected (nunca
+								// inventa UNPUBLISHED).
+								// privacy_fallback
+								// (ausente=false):
+								// forzar "" y etiquetar
+								// fallback (bloquea Go
+								// live, como status).
+								QString srid =
+									sres.value(QStringLiteral(
+											"id"))
+										.toString();
+								if (srid.isEmpty())
+									srid = cid;
+								const bool sfbFallback =
+									sres.value(QStringLiteral(
+											"privacy_fallback"))
+										.toBool();
+								runFbVerification(
+									srid,
+									sres.value(QStringLiteral(
+											"title"))
+										.toString(),
+									sres.value(QStringLiteral(
+											"description"))
+										.toString(),
+									sst,
+									sfbFallback
+										? QString()
+										: meta::facebookPrivacyValue(
+											sres.value(QStringLiteral(
+												"privacy"))));
+								if (sfbFallback)
+									setFbVerifyLabel(
+										tr("Audience not verified "
+										   "(Meta did not return/allow "
+										   "privacy — fallback read)"));
+							}
+							fbQuietStatus_ =
+								false;
+						});
+				}
+			}
 			// F-085: tras on/off, lectura encadenada (una vez,
 			// sin polling) para dejar el indicador real sin
 			// Check manual; el mensaje de la operacion se conserva.
@@ -2996,7 +3589,9 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 			     op == QStringLiteral("end")) &&
 			    !doneId.isEmpty()) {
 				if (op == QStringLiteral("go_live"))
-					setFbState(QStringLiteral("LIVE"));
+					// Sin LIVE optimista: pendiente hasta leer el
+					// mismo ID una vez (confirma o bloquea).
+					setFbState(QString());
 				else
 					setFbState(QStringLiteral("VOD"));
 				fbQuietStatus_ = true;
@@ -3008,13 +3603,36 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 				managedAuth_->apiPost(
 					QStringLiteral("/metadata/facebook"),
 					sbody,
-					[this, doneId](const backend_auth::Client::
-						       ApiReply &srep) {
+					[this, doneId, op](
+						const backend_auth::Client::
+							ApiReply &srep) {
 						if (!isManaged())
 							return;
 						if (srep.result !=
 						    backend_auth::Result::
 							    Ok) {
+							// go_live sin lectura: NADA
+							// confirmado. Estado pendiente,
+							// verificacion bloqueada (sin
+							// reutilizar privacy previa) y
+							// mensaje explicito. end intacto.
+							if (op == QStringLiteral(
+								    "go_live")) {
+								setFbState(
+									QString());
+								fbLastPrivacy_
+									.clear();
+								fbVerify_ = {
+									meta::FbVerify::
+										Blocked,
+									QStringLiteral(
+										"go-live-unconfirmed")};
+								setFbVerifyLabel(
+									tr("Blocked: go-live not confirmed (status read failed)"));
+								generalMsg_->setText(
+									tr("Facebook accepted go-live but publication NOT confirmed (status=%1) — still blocked; verify again.")
+										.arg(tr("unknown")));
+							}
 							fbQuietStatus_ = false;
 							return;
 						}
@@ -3023,36 +3641,108 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 								.value(QStringLiteral(
 									"result"))
 								.toObject();
-						setFbState(
+						const QString sst =
 							sres.value(QStringLiteral(
 									"status"))
-								.toString());
+								.toString();
+						setFbState(sst);
+						// Encadenada tras on/off: deja el
+						// indicador y la verificacion
+						// reales (LIVE/VOD bloquea un Go
+						// live posterior, como debe ser).
+						// privacy_fallback
+						// (ausente=false): forzar "" y
+						// etiquetar fallback (bloquea Go
+						// live, como status).
+						const bool sfbFallback =
+							sres.value(QStringLiteral(
+									"privacy_fallback"))
+								.toBool();
+						runFbVerification(
+							doneId,
+							sres.value(QStringLiteral(
+									"title"))
+								.toString(),
+							sres.value(QStringLiteral(
+									"description"))
+								.toString(),
+							sst,
+							sfbFallback
+								? QString()
+								: meta::facebookPrivacyValue(
+									sres.value(QStringLiteral(
+										"privacy"))));
+						if (sfbFallback)
+							setFbVerifyLabel(
+								tr("Audience not verified "
+								   "(Meta did not return/allow "
+								   "privacy — fallback read)"));
+						// Cambio B (solo go_live): la
+						// relectura manda. Solo LIVE leido
+						// afirma publicado; otro estado
+						// queda no confirmado y sigue
+						// bloqueado (reintentar exige
+						// nueva verificacion). end/delete
+						// intactos.
+						if (op == QStringLiteral(
+							    "go_live")) {
+							if (meta::fbLiveState(
+								    sst) ==
+							    meta::FbLiveState::
+								    Live)
+								generalMsg_->setText(
+									tr("Facebook is "
+									   "LIVE."));
+							else
+								generalMsg_->setText(
+									tr("Facebook go-live not confirmed (status=%1) — still blocked; verify again before retrying.")
+										.arg(sst.isEmpty()
+											     ? tr("unknown")
+											     : sst));
+						}
 						fbQuietStatus_ = false;
 					});
 			}
-			if (op == QStringLiteral("delete") && !id.isEmpty()) {
+			if (op == QStringLiteral("delete")) {
 				// Limpieza F-075: retirar el ID del combo y
 				// del store persistido.
-				for (int i = fbLiveCombo_->count() - 1;
-				     i >= 0; --i) {
-					if (fbLiveCombo_->itemData(i)
-						    .toString() == id ||
-					    fbLiveCombo_->itemText(i)
-						    .contains(id))
-						fbLiveCombo_->removeItem(i);
-				}
-				if (store_) {
-					secure::Data d;
-					store_->load(d);
-					if (d.facebookLiveId == id) {
-						d.facebookLiveId.clear();
-						store_->save(d);
+				if (!id.isEmpty()) {
+					for (int i = fbLiveCombo_->count() - 1;
+					     i >= 0; --i) {
+						if (fbLiveCombo_->itemData(i)
+							    .toString() == id ||
+						    fbLiveCombo_->itemText(i)
+							    .contains(id))
+							fbLiveCombo_->removeItem(
+								i);
+					}
+					if (store_) {
+						secure::Data d;
+						store_->load(d);
+						if (d.facebookLiveId == id) {
+							d.facebookLiveId
+								.clear();
+							store_->save(d);
+						}
 					}
 				}
+				// PoC ingestión: el objeto murió, la URL
+				// muere con él (aunque falte el id).
+				clearFbIngest();
+				// El objeto ya no existe: su verificacion tampoco.
+				clearFbVerify();
 				setFbState(QString());
 			}
-			generalMsg_->setText(
-				tr("Facebook %1 OK.").arg(op));
+			// go_live Managed: nunca afirmar OK aqui; solo la lectura
+			// encadenada del mismo ID confirma ("Facebook is
+			// LIVE.") o deja bloqueado. Interino explicito.
+			if (op == QStringLiteral("go_live"))
+				generalMsg_->setText(
+					tr("Facebook go-live request accepted — "
+					   "confirming status…"));
+			else
+				generalMsg_->setText(
+					tr("Facebook %1 OK.").arg(op));
 		});
 }
 
@@ -3224,6 +3914,14 @@ void MetadataDock::startApplyNext()
 		privacy[QStringLiteral("value")] =
 			QStringLiteral("EVERYONE");
 		body[QStringLiteral("privacy")] = privacy;
+		// Cambio A: captura lo ENVIADO (titulo/desc vigentes al
+		// enviar) y el MISMO liveId para sincronizar la referencia
+		// si el update tiene exito (el reply no trae el body
+		// enviado; leer los widgets en el reply correria riesgo de
+		// edicion intermedia).
+		fbPendingApplyId_ = liveId;
+		fbPendingApplyTitle_ = title;
+		fbPendingApplyDesc_ = desc;
 		sendJson(url, QStringLiteral("POST"),
 			 QString::fromUtf8(QJsonDocument(body).toJson(
 				 QJsonDocument::Compact)),
@@ -3425,14 +4123,19 @@ void MetadataDock::startManagedFacebookApply()
 		return;
 	}
 	setResult(p, true, tr("Updating…"));
+	// Cambio A: captura lo ENVIADO para sincronizar la referencia si
+	// el update tiene exito (el MISMO liveId de esta request).
+	const QString sentTitle = titleEdit_->text();
+	const QString sentDesc = descEdit_->toPlainText();
 	QJsonObject body;
 	body[QStringLiteral("live_video_id")] = liveId;
-	body[QStringLiteral("title")] = titleEdit_->text();
-	body[QStringLiteral("description")] = descEdit_->toPlainText();
+	body[QStringLiteral("title")] = sentTitle;
+	body[QStringLiteral("description")] = sentDesc;
 	if (!fbTarget_.isEmpty())
 		body[QStringLiteral("target")] = fbTarget_;
 	managedAuth_->apiPost(QStringLiteral("/metadata/facebook"), body,
-			      [this, p](const backend_auth::Client::ApiReply &rep) {
+			      [this, p, liveId, sentTitle, sentDesc](
+				      const backend_auth::Client::ApiReply &rep) {
 				      obs_log(LOG_INFO,
 					      "managed apply reply: result=%d "
 					      "http=%d",
@@ -3442,6 +4145,33 @@ void MetadataDock::startManagedFacebookApply()
 					      return; // user switched mode
 				      if (rep.result ==
 					  backend_auth::Result::Ok) {
+					      // Cambio A: guarda los enviados
+					      // (o la lectura autoritativa si
+					      // la respuesta la trae), fija
+					      // fbVerifyId_ y deja pendiente
+					      // de Check live status. Sin
+					      // tocar backend.
+					      const QJsonObject res =
+						      rep.body
+							      .value(QStringLiteral(
+								      "result"))
+							      .toObject();
+					      QString refTitle = sentTitle;
+					      QString refDesc = sentDesc;
+					      if (res.contains(QStringLiteral(
+							      "title")))
+						      refTitle =
+							      res.value(QStringLiteral(
+									      "title"))
+								      .toString();
+					      if (res.contains(QStringLiteral(
+							      "description")))
+						      refDesc =
+							      res.value(QStringLiteral(
+									      "description"))
+								      .toString();
+					      noteFbUpdated(liveId, refTitle,
+							    refDesc);
 					      finishPlatform(
 						      p, true,
 						      meta::userMessage(
@@ -3595,10 +4325,12 @@ void MetadataDock::onReply(QNetworkReply *reply)
 	case Op::FbIdentity:
 	case Op::FbTargets:
 	case Op::FbStatus:
+	case Op::FbStatusRetry:
 	case Op::FbCreate:
 	case Op::FbGoLive:
 	case Op::FbEnd:
 	case Op::FbDelete:
+	case Op::FbAdopt:
 		if (isManaged())
 			return;
 		break;
@@ -3980,6 +4712,93 @@ void MetadataDock::onReply(QNetworkReply *reply)
 		return;
 	}
 
+	case Op::FbAdopt: {
+		// Adopt explicito Independent (solo lectura, sin LIVE
+		// optimista, sin Aitum): bindea el unico LIVE; bloqueos
+		// no-active/ambiguous; error red/lista -> fallo general
+		// (expected intacto, sin tocar verify).
+		auto fbCode = [&]() {
+			const QJsonObject err = replyJson(reply)
+							    .value(QStringLiteral(
+								    "error"))
+							    .toObject();
+			int code = err.value(QStringLiteral("code"))
+					   .toInt(0);
+			const int sub = err.value(QStringLiteral(
+							  "error_subcode"))
+					      .toInt(0);
+			if (code == 0)
+				code = sub;
+			else if (code == 100 && sub == 33)
+				code = 33; // F-080: objeto web/ID desconocido
+			return code;
+		};
+		if (netFail || http != 200) {
+			const int fbc = fbCode();
+			const meta::Outcome oc =
+				meta::classifyFb(http, fbc);
+			const QString spec =
+				meta::fbEligibilityMessage(fbc);
+			generalMsg_->setText(
+				!spec.isEmpty()
+					? spec
+					: meta::userMessage(
+						  oc, P::Facebook));
+			obs_log(LOG_WARNING,
+				"facebook adopt list failed http %d",
+				http);
+			return;
+		}
+		QList<meta::FbLiveItem> items;
+		const QJsonArray data = replyJson(reply)
+						.value(QStringLiteral("data"))
+						.toArray();
+		for (const auto &v : data) {
+			const QJsonObject it = v.toObject();
+			meta::FbLiveItem li;
+			li.id =
+				it.value(QStringLiteral("id")).toString();
+			li.status = it.value(QStringLiteral("status"))
+					    .toString();
+			items.append(li);
+		}
+		const meta::FbAdoptResult ar =
+			meta::facebookAdoptActive(items);
+		if (ar.ok) {
+			QString st;
+			for (const auto &li : items) {
+				if (li.id.trimmed() == ar.id) {
+					st = li.status;
+					break;
+				}
+			}
+			setFbLiveId(ar.id);
+			// Sin expected: queda pendiente de Apply+Check
+			// (el update sincroniza la referencia).
+			fbVerifyId_ = ar.id;
+			setFbState(st);
+			generalMsg_->setText(
+				tr("Adopted active live (%1) — Check live "
+				   "status, then Apply to update "
+				   "title/description. Never changes Aitum.")
+					.arg(ar.id));
+			obs_log(LOG_INFO, "facebook adopt ok");
+			return;
+		}
+		if (ar.reason == QStringLiteral("no-active")) {
+			generalMsg_->setText(
+				tr("No active LIVE video found — Go live "
+				   "first (persistent key or new dock video), "
+				   "then Adopt."));
+		} else {
+			generalMsg_->setText(
+				tr("More than one LIVE video — stop the extra "
+				   "one or paste the ID manually."));
+		}
+		obs_log(LOG_INFO, "facebook adopt blocked");
+		return;
+	}
+
 	case Op::FbRead: {
 		// Read-back manual (E2E/sondas): informa, no decide Apply.
 		if (netFail || http != 200)
@@ -3991,12 +4810,39 @@ void MetadataDock::onReply(QNetworkReply *reply)
 	}
 
 	case Op::FbStatus: {
-		// Indicador D7: solo lectura, sin decidir Apply.
-		if (netFail || http != 200) {
-			const QJsonObject err = replyJson(reply)
-							    .value(QStringLiteral(
-								    "error"))
-							    .toObject();
+		// Indicador D7 + verificacion previa a GoLive: lectura con
+		// valores reales; el error de lectura nunca marca Verified.
+		// Meta puede responder error en cuerpo con HTTP 200: el
+		// objeto "error" no vacio tambien es fallo (fallback unico).
+		const QJsonObject fbBody = replyJson(reply);
+		const QJsonObject fbErr =
+			fbBody.value(QStringLiteral("error")).toObject();
+		if (netFail || http != 200 || !fbErr.isEmpty()) {
+			// Fallback minimo ante fallo por `privacy` (mismo
+			// criterio que backend get_live_status): UNA sola
+			// relectura del MISMO ID sin `privacy`. Sin polling
+			// extra; el fallo del retry si es definitivo.
+			QString retryId = fbStatusId_;
+			if (retryId.isEmpty())
+				retryId = currentFbLiveId();
+			if (!retryId.isEmpty()) {
+				obs_log(LOG_INFO,
+					"facebook status fallback retry "
+					"http %d",
+					http);
+				QUrl rurl(QString::fromLatin1(kFbGraph) +
+					  QStringLiteral("/") + retryId);
+				QUrlQuery rq;
+				rq.addQueryItem(
+					QStringLiteral("fields"),
+					QStringLiteral(
+						"id,title,description,status"));
+				rurl.setQuery(rq);
+				sendGet(rurl, Op::FbStatusRetry,
+					fb_.access);
+				return;
+			}
+			const QJsonObject err = fbErr;
 			int code = err.value(QStringLiteral("code"))
 					   .toInt(0);
 			const int sub = err.value(QStringLiteral(
@@ -4015,17 +4861,116 @@ void MetadataDock::onReply(QNetworkReply *reply)
 						  meta::classifyFb(http, code),
 						  P::Facebook));
 			setFbState(QString());
+			// Mensaje de lectura distinto del de audiencia no
+			// verificada; se conserva el expected para reintentar.
+			// Cambio B: la lectura encadenada tras go_live fallo:
+			// nada que informar como publicado.
+			fbGoLiveConfirm_ = false;
+			fbVerify_ = {meta::FbVerify::Blocked,
+				     QStringLiteral("read-failed")};
+			setFbVerifyLabel(
+				tr("Status read failed — not verified."));
 			return;
 		}
-		const QJsonObject o = replyJson(reply);
-		setFbState(o.value(QStringLiteral("status")).toString());
-		if (!fbQuietStatus_)
+		const QJsonObject o = fbBody;
+		const QString st =
+			o.value(QStringLiteral("status")).toString();
+		setFbState(st);
+		QString rid = o.value(QStringLiteral("id")).toString();
+		if (rid.isEmpty())
+			rid = currentFbLiveId();
+		runFbVerification(rid,
+				  o.value(QStringLiteral("title")).toString(),
+				  o.value(QStringLiteral("description"))
+					  .toString(),
+				  st,
+				  meta::facebookPrivacyValue(
+					  o.value(QStringLiteral("privacy"))));
+		// Cambio B: si esta lectura es la encadenada tras go_live,
+		// informa lo observado (manda sobre el mensaje generico).
+		if (fbGoLiveConfirm_)
+			reportFbGoLiveObserved(st);
+		else if (!fbQuietStatus_)
 			generalMsg_->setText(
-				tr("Facebook status: %1")
-					.arg(o.value(QStringLiteral("status"))
-						     .toString()));
+				tr("Facebook status: %1").arg(st));
 		fbQuietStatus_ = false;
 		obs_log(LOG_INFO, "facebook status checked");
+		return;
+	}
+
+	case Op::FbStatusRetry: {
+		// Relectura sin `privacy` (un solo intento): exito con
+		// valores reales pero audiencia no verificable (privacy ""
+		// fijado, sin reutilizar previo); el fallo es general.
+		// Nunca marca Verified (Go live sigue bloqueado).
+		// HTTP 200 con "error" no vacio tambien es fallo general
+		// (read-failed, nunca audiencia no verificada).
+		const QJsonObject fbBody = replyJson(reply);
+		const QJsonObject fbErr =
+			fbBody.value(QStringLiteral("error")).toObject();
+		if (netFail || http != 200 || !fbErr.isEmpty()) {
+			const QJsonObject err = fbErr;
+			int code = err.value(QStringLiteral("code"))
+					   .toInt(0);
+			const int sub = err.value(QStringLiteral(
+							  "error_subcode"))
+					      .toInt(0);
+			if (code == 0)
+				code = sub;
+			else if (code == 100 && sub == 33)
+				code = 33;
+			const QString spec =
+				meta::fbEligibilityMessage(code);
+			generalMsg_->setText(
+				!spec.isEmpty()
+					? spec
+					: meta::userMessage(
+						  meta::classifyFb(http, code),
+						  P::Facebook));
+			setFbState(QString());
+			// Mensaje de lectura distinto del de audiencia no
+			// verificada; se conserva el expected para reintentar.
+			// Cambio B: la lectura encadenada tras go_live fallo:
+			// nada que informar como publicado.
+			fbGoLiveConfirm_ = false;
+			fbVerify_ = {meta::FbVerify::Blocked,
+				     QStringLiteral("read-failed")};
+			setFbVerifyLabel(
+				tr("Status read failed — not verified."));
+			return;
+		}
+		const QJsonObject o = fbBody;
+		const QString st =
+			o.value(QStringLiteral("status")).toString();
+		setFbState(st);
+		QString rid = o.value(QStringLiteral("id")).toString();
+		if (rid.isEmpty())
+			rid = !fbStatusId_.isEmpty() ? fbStatusId_
+						     : currentFbLiveId();
+		runFbVerification(
+			rid,
+			o.value(QStringLiteral("title")).toString(),
+			o.value(QStringLiteral("description")).toString(),
+			st, QString());
+		// privacy "" fijado (sin reutilizar previo ni loguear
+		// valores); etiqueta existente + sufijo fallback.
+		fbLastPrivacy_.clear();
+		if (fbVerifyLabel_)
+			setFbVerifyLabel(fbVerifyLabel_->text() +
+					 tr(" — fallback"));
+		// Cambio B: si esta lectura es la encadenada tras go_live,
+		// informa lo observado (manda sobre el mensaje generico).
+		if (fbGoLiveConfirm_)
+			reportFbGoLiveObserved(st);
+		else if (!fbQuietStatus_)
+			generalMsg_->setText(
+				tr("Facebook status: %1 — audience not "
+				   "verified (privacy not returned, "
+				   "fallback read); values kept.")
+					.arg(st.isEmpty() ? tr("unknown")
+							 : st));
+		fbQuietStatus_ = false;
+		obs_log(LOG_INFO, "facebook status fallback checked");
 		return;
 	}
 
@@ -4063,9 +5008,35 @@ void MetadataDock::onReply(QNetworkReply *reply)
 			return;
 		}
 		setFbLiveId(nid);
-		setFbState(QStringLiteral("UNPUBLISHED"));
-		generalMsg_->setText(
-			tr("Facebook live video created (%1).").arg(nid));
+		// El ID creado queda pendiente de verificacion contra el
+		// expected guardado al crear (titulo/desc/audiencia).
+		fbVerifyId_ = nid;
+		// PoC ingestión: valor completo del create, oculto por
+		// defecto (Password). Jamas en logs.
+		setFbIngest(
+			o.value(QStringLiteral("secure_stream_url"))
+				.toString());
+		// Estado real vía lectura Meta: si la respuesta trae status
+		// se usa; si no, NO se supone UNPUBLISHED: lectura
+		// encadenada (una vez, sin polling) que deja el indicador
+		// real sin pisar el mensaje del create (fbQuietStatus_).
+		const QString createdStatus =
+			o.value(QStringLiteral("status")).toString();
+		if (!createdStatus.isEmpty()) {
+			setFbState(createdStatus);
+			setFbVerifyLabel(
+				tr("Created — press Check live status to "
+				   "verify before Go live."));
+			generalMsg_->setText(
+				tr("Facebook live video created (%1).")
+					.arg(nid));
+		} else {
+			fbQuietStatus_ = true;
+			startFbStatusIndependent(nid);
+			generalMsg_->setText(
+				tr("Facebook live video created (%1).")
+					.arg(nid));
+		}
 		obs_log(LOG_INFO, "facebook live video created");
 		return;
 	}
@@ -4106,10 +5077,12 @@ void MetadataDock::onReply(QNetworkReply *reply)
 		{
 			const QString liveId = currentFbLiveId();
 			if (op == Op::FbGoLive && !liveId.isEmpty()) {
-				// F-085: refresco encadenado (una lectura,
-				// sin polling): el indicador queda real sin
-				// Check manual; el mensaje del ON se conserva.
+				// F-085 + Cambio B: refresco encadenado (una
+				// lectura, sin polling). La relectura informa
+				// lo observado (reportFbGoLiveObserved); aqui
+				// no se afirma publicado sin LIVE leido.
 				setFbState(QStringLiteral("LIVE"));
+				fbGoLiveConfirm_ = true;
 				fbQuietStatus_ = true;
 				startFbStatusIndependent(liveId);
 			} else if (op == Op::FbEnd && !liveId.isEmpty()) {
@@ -4136,12 +5109,24 @@ void MetadataDock::onReply(QNetworkReply *reply)
 					store_->save(d);
 				}
 			}
+			// PoC ingestión: el objeto murió, la URL muere con él.
+			clearFbIngest();
+			// El objeto ya no existe: su verificacion tampoco.
+			clearFbVerify();
 			setFbState(QString());
 			generalMsg_->setText(
 				tr("Facebook live video deleted."));
 		} else if (op == Op::FbGoLive) {
-			setFbState(QStringLiteral("LIVE"));
-			generalMsg_->setText(tr("Facebook is LIVE."));
+			// Cambio B: no afirmar publicado sin LIVE leido; la
+			// relectura encadenada (si la hay) informa lo
+			// observado y manda.
+			if (fbGoLiveConfirm_)
+				generalMsg_->setText(
+					tr("Facebook go-live accepted — "
+					   "confirming status…"));
+			else
+				generalMsg_->setText(
+					tr("Facebook go-live accepted."));
 		} else {
 			setFbState(QStringLiteral("VOD"));
 			generalMsg_->setText(tr("Facebook live ended."));
@@ -4153,10 +5138,9 @@ void MetadataDock::onReply(QNetworkReply *reply)
 	case Op::UpFb:
 	case Op::UpFbRetry: {
 		const P p = P::Facebook;
-		const QJsonObject err = replyJson(reply)
-						    .value(QStringLiteral(
-							    "error"))
-						    .toObject();
+		const QJsonObject okBody = replyJson(reply);
+		const QJsonObject err =
+			okBody.value(QStringLiteral("error")).toObject();
 		int code =
 			err.value(QStringLiteral("code")).toInt(0);
 		const int sub =
@@ -4180,6 +5164,31 @@ void MetadataDock::onReply(QNetworkReply *reply)
 		const QString spec =
 			!netFail ? meta::fbEligibilityMessage(code)
 				 : QString();
+		if (oc == meta::Outcome::Success) {
+			// Cambio A: sincroniza la referencia con lo ENVIADO
+			// en este update para el MISMO liveId (capturado al
+			// enviar). Preferir la lectura autoritativa si la
+			// respuesta la trae; si no, los enviados. Excluye
+			// backoff/auth (ya retornados arriba). Deja
+			// verificacion pendiente de Check live status.
+			QString refId = fbPendingApplyId_;
+			if (refId.isEmpty())
+				refId = currentFbLiveId();
+			QString refTitle = fbPendingApplyTitle_;
+			QString refDesc = fbPendingApplyDesc_;
+			if (okBody.contains(QStringLiteral("title")))
+				refTitle = okBody
+						   .value(QStringLiteral(
+							   "title"))
+						   .toString();
+			if (okBody.contains(
+				    QStringLiteral("description")))
+				refDesc = okBody
+						  .value(QStringLiteral(
+							  "description"))
+						  .toString();
+			noteFbUpdated(refId, refTitle, refDesc);
+		}
 		finishPlatform(p, oc == meta::Outcome::Success,
 			       !spec.isEmpty()
 				       ? spec

@@ -79,6 +79,13 @@ private slots:
 	void onFbGoLive();
 	void onFbEndLive();
 	void onFbDelete();
+	void onFbAdopt();
+	// PoC ingestión: secure_stream_url de create, solo memoria de
+	// sesión (fbIngest_, jamás persistido ni logueado). Oculto por
+	// defecto (Password); Show/Copy son acción explícita. Copy pega
+	// el valor completo para Aitum manual (sin dividir server/key).
+	void onFbIngestToggled();
+	void onFbIngestCopy();
 	void onReply(QNetworkReply *reply);
 	void onTwitchPollTimeout();
 	void onBackoffTimeout();
@@ -150,16 +157,41 @@ private slots:
 	void startFacebookLongLived();
 	void fetchFacebookVideos();
 	void fetchFacebookTargets();
-	// T-073 FB-4: helpers ciclo de vida (ambos modos, QNAM async).
+	// T-073 FB-4: indicador + ciclo de vida (D6R/D7/F-075). Sin
+	// polling auto: todo a peticion (Refresh/Apply/botones).
 	QString currentFbLiveId() const;
 	void setFbLiveId(const QString &id);
 	void setFbState(const QString &status);
+	// Verificacion previa a GoLive (solo sesion, sin persistencia ni
+	// red): expected del ultimo create + resultado puro. El gate de
+	// onFbGoLive exige Verified sobre el ID actual.
+	void setFbVerifyLabel(const QString &text);
+	void runFbVerification(const QString &id,
+			       const QString &actTitle,
+			       const QString &actDesc,
+			       const QString &actStatus,
+			       const QString &actPrivacy);
+	void clearFbVerify();
 	void startFbStatusIndependent(const QString &liveId);
+	void startFbAdoptIndependent();
 	void startFbCreateIndependent();
 	void startFbGoLiveIndependent(const QString &liveId);
 	void startFbEndIndependent(const QString &liveId);
 	void startFbDeleteIndependent(const QString &liveId);
 	void startManagedFbOp(const QString &op, const QString &liveId);
+	// Cambio A: sincroniza la referencia expected con lo ENVIADO en un
+	// update exitoso (MISMO liveId), dejando verificacion pendiente.
+	void noteFbUpdated(const QString &liveId, const QString &title,
+			   const QString &desc);
+	// Cambio B: la relectura encadenada tras go_live informa lo
+	// observado (LIVE leido => publicado; otro estado => no
+	// confirmado, sigue bloqueado). Consume fbGoLiveConfirm_.
+	void reportFbGoLiveObserved(const QString &status);
+	// PoC ingestión: fija/limpia fbIngest_ + visibilidad (sin logs,
+	// sin persistencia). clearFbIngest oculta directo (sin refresh
+	// global) para usarlo en disconnect/delete/mode-switch.
+	void setFbIngest(const QString &url);
+	void clearFbIngest();
 	// F-C2: borrado total Managed (POST /privacy/erase + snapshots).
 	void onEraseManagedData();
 
@@ -185,10 +217,12 @@ private:
 		FbList,
 		FbRead,
 		FbStatus,
+		FbStatusRetry, // relectura sin privacy (un intento)
 		FbCreate,
 		FbGoLive,
 		FbEnd,
 		FbDelete,
+		FbAdopt,
 		UpFb,
 		UpFbRetry,
 		UpTw,
@@ -241,6 +275,27 @@ private:
 	// persistidos ni logueados. Clave = page id.
 	QMap<QString, QString> fbPageTokens_;
 	QString fbTarget_;
+	// PoC ingestión: secure_stream_url del create (solo sesión).
+	QString fbIngest_;
+	QString fbExpectedTitle_;
+	QString fbExpectedDesc_;
+	QString fbVerifyId_;
+	QString fbLastPrivacy_;
+	// ID en curso de la lectura de estado (reintento fallback sin
+	// privacy sobre el MISMO ID; una sola relectura, sin polling).
+	QString fbStatusId_;
+	// Cambio A (Independent): valores ENVIADOS en el update en curso
+	// (titulo/desc vigentes al enviar + MISMO liveId). Se fijan al
+	// enviar y se consumen en el reply de exito; leer los widgets en
+	// el reply correria riesgo de edicion intermedia.
+	QString fbPendingApplyId_;
+	QString fbPendingApplyTitle_;
+	QString fbPendingApplyDesc_;
+	// Cambio B: go_live aceptado con relectura encadenada pendiente.
+	// La relectura informa lo observado y consume este flag.
+	bool fbGoLiveConfirm_ = false;
+	meta::FbVerifyResult fbVerify_ = {meta::FbVerify::Blocked,
+					  QStringLiteral("not-verified")};
 	QTcpServer *callbackServer_ = nullptr;
 	meta::Platform callbackFor_ = meta::Platform::YouTube;
 	bool callbackDone_ = false; // first callback wins (favicon guard)
@@ -295,7 +350,9 @@ private:
 	// T-073 FB-4: indicador + ciclo de vida (solo UI, sin estado nuevo
 	// sensible; el ID persiste en secure::Data.facebookLiveId).
 	QLabel *fbStateLabel_ = nullptr;
+	QLabel *fbVerifyLabel_ = nullptr;
 	QPushButton *fbStatusButton_ = nullptr;
+	QPushButton *fbAdoptButton_ = nullptr;
 	QPushButton *fbCreateButton_ = nullptr;
 	QPushButton *fbGoLiveButton_ = nullptr;
 	QPushButton *fbEndButton_ = nullptr;
@@ -304,6 +361,12 @@ private:
 	// el read-back actualiza el indicador sin pisar el mensaje de la
 	// operacion (sigue siendo una lectura a peticion, sin polling).
 	bool fbQuietStatus_ = false;
+	// PoC ingestión: valor completo visible/copiable, oculto por
+	// defecto. Solo memoria de sesión (fbIngest_); jamás en Store.
+	QLabel *fbIngestLabel_ = nullptr;
+	QLineEdit *fbIngestEdit_ = nullptr;
+	QPushButton *fbIngestShowButton_ = nullptr;
+	QPushButton *fbIngestCopyButton_ = nullptr;
 	QLabel *devicePrompt_ = nullptr;
 	QPushButton *applyButton_ = nullptr;
 	// F-C2: "Borrar mis datos" (solo Managed; Independent intacto).

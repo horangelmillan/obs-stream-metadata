@@ -206,6 +206,26 @@ QString fbLiveStateLabel(FbLiveState s)
 	return QStringLiteral("Unknown");
 }
 
+FbAdoptResult facebookAdoptActive(const QList<FbLiveItem> &items)
+{
+	QList<QString> live;
+	for (const FbLiveItem &it : items) {
+		const QString id = it.id.trimmed();
+		if (id.isEmpty())
+			continue;
+		const QString st = it.status.trimmed().toUpper();
+		if (st != QStringLiteral("LIVE") &&
+		    st != QStringLiteral("LIVE_NOW"))
+			continue;
+		live.append(id);
+	}
+	if (live.isEmpty())
+		return {false, QString(), QStringLiteral("no-active")};
+	if (live.size() > 1)
+		return {false, QString(), QStringLiteral("ambiguous")};
+	return {true, live.first(), QString()};
+}
+
 QStringList fbRequiredScopes(bool page)
 {
 	if (page)
@@ -234,6 +254,43 @@ QString facebookAuthUrl(const QString &clientId, const QString &redirectUri,
 	return QStringLiteral(
 		       "https://www.facebook.com/v26.0/dialog/oauth?") +
 	       parts.join(QLatin1Char('&'));
+}
+
+QString facebookPrivacyValue(const QJsonValue &v)
+{
+	if (v.isObject())
+		return v.toObject()
+			.value(QStringLiteral("value"))
+			.toString()
+			.trimmed();
+	if (v.isString())
+		return v.toString().trimmed();
+	return QString();
+}
+
+FbVerifyResult facebookVerifyPrepared(const QString &expTitle,
+				      const QString &expDesc,
+				      const QString &actTitle,
+				      const QString &actDesc,
+				      const QString &actStatus,
+				      const QString &actPrivacy)
+{
+	if (actStatus.isEmpty())
+		return {FbVerify::Blocked,
+			QStringLiteral("status-missing")};
+	if (actStatus != QStringLiteral("UNPUBLISHED"))
+		return {FbVerify::Blocked,
+			QStringLiteral("status-not-unpublished")};
+	if (actTitle != expTitle || actDesc != expDesc)
+		return {FbVerify::Blocked, QStringLiteral("mismatch")};
+	if (actPrivacy.isEmpty())
+		return {FbVerify::AudienceUnverified,
+			QStringLiteral("privacy-unverified")};
+	if (actPrivacy.compare(QStringLiteral("EVERYONE"),
+				Qt::CaseInsensitive) != 0)
+		return {FbVerify::AudienceUnverified,
+			QStringLiteral("privacy-not-public")};
+	return {FbVerify::Verified, QStringLiteral("verified")};
 }
 
 Outcome classifyStatus(int code)
