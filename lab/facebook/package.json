@@ -1,0 +1,10 @@
+{
+  "name": "lab-facebook",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Lab throwaway Facebook T-077 (stdlib-only, no merge)",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js"
+  }
+}
