@@ -9,6 +9,38 @@
 > `#define`; conteo estático [C], sin ejecutar aquí). Últimos resultados documentados [D]: backend 250 OK
 > (T-076) + SELFCHECK OK (T-073).
 
+## T-077 E2E lab Facebook LiveVideo propio → ingesta → LIVE (2026-10-26, lab throwaway `lab/facebook`, autorizado)
+
+```text
+FUENTE:    informes backend + capturas del operador, 2026-10-26 [D]
+             (evidencia de sesión aportada a esta tarea documental;
+             no re-ejecutada aquí; sin commit/push/PR en esta tarea).
+CONNECT:   PASS PKCE Test App (vía Test App; app Live bloquea localhost
+             con Enforce HTTPS — ver F-094).
+CREATE:    PASS ×5 UNPUBLISHED EVERYONE con IDs registrados:
+             28703591109303258, 28703717372623965,
+             28703720135957022, 28703757945953241, 28703813379281031.
+READ-BACK: PASS título/descripción/status idénticos tras crear.
+UPDATE:    PASS update + read-back idéntico.
+PRIVACY:   PENDIENTE producción — privacy NO legible en GET (Meta 400)
+             + badge efectivo "Solo yo" pese a EVERYONE 200 al crear
+             (ver F-093); audiencia real en producción sin confirmar [P].
+PERSIST:   VEREDICTO NO url única — ingestas distintas por create incluso
+             con `persistent_stream_key_status=ENABLE` (ver F-092) [D].
+GOLIVE:    PASS ingesta manual Aitum → GoLive 200 → LIVE + DIRECTO con
+             movimiento visible en perfil (operador).
+TEARDOWN:  PASS End → LIVE_STOPPED + DELETE ×2 con 100/33.
+LAB-BUG:   Status con comas corregido en el lab (ver F-095).
+ALCANCE:   T-077 sigue en investigación: su aceptación incluye "resolver
+             el conflicto de alcance AGENTS.md §23/§51 antes de implementar"
+             — pendiente; sin port al plugin en esta sesión. BACKLOG
+             canónico: estado sin cambios.
+SECRETOS:  IDs de LiveVideo sí (no son secretos); tokens/claves/URLs de
+             ingesta jamás registrados.
+FINAL: E2E lab T-077 documentado; pendientes: audiencia en producción,
+       port al plugin, resolución de alcance §§23/51.
+```
+
 ## T-076 Facebook gris + YouTube default listo (2026-10-24, PR #55 + #56)
 
 ```text

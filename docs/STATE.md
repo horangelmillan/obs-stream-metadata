@@ -79,7 +79,20 @@
   `docs/FACEBOOK-LIVE-API-FLOW.md`, T-077. F-067 ya documenta create/update/
   read-back de metadatos, pero la emisión real vía ingestión y publicación
   visible aún requieren validación. La integración Aitum/RTMP está fuera del
-  alcance vigente (`AGENTS.md` §23/§51); resolver alcance antes de cambios.
+  alcance vigente (`AGENTS.md` §23/§51); resolver alcance antes de cambios. E2E lab 2026-10-26 [D]:
+  Connect PKCE Test App PASS; create UNPUBLISHED EVERYONE ×5 PASS
+  (IDs `28703591109303258`, `28703717372623965`, `28703720135957022`,
+  `28703757945953241`, `28703813379281031`); read-back título/desc/
+  status idénticos PASS; update+read-back PASS; ingesta manual Aitum →
+  GoLive 200 → LIVE + DIRECTO visible en perfil PASS; End →
+  LIVE_STOPPED + DELETE ×2 (100/33) PASS; bug lab Status-comas
+  corregido (solo lab). Veredictos negativos: persistencia NO url única
+  (F-092); privacy ilegible en GET (Meta 400) + badge "Solo yo" pese a
+  EVERYONE 200 (F-093); localhost bloqueado en app Live con Enforce
+  HTTPS, Test App como vía (F-094). Pendientes [P]: audiencia en
+  producción, port al plugin, resolución del conflicto de alcance
+  §§23/51 antes de implementar producto. BACKLOG canónico: T-077 sigue
+  en investigación, sin cambio de estado. Detalle en VALIDATION.md.
 - **Reforma harness en curso [C, 2026-10-25, Fase 1 documental]:** apertura
   mínima-privilegio + validación por stack + reparto steward/BACKLOG y
   ejecutor lab (F-088). Cambios solo documentales/permisos, sin código:
