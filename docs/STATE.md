@@ -93,6 +93,7 @@
   producción, port al plugin, resolución del conflicto de alcance
   §§23/51 antes de implementar producto. BACKLOG canónico: T-077 sigue
   en investigación, sin cambio de estado. Detalle en VALIDATION.md.
+- **Relay local MediaMTX [D E2E lab 2026-10-26, T-078 en investigación]:** propuesta validada en lab (`docs/MEDIAMTX-RELAY-FLOW.md` como guía; T-078): MediaMTX v1.21.3 local con forward RTMPS en caliente (PATCH sin reinicio, formato base+`#`+clave) → 2 emisiones LIVE+DIRECTO con movimiento sin tocar Aitum entre ellas; responde a F-092 (sin URL única de ingesta) con URL fija local + re-fijado del forward. Nuevo punto de partida arquitectónico pendiente de port al plugin y de resolución del conflicto de alcance §§23/51. Pendientes [P]: métricas latencia/CPU/recovery (F-099), audiencia en producción (sigue "Solo yo" pese a EVERYONE 200, como F-093), rate-limit a re-handshakes (~3 min, F-097). Detalle en VALIDATION.md T-078 y F-096–F-099. BACKLOG canónico: T-078 sigue en investigación (aceptación parcialmente cubierta), T-077 intacta.
 - **Reforma harness en curso [C, 2026-10-25, Fase 1 documental]:** apertura
   mínima-privilegio + validación por stack + reparto steward/BACKLOG y
   ejecutor lab (F-088). Cambios solo documentales/permisos, sin código:
@@ -111,7 +112,9 @@
 - **Restricción vigente:** `poc/` es evidencia histórica + regresión
   (no tocar salvo corrección justificada); el producto vive en `src/`
   + `backend/`.
-- **Última actualización:** 2026-10-25 — reforma harness Fase 1
-  documental (F-088); sin cambios de código, sin operaciones externas.
+- **Última actualización:** 2026-10-26 — E2E relay T-078 documentado
+  (forward + caliente PASS, métricas parciales; sigue en investigación,
+  T-077 intacta); sin cambios de código, sin operaciones externas.
+  Anterior (2026-10-25): reforma harness Fase 1 documental (F-088).
   Anterior (2026-10-24): flujo objetivo Facebook Live API documentado
   como propuesta pendiente (`docs/FACEBOOK-LIVE-API-FLOW.md`, T-077).

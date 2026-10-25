@@ -9,6 +9,38 @@
 > `#define`; conteo estático [C], sin ejecutar aquí). Últimos resultados documentados [D]: backend 250 OK
 > (T-076) + SELFCHECK OK (T-073).
 
+## T-078 E2E relay MediaMTX local → LiveVideo propio (2026-10-26, autorizado 2026-10-26)
+
+```text
+FUENTE:    informes backend + capturas del operador, 2026-10-26 [D]
+             (evidencia de sesión aportada a esta tarea documental;
+             no re-ejecutada aquí; sin commit/push/PR en esta tarea).
+RELAY:     MediaMTX v1.21.3 local (:1935/:9997, checksum oficial OK,
+             licencia MIT — aviso registrado, empaquetado pendiente) [D].
+FORMATO:   ganador base+'#'+clave; URL íntegra da EOF/0 bytes (ver F-096).
+INGESTA:   OBS/Aitum→relay verificado (H264 1080p+AAC, inbound creciente,
+             0 errores) [D].
+FORWARD:   PASS en caliente por PATCH /v3/config/paths/patch/live SIN
+             reinicio; 2 emisiones (IDs 28704775482518154 y
+             28704809952514707) con forward→GoLive→LIVE+DIRECTO visible
+             con movimiento SIN tocar Aitum entre ellas [D].
+RATELIMIT: re-handshakes RTMPS seguidos limitados por Meta (cooldown
+             ~3 min) (ver F-097) [D].
+VOD:       auto-VOD al retirar señal (ver F-098) [D].
+AUDIENCIA: PENDIENTE producción — sigue "Solo yo" pese a EVERYONE 200,
+             igual que F-093 [P].
+MÉTRICAS:  ~57-59 MB WS + códec/inbound/0-errores (ver F-099);
+             latencia/CPU/recovery numéricos pendientes [P].
+CIERRE:    End→LIVE_STOPPED, forward [], VOD del 2º conservado a petición,
+             1er objeto borrado antes [D].
+SECRETOS:  IDs de LiveVideo sí (no son secretos); tokens/claves/URLs de
+             ingesta jamás registrados.
+FINAL: E2E relay T-078 documentado; aceptación parcialmente cubierta
+       (forward PASS + caliente PASS + licencia identificada; métricas
+       latencia/CPU/recovery pendientes) — T-078 sigue en investigación.
+       T-077 intacta. Detalle en F-096–F-099.
+```
+
 ## T-077 E2E lab Facebook LiveVideo propio → ingesta → LIVE (2026-10-26, lab throwaway `lab/facebook`, autorizado)
 
 ```text
