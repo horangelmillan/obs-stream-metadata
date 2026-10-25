@@ -26,7 +26,7 @@ const SCOPES = ["publish_video"];
 const FB_TITLE_MAX = 254;
 const LAB_PORT = 3002;
 
-/* --- .env manual (sin deps): solo APP_ID + PORT. --- */
+/* --- .env manual (sin deps): APP_ID con alias + PORT. --- */
 function loadEnvFile(file) {
   try {
     const raw = fs.readFileSync(file, "utf8");
@@ -44,7 +44,19 @@ function loadEnvFile(file) {
 }
 loadEnvFile(path.join(__dirname, ".env"));
 
-const APP_ID = (process.env.FB_APP_ID || "").trim();
+/* Alias config: FB_APP_ID gana; si vacio, fallback a FB_URL_APP (trim).
+ * Se loguea SOLO nombre de variable + longitud, jamas el valor. */
+function pickEnv(...names) {
+  for (const n of names) {
+    const v = (process.env[n] || "").trim();
+    if (v) return { name: n, value: v };
+  }
+  return { name: null, value: "" };
+}
+const APP_ID_LOOKED_AT = ["FB_APP_ID", "FB_URL_APP"];
+const appIdCfg = pickEnv(...APP_ID_LOOKED_AT);
+const APP_ID = appIdCfg.value;
+const APP_ID_SOURCE = appIdCfg.name;
 const PORT = parseInt(process.env.PORT || String(LAB_PORT), 10) || LAB_PORT;
 
 /* --- estado SOLO en memoria (jamas disco/logs) --- */
@@ -145,7 +157,7 @@ const server = http.createServer(async (req, res) => {
     /* GET /auth/url — dialog/oauth + PKCE S256 + state */
     if (req.method === "GET" && url.pathname === "/auth/url") {
       if (!APP_ID) {
-        sendJson(res, 500, { ok: false, error: "FB_APP_ID-missing" });
+        sendJson(res, 500, { ok: false, error: "FB_APP_ID-missing", lookedAt: APP_ID_LOOKED_AT });
         return;
       }
       const verifier = b64url(crypto.randomBytes(32));
@@ -244,7 +256,7 @@ const server = http.createServer(async (req, res) => {
       }
       const method = String(input.method || "GET").toUpperCase();
       const rel = String(input.path || "");
-      if (!/^\/[A-Za-z0-9_./?=&%-]*$/.test(rel) || rel.includes("..")) {
+      if (!/^\/[A-Za-z0-9_./?=&%,-]*$/.test(rel) || rel.includes("..")) {
         sendJson(res, 400, { ok: false, error: "bad-path" });
         return;
       }
@@ -254,7 +266,8 @@ const server = http.createServer(async (req, res) => {
       let fwdBody = input.body;
       if (fwdBody !== undefined && typeof fwdBody === "object" && fwdBody !== null) {
         // Flag solo-lab: se valida localmente y NUNCA se envia a Meta.
-        const { _lab_create, ...rest } = fwdBody;
+        const { _lab_create, persistent, ...rest } = fwdBody;
+        if (persistent === true) rest.persistent_stream_key_status = "ENABLE";
         if (_lab_create === true) {
           const title = String(rest.title || "");
           if (!validTitle(title)) {
@@ -329,4 +342,5 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`[lab-facebook] http://localhost:${PORT}/ (callback http://localhost:${PORT}/fb-cb)`);
+  safeLog(`[lab] APP_ID desde ${APP_ID_SOURCE || "ninguna"} (longitud ${APP_ID.length})`);
 });

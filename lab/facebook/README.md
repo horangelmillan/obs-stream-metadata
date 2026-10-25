@@ -34,6 +34,8 @@ ingesta **manual** en Aitum por el operador y publicación explícita.
 
 1. Copia `.env.example` a `.env` y rellena `FB_APP_ID` (solo App ID;
    el lab no usa `FB_APP_SECRET`: el canje es sin secreto + PKCE).
+   Precedencia: `FB_APP_ID` no vacío gana; si queda vacío se usa el alias
+   `FB_URL_APP`. El `.env` real jamás se commitea.
 2. `npm run dev` (o `node server.js`). Abre `http://localhost:3002/`.
 3. **Connect** → autoriza en facebook.com → vuelve al callback local.
 4. **Create** → crea tu LiveVideo (`UNPUBLISHED`, `privacy EVERYONE`).

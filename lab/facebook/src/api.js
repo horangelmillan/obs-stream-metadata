@@ -29,7 +29,7 @@ const api = {
   reset: () => post("/api/reset", {}),
   graph: (method, path, body) => post("/api/graph", { method, path, body }),
 
-  createLive: (title, description) =>
+  createLive: (title, description, opts) =>
     post("/api/graph", {
       method: "POST",
       path: "/me/live_videos",
@@ -39,12 +39,15 @@ const api = {
         description: description || undefined,
         status: "UNPUBLISHED",
         privacy: { value: "EVERYONE" },
+        persistent: !!(opts && opts.persistent),
       },
     }),
   liveStatus: (id) =>
     post("/api/graph", {
       method: "GET",
-      path: `/${encodeURIComponent(id)}?fields=id,title,description,status,privacy`,
+      // Nota T-077: Meta 400-rechaza `privacy` en GET; privacy solo se
+      // verifica por aceptacion en create/update (body privacy:{value}).
+      path: `/${encodeURIComponent(id)}?fields=id,title,description,status`,
     }),
   updateLive: (id, title, description) =>
     post("/api/graph", {
