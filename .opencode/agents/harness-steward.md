@@ -1,5 +1,5 @@
 ---
-description: Mantiene la coherencia entre instrucciones, estado, decisiones, backlog y evidencia. Solo edita documentos del proyecto dentro de su alcance; no modifica código ni ejecuta operaciones externas.
+description: Mantiene la coherencia entre instrucciones, estado, decisiones, backlog y evidencia. Solo edita documentos del proyecto dentro de su alcance; no modifica código ni ejecuta operaciones externas. Es el único escritor de docs/BACKLOG.md y dueño de .gitignore (entradas de ignorado).
 mode: subagent
 permission:
   edit:
@@ -13,6 +13,8 @@ permission:
     "docs/TOOLS.md": allow
     "docs/WORKFLOW.md": allow
     "docs/FINDINGS.md": allow
+    "docs/BACKLOG.md": allow
+    ".gitignore": allow
     ".opencode/agents/*.md": allow
     ".agents/skills/project-harness-governance/SKILL.md": allow
   read:
@@ -106,6 +108,8 @@ Solo estos archivos, y solo cuando la tarea lo autorice:
 - `docs/TOOLS.md`
 - `docs/WORKFLOW.md`
 - `docs/FINDINGS.md` (añadir hallazgos F-###, nunca reescribir historia)
+- `docs/BACKLOG.md` (estado canónico: solo edición autorizada por tarea, nunca cambiar estados sin evidencia)
+- `.gitignore` (solo entradas de ignorado; sin tocar reglas de secretos sin ADR)
 - `.opencode/agents/` (definiciones de agentes locales)
 - `.agents/skills/project-harness-governance/SKILL.md`
 

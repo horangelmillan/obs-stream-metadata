@@ -257,6 +257,15 @@ pendiente = representable sin implementación; no hay casos "no soportado".
 | Kick | implementado + validado (OAuth directo, T-031 live) | implementado + validado (T-046 + T-048; live 2026-09-09 revalidado) | T-031; T-036; T-046; live este turno |
 | Facebook | implementado + validado (OAuth PKCE directo BYO-app, T-071 live; FB-4: indicador/on-off/creación-por-dock + warnings F-080/F-081 + visibilidad F-086) | implementado + validado (T-072 adapter + dock + snapshot `managed_facebook`; T-073 E2E operador PASS Managed perfil: create+ID, status, Apply+read-back, end, delete, restart, Disconnect) | T-071; T-072; T-073; F-072; F-076; F-081; F-082; F-084; F-085; F-086; ADR-015 |
 
+### Facebook Live: proceso propuesto pendiente de validación
+
+El proceso objetivo para administrar metadatos/audiencia y transmitir un
+LiveVideo creado por API está descrito en
+[`FACEBOOK-LIVE-API-FLOW.md`](FACEBOOK-LIVE-API-FLOW.md). F-067 valida
+creación, actualización y lectura de metadatos/audiencia del objeto API;
+la unión con ingestión OBS/Aitum y su publicación visible quedan `[P]`.
+La propuesta no altera las exclusiones vigentes de `AGENTS.md` §23/§51.
+
 Modelo/UI/routing/OAuth/storage/backend por celda: Independent = directo +
 DPAPI + navegador; Managed (YT/Kick) = `backend_auth` + ConnectService +
 SecretStore/TokenStore backend. Esta tabla es LA matriz vigente; no duplicarla.

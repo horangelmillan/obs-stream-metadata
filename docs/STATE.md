@@ -73,12 +73,32 @@
   específicos aplican (sin evidencia). Tarea separada del despliegue del
   backend en Cloud Run (ver DEPLOYMENT.md); requiere confirmación y
   alcance explícito antes de ejecutar nada.
+- **Facebook Live API [P]:** el operador quiere validar el flujo de
+  LiveVideo creado por API con título, descripción y audiencia Público,
+  ingestión de OBS/Aitum y publicación final. El proceso propuesto está en
+  `docs/FACEBOOK-LIVE-API-FLOW.md`, T-077. F-067 ya documenta create/update/
+  read-back de metadatos, pero la emisión real vía ingestión y publicación
+  visible aún requieren validación. La integración Aitum/RTMP está fuera del
+  alcance vigente (`AGENTS.md` §23/§51); resolver alcance antes de cambios.
+- **Reforma harness en curso [C, 2026-10-25, Fase 1 documental]:** apertura
+  mínima-privilegio + validación por stack + reparto steward/BACKLOG y
+  ejecutor lab (F-088). Cambios solo documentales/permisos, sin código:
+  `harness-steward` único escritor de `docs/BACKLOG.md` + dueño de
+  `.gitignore`; `release-tooling` en `tools/**` (sin ejecución);
+  `backend-integrations` dueño ejecutor de `lab/**` (aún no existe en el
+  checkout [C]); `obs-plugin` valida con `cmake*/ctest*/msbuild*`;
+  `AGENTS.md` §56 con tabla de propiedad; TOOLS/WORKFLOW reconciliados.
+  Sin cambios de estados BACKLOG en esta tarea. Próximo gate: Fase 2 lab
+  por `backend-integrations` (incl. entrada `node_modules` en
+  `.gitignore` y comprobación `browser: ask` con `opencode debug
+  agents`).
 - **Rama base:** `master` (ADR-004; CI anclado a `master`).
 - **Repo remoto:** `horangelmillan/obs-stream-metadata` (público,
   GitHub-flow con PRs).
 - **Restricción vigente:** `poc/` es evidencia histórica + regresión
   (no tocar salvo corrección justificada); el producto vive en `src/`
   + `backend/`.
-- **Última actualización:** 2026-10-24 — tarea documental: el harness
-  describe el producto actual y fija la jerarquía (AGENTS.md §55); sin
-  cambios de código, sin operaciones externas.
+- **Última actualización:** 2026-10-25 — reforma harness Fase 1
+  documental (F-088); sin cambios de código, sin operaciones externas.
+  Anterior (2026-10-24): flujo objetivo Facebook Live API documentado
+  como propuesta pendiente (`docs/FACEBOOK-LIVE-API-FLOW.md`, T-077).

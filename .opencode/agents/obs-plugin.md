@@ -48,6 +48,9 @@ permission:
     "curl*": deny
     "npm*": deny
     "npx*": deny
+    "cmake*": allow
+    "ctest*": allow
+    "msbuild*": allow
   glob: allow
   grep: allow
   list: allow
@@ -62,6 +65,7 @@ permission:
     "systematic-debugging": allow
     "verification-before-completion": allow
     "project-harness-governance": allow
+    "requesting-code-review": allow
     "clean-code": allow
     "ponytail": allow
   codebase-memory_*: deny
@@ -117,9 +121,18 @@ storage DPAPI, `backend_auth` (cliente Managed) y selfchecks.
 - `systematic-debugging`: ante fallos (observar → hipotetizar →
   probar → verificar).
 - `verification-before-completion`: antes de declarar trabajo terminado.
+- `requesting-code-review`: revisión técnica de cambios grandes
+  (reforma 2026-10-25).
 - `project-harness-governance`: si la tarea requiere actualizar
   documentación (entonces aplican sus reglas de etiquetas y fuentes).
 - `clean-code`, `ponytail`: estilo mínimo por defecto.
+
+## Validación por stack (reforma 2026-10-25)
+
+Este agente ejecuta solo lo de su alcance con evidencia comando+salida:
+`cmake*`/`ctest*`/`msbuild*` (C++/Qt en `src/`). Sin `npm`/`npx`,
+sin `curl`, sin Git mutante. Detalle en `docs/WORKFLOW.md`
+(VALIDATION por stack).
 
 ## Reglas de producto (inviolables sin ADR)
 

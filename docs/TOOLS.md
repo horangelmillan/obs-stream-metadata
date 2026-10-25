@@ -20,7 +20,8 @@ Manejo de errores: ante fallo de herramienta, registrar comando + salida en el m
 
 Descubrimiento: `opencode debug agents` desde la raíz. Definiciones en
 `.opencode/agents/` (`harness-steward`, `obs-plugin`,
-`backend-integrations`, `gcp-stream-metadata` de solo lectura);
+`backend-integrations`, `release-tooling`, `orquestador` (`mode:
+primary`, sin edición), `gcp-stream-metadata` de solo lectura);
 Skill en `.agents/skills/project-harness-governance/`
 (descubierta por la herramienta `skill` en sesión 2026-10-24 y cargada
 con éxito por `harness-steward` en prueba de subagente de solo lectura;
@@ -39,9 +40,13 @@ documentada se ignora en silencio en el frontmatter; la denegación de
 invocación de subagentes se expresa con `subagent: deny` (comprobado
 efectivo en los 4 agentes, igual que en los built-ins `explore` y
 `general`). `edit` negado salvo alcance
-(`harness-steward` = 11 documentos/rutas listados;
-`obs-plugin` = `src/**`; `backend-integrations` = `backend/**`;
-GCP = denegado) — casos comprobados en reglas efectivas:
+(`harness-steward` = 13 rutas listadas (11 documentales + `docs/BACKLOG.md`
++ `.gitignore`, reforma 2026-10-25);
+`obs-plugin` = `src/**`; `backend-integrations` = `backend/**` + `lab/**`
+(dueño ejecutor lab, reforma 2026-10-25);
+`release-tooling` = `tools/**` (ampliado desde `tools/deploy.ps1` exacto
+para cubrir `tools/package.ps1`, T-067, reforma 2026-10-25);
+GCP = denegado; orquestador = denegado total) — casos comprobados en reglas efectivas:
 `docs/STATE.md`→allow y `src/metadata.cpp`→deny en steward;
 `src/metadata.cpp`→allow y `backend/app.py`→deny en obs-plugin;
 `backend/app.py`→allow y `src/metadata.cpp`→deny en backend;
@@ -57,10 +62,18 @@ comprobados `dev.env`, `config.env`, `secrets.yaml`,
 (verificado por glob que ningún archivo legítimo del repo colisiona).
 Shell en `ask` salvo Git de solo lectura (`status/diff/log/rev-parse/
 branch`→allow; `commit/push/merge/rebase/reset/clean/checkout`,
-`gh`, `gcloud` salvo GCP, `curl`, `npm/npx`→deny comprobados;
+`gh`, `gcloud` salvo GCP, `curl`→deny comprobados;
+validación por stack, reforma 2026-10-25: `backend-integrations` =
+`python*`/`pytest*`/`node*`/`npm*`/`npx*`→allow (lab Node + backend
+Python; `lab/` aún no existe en el checkout [C, 2026-10-25], permiso
+anticipado para la Fase 2); `obs-plugin` = `cmake*`/`ctest*`/
+`msbuild*`→allow (C++/Qt de `src/`); `release-tooling` = sin ejecución
+(`Invoke-WebRequest`→deny intacto);
 `git push` en GCP queda en `ask` heredado); allowlist exacta de shell
 de GCP intacta. Skills restringidas por ID (denegación general +
-nombres exactos comprobados en disco). MCP por nombre real
+nombres exactos comprobados en disco): añadidos reforma 2026-10-25
+(`executing-plans` + `requesting-code-review` en `backend-integrations`;
+`requesting-code-review` en `obs-plugin`; resto intacto). MCP por nombre real
 `<servidor>_<tool>` (inventario confirmado por `tools/list` y el
 historial local): solo lecturas necesarias por rol; denegados
 `index_repository/delete_project/ingest_traces/manage_adr`,
@@ -68,7 +81,12 @@ historial local): solo lecturas necesarias por rol; denegados
 (`search_graph`→allow y `delete_project/ingest_traces`→deny
 comprobados; `github_list_issues`, `playwright_browser_navigate`,
 `eslint_lint-files`→deny comprobados). `github` sigue sin
-autenticación: no disponible. `question`/`browser`/`task` denegados;
+autenticación: no disponible. `question`/`task` denegados;
+`browser`: `deny` en steward/orquestador/dominio salvo
+`backend-integrations` = `ask` solo-localhost (reforma 2026-10-25;
+efectividad [P] pendiente de comprobar con `opencode debug agents` en
+la Fase 2; si el motor no lo admite rige `deny` y el lab se valida sin
+navegador);
 `webfetch` permitido, `websearch` permitido en steward y `ask` en
 dominio. GCP además: sin skills y sin MCP (solo shell + webfetch),
 coherente con su rol auditor.
@@ -98,7 +116,42 @@ resto `codebase-memory_*`, `github_*`, `playwright_*`, `eslint_*`,
 `chrome-devtools_*`→deny. Orquestador lo invoca vía
 `subagent: release-tooling: allow` (sin regla `task`: el runtime la
 ignora). Límites: sin ejecución, despliegues, red/producción ni Git
-mutante.
+mutante. Reforma 2026-10-25 [C frontmatters de esta sesión]: `edit`
+pasa a `tools/**` (cubre `tools/package.ps1`, T-067); el resto del
+bloque queda intacto.
+
+`git-integration` [C] (definición `.opencode/agents/git-integration.md`,
+fase G1 2026-10-25): operador Git atómico; integra trabajo ya revisado
+y no edita ningún archivo (`edit`: `*`→deny total). `read`: `*`→allow
++ secretos idénticos a los demás agentes (`dev.env`, `*.env`,
+`*.env.*`, `*.envrc`, `*.key/.pem/.p12`, `*token*/*secret*` en
+`.json/.txt/.yaml/.yml/.key`, `credentials.json/.yaml/.yml`,
+`*credential*`, `client_secret*`→deny; `*.env.example`→allow).
+`bash`: `*`→ask + allows exactos de solo lectura (`git status/diff/
+log/rev-parse/branch/show`) y de integración (`git add backend/**`,
+`git add src/**`, `git add docs/**`, `git add AGENTS.md`,
+`git add .opencode/agents/*`, `git add .gitignore`, `git add tools/**`,
+`git commit*`, `git push*`, `gh pr create/view/status*`,
+`gh run list/view*`); denies explícitos (`git reset/clean/rebase/
+checkout*`, `gcloud *`, `curl*`, `npm*`, `npx*`). Prohibido en cuerpo:
+`git add -A` / `git add .`, `staging/`, `dev.env`/secretos,
+force-push / `--hard` sin autorización separada escrita; commits
+atómicos por grupo (Conventional + T-### + evidencia); gate
+`verification-before-completion` antes de cada push/PR/merge;
+secreto-scan antes de cada commit. `subagent`/`browser`/`question`→deny.
+Skills (`*`→deny + tres verificadas en disco en esta sesión [C]:
+`project-harness-governance` local, `verification-before-completion`
+y `git-workflow` globales). MCP: solo lectura denegada en bloque
+(`codebase-memory_*`, `context7_*`, `github_*`, `playwright_*`,
+`eslint_*`, `chrome-devtools_*`→deny); `github` MCP sin autenticación:
+no disponible. El orquestador lo invoca vía
+`subagent: git-integration: allow` y sigue sin ejecutar Git
+directamente (sus denies de `git commit/push/merge` y `gh *` intactos).
+Autorización vigente [D] (fase G1, 2026-10-25, orden del usuario):
+commit/push/PR/merge de ESTE run quedan autorizados hasta el merge a
+`master`, con parada solo si el usuario lo pide; futuros runs requieren
+autorización separada. Parche G1.5 [D] (2026-10-25): merge incluido en este run (`gh pr merge*`, `git merge --no-ff*` en allowlist exacta). Gate G2 [P]: lanzar `git-integration` para
+integrar el Todo-junto en commits atómicos ordenados.
 
 ## Skills (solo si aportan; compatibles con el proyecto)
 

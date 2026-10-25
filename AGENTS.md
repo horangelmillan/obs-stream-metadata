@@ -2335,13 +2335,42 @@ Definiciones en `.opencode/agents/` (descubrimiento:
 `opencode debug agents` desde la raíz del checkout):
 
 -   `harness-steward`: coherencia documental; edita solo los
-    documentos de su alcance; sin código ni operaciones externas.
+    documentos de su alcance (único escritor de `docs/BACKLOG.md`;
+    dueño de `.gitignore` para entradas de ignorado); sin código ni
+    operaciones externas.
 -   `obs-plugin`: C++/Qt6 y cliente del plugin; trabaja en `src/`;
     sin despliegues ni cuentas externas.
 -   `backend-integrations`: backend Python/OAuth/pruebas; trabaja en
-    `backend/`; sin infraestructura productiva ni despliegues.
+    `backend/`; dueño ejecutor del lab Facebook (`lab/**`, Node);
+    sin infraestructura productiva ni despliegues.
+-   `release-tooling`: herramientas de publicación; trabaja en
+    `tools/**` (`deploy.ps1`, `package.ps1`); modifica sin ejecutar.
+-   `git-integration`: integración Git atómica (add por paths
+    explícitos, commit, push, PRs) del trabajo ya revisado; sin
+    edición de archivos (`permission.edit` denegado total); solo
+    actúa bajo autorización escrita del gate vigente (fase G1,
+    2026-10-25 [D]).
 -   `gcp-stream-metadata`: auditoría GCP en solo lectura; sus datos
     fechados son evidencia histórica hasta re-verificar.
+-   `orquestador` (`orquestador.md`, `mode: primary`): clasifica,
+    planea, obtiene autorización, delega a un especialista a la vez,
+    revisa, valida y cierra; no edita archivos directamente
+    (`permission.edit` denegado en su totalidad).
+
+Tabla de propiedad (un escritor por ruta; reforma 2026-10-25):
+
+| Ruta | Dueño escritor |
+|---|---|
+| `docs/BACKLOG.md` | `harness-steward` (único) |
+| `.gitignore` (entradas de ignorado) | `harness-steward` |
+| Resto documental (`AGENTS.md`, `README.md`, `docs/STATE.md`, `docs/PROJECT_CONTEXT.md`, `docs/DEPLOYMENT.md`, `docs/VALIDATION.md`, `docs/TOOLS.md`, `docs/WORKFLOW.md`, `docs/FINDINGS.md`) | `harness-steward` |
+| `src/**` | `obs-plugin` |
+| `backend/**` | `backend-integrations` |
+| `lab/**` | `backend-integrations` (ejecutor lab) |
+| `tools/**` | `release-tooling` (sin ejecución) |
+| Integración Git (add/commit/push/PR/merge por paths, sin edición de archivos) | `git-integration` (solo bajo autorización escrita del gate vigente) |
+
+Los límites de producto de §§23/51 no cambian con esta reforma.
 
 Skill compartida en `.agents/skills/project-harness-governance/`:
 gobierno documental (fuentes canónicas, discrepancias con evidencia,
@@ -2351,6 +2380,8 @@ documentación.
 
 Coordinación: OpenCode principal orquesta e integra; un solo agente
 escribe a la vez; ningún agente hace commit, push, PR, merge,
-despliegue ni cambios externos sin autorización separada. Detalle de
+despliegue ni cambios externos sin autorización separada — la única
+excepción es `git-integration`, que ejecuta exactamente lo autorizado
+por el gate vigente sin editar archivos. Detalle de
 permisos y herramientas por agente en cada definición y en
 `docs/TOOLS.md`.

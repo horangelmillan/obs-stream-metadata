@@ -60,6 +60,7 @@ permission:
     "backend-integrations": allow
     "gcp-stream-metadata": allow
     "release-tooling": allow
+    "git-integration": allow
     "explore": allow
   browser: deny
   skill:
@@ -109,6 +110,9 @@ Subagentes invocables, y solo estos:
 - `backend-integrations`: implementación en `backend/` (Python).
 - `gcp-stream-metadata`: auditoría GCP en solo lectura.
 - `release-tooling`: mantenimiento de `tools/deploy.ps1` (modifica, no ejecuta).
+- `git-integration`: integración Git atómica (add por paths, commit,
+  push, PRs) del trabajo ya revisado; no edita archivos. Solo actúa
+  bajo autorización escrita del gate vigente.
 - `explore` (built-in, solo lectura): exploración o revisión
   independiente cuando aporte valor.
 
