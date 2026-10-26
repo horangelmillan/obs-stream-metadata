@@ -140,7 +140,17 @@ limpios. T-078 sigue en investigación sin cambio de estado [C contra
 BACKLOG]. Pendiente [P]: operador reinstala/reabre OBS → Start relay
 → E2E. Sin afirmar Live/App Review/requisitos (sin evidencia);
 separado del despliegue del backend en Cloud Run; requiere confirmación
-y alcance explícito antes de ejecutar nada.
+y alcance explícito antes de ejecutar nada. Simplificación FB Fase
+A+B (2026-10-26) [D delegada de la sesión implementadora, no
+re-ejecutada aquí]: Fase A auto-prepare (auto-relay si FB conectado;
+valida ID con crea-nuevo + borra anterior UNPUBLISHED, fallback
+reutilizar con aviso honesto; Apply con verificación silenciosa;
+señal del emisor vía API local; auto-prepare tras End con cooldown)
++ Fase B vista (línea "Facebook listo", Avanzado colapsado, botones
+condicionales, indicador de señal); build OK, selfcheck 338/0,
+diff-check y scan limpios; T-078 sigue en investigación sin cambio
+de estado [C contra BACKLOG]. Pendientes [P]: E2E operador,
+capturas visuales, instalador con relay+fix.
 NEXT REQUIRED TECHNICAL TASK: NONE.
 
 ## 14. Known Findings / Limitations
