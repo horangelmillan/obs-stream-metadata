@@ -1900,6 +1900,16 @@ int main(int argc, char **argv)
 		      meta::fbRefireDue(999999, 1000000) &&
 		      !meta::fbRefireDue(1000001, 1000000),
 	      "v3-refire-due");
+	// Auto-prepare sin transmision: valida/crea pero NO re-fija; el
+	// forward queda pendiente hasta intencion real (Apply con FB,
+	// senal del emisor, Go live). Manual (los tres falsos) refija.
+	CHECK(meta::fbAutoCreateDefersForward(true, false, false) &&
+		      meta::fbAutoCreateDefersForward(false, true, false) &&
+		      meta::fbAutoCreateDefersForward(false, false, true) &&
+		      meta::fbAutoCreateDefersForward(true, true, true) &&
+		      !meta::fbAutoCreateDefersForward(false, false,
+						       false),
+	      "fbauto-create-defers-forward");
 	{
 		// Punto 3: Verified no anade nota (Apply ya dijo exito);
 		// audiencia no verificada afirma titulo/desc pero jamas

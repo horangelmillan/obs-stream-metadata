@@ -460,6 +460,12 @@ bool fbRefireDue(qint64 fireAtMs, qint64 nowMs)
 	return nowMs >= fireAtMs;
 }
 
+bool fbAutoCreateDefersForward(bool autoActive, bool endAutoPending,
+			       bool sigPrecreated)
+{
+	return autoActive || endAutoPending || sigPrecreated;
+}
+
 Outcome classifyStatus(int code)
 {
 	if (code >= 200 && code < 300)

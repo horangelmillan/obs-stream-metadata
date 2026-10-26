@@ -204,7 +204,7 @@ métricas F-099, audiencia F-093. Fases v3 completadas (2026-10-26) [D delegada,
    en persona + obs_log con códigos, usess-* 34); [C: 7
    `def test_*` + 28 ocurrencias `usess` (28 vs 34 sin
    conciliar [P])]. Pendientes [P]: deploy backend para efecto
-   real, instalador, E2E operador.
+   real, instalador, E2E operador. Cambio "sin Meta al abrir" (2026-10-26) [D delegada]: auto-prepare crea/valida sin re-fijar; destino solo ante intención real; mensaje honesto; "Comprobar estado"; amarillo = fallo de lectura en Meta; build OK, selfcheck PASS 0 FAIL; T-078 en investigación. Pendientes [P]: E2E, instalador. Detalle en VALIDATION.md.
 NEXT REQUIRED TECHNICAL TASK: NONE.
 
 ## 14. Known Findings / Limitations

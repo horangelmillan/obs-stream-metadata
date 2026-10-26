@@ -10,6 +10,35 @@
 > Últimos resultados documentados [D]: build OK + selfcheck 367/0
 > (fix trío, delegado de la sesión implementadora).
 
+## Cambio "sin Meta al abrir" (2026-10-26 — IMPLEMENTADO SIN COMMIT; T-078 sin cambio de estado)
+
+```text
+FUENTE [D delegada de la sesión implementadora, no re-ejecutada
+  aquí; comunicada en la tarea que autoriza, 2026-10-26]:
+  el auto-prepare al abrir creaba Y re-fijaba destino (handshake),
+  chocando con cooldown y mostrando triángulo+cuenta sin que el
+  usuario hiciera nada; ahora crea/valida sin re-fijar y el destino
+  se fija solo ante intención real (Aplicar, señal detectada,
+  Go live); mensaje honesto sin cuenta ni triángulo; botón de
+  Avanzado renombrado a "Comprobar estado" (antes ambiguo con
+  "Comprobar señal"); el amarillo "Se cortó la conexión" es fallo
+  de lectura del vídeo en Meta, no corte de emisión (aclarado en
+  docs).
+  Validación — build OK, selfcheck PASS 0 FAIL, diff-check y
+  scan limpios.
+BASE [C, esta subtarea documental]: solo edición de docs
+  (`docs/VALIDATION.md`, `docs/STATE.md`, `docs/PROJECT_CONTEXT.md`)
+  + `git diff --check`; sin commit/push, sin secretos, sin
+  `staging/`/`dev.env`. No reescribe historia: las entradas
+  anteriores quedan intactas abajo.
+ESTADO [C contra BACKLOG]: T-078 SIGUE en investigación, sin cambio
+  de estado en esta subtarea (canónico BACKLOG; esta entrada no
+  cambia estados).
+PENDIENTES [P]: E2E operador + instalador con el cambio.
+FINAL: cambio "sin Meta al abrir" documentado; E2E de aceptación
+  pendiente.
+```
+
 ## Sesión Managed larga — 15 días deslizantes + tope 30 días (2026-10-26 — IMPLEMENTADO SIN COMMIT; sin cambio de estados)
 
 ```text

@@ -380,6 +380,13 @@ private slots:
 	// Crea ya, difiere solo el PATCH (un disparo, guarda de ID).
 	void fbRefireOrDefer(const QString &liveId,
 			     const QString &ingest);
+	// Auto-prepare: el forward queda pendiente (sin re-fijar) hasta
+	// intencion real; fbFirePendingForward lo dispara ante Apply con
+	// FB, senal del emisor o Go live (revalida ID/ingesta/relay y usa
+	// fbRefireOrDefer, con su cola diferida honesta). fbNoteForwardPending
+	// anade el aviso pendiente al mensaje general (solo si hay pendiente).
+	void fbNoteForwardPending();
+	void fbFirePendingForward();
 
 private:
 	// One request at a time; replies carry their Op in a property.
@@ -548,6 +555,10 @@ private:
 		QTimer *timer = nullptr;
 	};
 	FbRefire fbRefire_;
+	// Forward pendiente del auto-prepare (ingesta en memoria del video
+	// vigente sin re-fijar; sin countdown ni triangulo: no hay espera,
+	// no hay nada que contar). Lo dispara solo la intencion real.
+	bool fbForwardPending_ = false;
 	meta::FbVerifyResult fbVerify_ = {meta::FbVerify::Blocked,
 					  QStringLiteral("not-verified")};
 	QTcpServer *callbackServer_ = nullptr;
