@@ -1279,6 +1279,15 @@ No modificar:
 
 Esto permite que el plugin sea independiente del sistema de multistream.
 
+> Excepción acotada 2026-10-26 [D] (autorización del dueño; ADR-016):
+> solo para el relay local MediaMTX, el plugin gobierna el proceso
+> hijo y fija su forward vía Control API `:9997` hacia la ingesta del
+> LiveVideo propio; el operador mantiene su destino fijo
+> `rtmp://127.0.0.1:1935/live`. No automatiza Aitum/OBS (sin tocar
+> configuración RTMP, keys, outputs, servicios, escenas ni fuentes) y
+> no es multistream general. Resto de §23 intacto; historia previa no
+> reescrita.
+
 ------------------------------------------------------------------------
 
 # 24. No intentar "descubrir" las plataformas desde Aitum
@@ -2141,6 +2150,13 @@ No implementar hasta que el MVP sea estable:
 -   auto-start,
 -   auto-update,
 -   marketplace.
+
+> Excepción acotada 2026-10-26 [D] (autorización del dueño; ADR-016):
+> relay local MediaMTX integrado (instalación + proceso hijo + forward
+> vía `:9997` al LiveVideo propio, destino operador fijo
+> `rtmp://127.0.0.1:1935/live`). Resto de la lista intacto: sin
+> multistream general, sin keys en repo, sin tocar outputs. Historia
+> previa no reescrita.
 
 ------------------------------------------------------------------------
 

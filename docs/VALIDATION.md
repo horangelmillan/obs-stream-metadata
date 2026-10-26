@@ -9,6 +9,31 @@
 > `#define`; conteo estático [C], sin ejecutar aquí). Últimos resultados documentados [D]: backend 250 OK
 > (T-076) + SELFCHECK OK (T-073).
 
+## Relay Fases 2–6 port lab→plugin (2026-10-26, sin commit; T-078 sin cambio de estado)
+
+```text
+FUENTE [D, delegada de la sesión implementadora; no re-ejecutada en
+  esta sesión documental]: `src/relay.h`/`src/relay.cpp` +
+  `src/relay_manager.*` + vista en el dock + `tools/package.ps1` con
+  relay/MIT; build RelWithDebInfo OK; selfcheck 315 PASS/0 FAIL;
+  `git diff --check` 0; secret-scan limpio; `package.ps1 -WhatIf` OK.
+  Aquí solo edición de docs + `git diff --check`; sin commit/push,
+  sin secretos, sin staging/dev.env.
+ALCANCE FASES [D]: relay local MediaMTX integrado (instalación +
+  proceso hijo + forward vía Control API `:9997` hacia la ingesta del
+  LiveVideo propio; destino operador fijo `rtmp://127.0.0.1:1935/live`)
+  + aviso MIT en el empaquetado. Excepción acotada §§23/51 (ADR-016):
+  no automatiza Aitum/OBS, no es multistream general.
+ESTADO [C contra BACKLOG]: T-078 SIGUE en investigación, sin cambio
+  de estado en esta tarea (canónico BACKLOG; esta entrada no cambia
+  estados). T-077 intacta en investigación.
+PENDIENTE [P]: E2E operador instalar→relay→forward→GoLive→LIVE +
+  métricas latencia/CPU/recovery (F-099) + audiencia en producción
+  (F-093) + build E2E del instalador con descarga real de MediaMTX +
+  capturas visuales.
+FINAL: Fases 2–6 documentadas; E2E de aceptación pendiente.
+```
+
 ## Port lab→plugin Fase D (2026-10-26, sin commit; T-077/T-078 sin cambio de estado)
 
 ```text

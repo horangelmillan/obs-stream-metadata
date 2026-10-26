@@ -26,9 +26,12 @@ Managed behavior are untouched.
 
 #include "backend_auth.h"
 #include "metadata.h"
+#include "relay.h"
 #include "secure_store.h"
 #include <QMap>
 #include <QWidget>
+
+class RelayManager;
 
 class QCheckBox;
 class QComboBox;
@@ -65,6 +68,16 @@ public:
 	// ENABLE la URL es unica: jamas prometer persistencia.
 	void setFbPersistent(bool on) { fbPersistent_ = on; }
 	bool fbPersistent() const { return fbPersistent_; }
+
+	// T-078 Fase 3 (cableado): estado del relay local (ADR-016). Solo
+	// estados (relay::State); la vista redacta los textos finales.
+	// Update/Apply jamas tocan el forward (solo metadatos).
+	relay::State relayState() const { return relayState_; }
+
+signals:
+	// T-078 Fase 3: la vista observa el relay por estados, no por
+	// textos (los redacta despues).
+	void relayStateChanged(relay::State s);
 
 private slots:
 	void onApply();
@@ -238,6 +251,18 @@ private slots:
 	// inline y lleva el foco al primer campo (sin red, solo vista).
 	void onAuthTabChanged(int index);
 	void clearAuthInlineErrors();
+	// T-078 Fase 3 (cableado): el gestor emite estados y mensajes
+	// honestos (relay.h); aqui solo se registra el estado y se
+	// muestra el mensaje, sin textos nuevos de vista.
+	void onRelayStateChanged(relay::State s);
+	void onRelayOperatorMessage(const QString &msg);
+	// T-078 Fase 4 (vista): seccion relay en la tarjeta Facebook
+	// (ADR-016). Solo vista: Iniciar/Detener + URL fija copiable +
+	// indicador por estados + mensajes honestos del gestor tal cual.
+	// Sin logica auth/red/secretos; el forward lo gobierna Fase 3.
+	void onRelayToggle();
+	void onRelayFixedCopy();
+	void updateRelayUi();
 
 private:
 	// One request at a time; replies carry their Op in a property.
@@ -493,6 +518,22 @@ private:
 	// FASE 1.1 note, kept hidden since FASE 2 (Twitch connects in
 	// Managed like the other platforms; see refreshContentVisibility).
 	QLabel *twManagedNote_ = nullptr;
+	// T-078 Fase 3 (cableado): gestor async del proceso hijo MediaMTX
+	// (ADR-016) + ultimo estado conocido (indicador por estados; la
+	// vista redacta). La ingesta (fbIngest_) jamas llega al Store.
+	RelayManager *relay_ = nullptr;
+	relay::State relayState_ = relay::State::Stopped;
+	// T-078 Fase 4 (vista): seccion relay en la tarjeta Facebook.
+	// Solo widgets/visibilidad; sin estado nuevo sensible. Los
+	// mensajes del gestor se muestran tal cual en relayMsgLabel_
+	// (jamas pisan fbState_/fbVerify_/generalMsg_).
+	QLabel *relaySectionLabel_ = nullptr;
+	QLineEdit *relayFixedEdit_ = nullptr;
+	QPushButton *relayFixedCopy_ = nullptr;
+	QLabel *relayStateLabel_ = nullptr;
+	QPushButton *relayToggleButton_ = nullptr;
+	QLabel *relayMsgLabel_ = nullptr;
+	QLabel *relayVodLabel_ = nullptr;
 	std::optional<meta::Platform> expanded_; // none = all cards closed
 	QNetworkAccessManager *net_ = nullptr;
 	// T-041: connection mode (ADR-012). Global for the dock: a single

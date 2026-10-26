@@ -73,7 +73,7 @@ endif()
 
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/plugin-main.c src/dock-poc.cpp src/metadata.cpp
                                                      src/secure_store.cpp src/metadata_dock.cpp
-                                                     src/backend_auth.cpp)
+                                                     src/backend_auth.cpp src/relay.cpp src/relay_manager.cpp)
 
 if(ENABLE_QT)
   add_subdirectory(poc/t030)
@@ -81,7 +81,7 @@ if(ENABLE_QT)
   # T-031 product selfcheck (QtCore only, on demand).
   # T-032: also covers backoff/revoke policy + DPAPI store round-trip.
   add_executable(metadata-selfcheck EXCLUDE_FROM_ALL src/metadata_selfcheck.cpp src/metadata.cpp
-                                                     src/secure_store.cpp)
+                                                     src/secure_store.cpp src/relay.cpp)
   target_link_libraries(metadata-selfcheck PRIVATE Qt6::Core)
   # T-047: deterministic fake distributed ID for twitchClientId tests
   # (never a real credential; the plugin default stays empty).

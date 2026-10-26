@@ -121,7 +121,14 @@ pruebas de Facebook con usuarios reales y streams reales durante octubre
 de 2026 (incl. E2E del port lab→plugin Fase D + resolución del conflicto
 de alcance AGENTS.md §§23/51 antes de implementar producto [P]; T-077/T-078
 siguen en investigación, BACKLOG canónico; detalle en VALIDATION.md
-Fase D y STATE). Sin afirmar Live/App Review/requisitos (sin evidencia);
+Fase D y STATE). Relay Fases 2–6 (2026-10-26) [D delegada, no
+re-ejecutada aquí]: relay.h/cpp + relay_manager + vista + package.ps1
+con relay/MIT; build RelWithDebInfo OK, selfcheck 315 PASS/0 FAIL,
+diff-check 0, secret-scan limpio, WhatIf OK; T-078 sigue en
+investigación sin cambio de estado [C contra BACKLOG]. Pendientes [P]:
+E2E operador instalar→relay→forward→GoLive→LIVE, métricas F-099,
+audiencia F-093, build E2E del instalador con descarga real, capturas
+visuales. Sin afirmar Live/App Review/requisitos (sin evidencia);
 separado del despliegue del backend en Cloud Run; requiere confirmación
 y alcance explícito antes de ejecutar nada.
 NEXT REQUIRED TECHNICAL TASK: NONE.

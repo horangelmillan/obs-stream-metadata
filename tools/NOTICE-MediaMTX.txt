@@ -1,0 +1,42 @@
+Local relay bundled with obs-stream-metadata: MediaMTX
+============================================================
+
+This product bundles the MediaMTX executable (mediamtx.exe) plus the
+minimal configuration in this directory (mediamtx.yml), as a local
+relay so the operator can always stream to one fixed URL
+(rtmp://127.0.0.1:1935/live). See ADR-016 and tools/MEDIAMTX.md.
+
+MediaMTX upstream: https://github.com/bluenviron/mediamtx
+Pinned release used by the installer: v1.21.3
+  asset: mediamtx_v1.21.3_windows_amd64.zip
+  origin: https://github.com/bluenviron/mediamtx/releases/download/v1.21.3/
+  sha256: b2f5246b07cb72961df03b8d5e8cad43dc657bcf3f49a87bb031bdf22721af74
+  (verified at build time by tools/package.ps1 against the pinned hash
+  and the release checksums.sha256; the binary is never versioned.)
+
+MediaMTX is open-source under the MIT License (license text fetched
+from https://raw.githubusercontent.com/bluenviron/mediamtx/v1.21.3/LICENSE):
+
+----------------------------------------------------------------
+MIT License
+
+Copyright (c) 2019 aler9
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+----------------------------------------------------------------
