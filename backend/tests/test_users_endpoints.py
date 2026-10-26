@@ -5,7 +5,8 @@ Decisiones fijadas aquí con evidencia (pendientes [P] del spec §11):
 - password: 12–128 chars (mínimo 12, sin complejidad inventada).
 - Rate-limit login: 10/10min por IP + 5/10min por username.
 - Signup rate-limit: 10/10min por IP (anti-abuso, mismo orden).
-- Sesión de usuario: opaca 30min (USER_SESSION_TTL_S, patrón T-044),
+- Sesión de usuario: opaca 15d deslizantes con tope absoluto 30d
+  (USER_SESSION_TTL_S/USER_SESSION_MAX_TTL_S, [D] 2026-10-26),
   bearer distinto (header X-User-Session), revocable, idempotente.
 - Auditoría: user_id opaco + conteos/códigos; jamás username en logs
   de auth (identificador de persona, spec §6), jamás password/hash.
@@ -54,7 +55,8 @@ class ValidationTest(unittest.TestCase):
     def test_constants_documented(self):
         from backend import users as u
         self.assertEqual(u.MIN_PASSWORD_LEN, 12)
-        self.assertEqual(u.USER_SESSION_TTL_S, 1800)
+        self.assertEqual(u.USER_SESSION_TTL_S, 15 * 24 * 3600)
+        self.assertEqual(u.USER_SESSION_MAX_TTL_S, 30 * 24 * 3600)
         self.assertEqual((u.USERNAME_MIN_LEN, u.USERNAME_MAX_LEN), (3, 32))
 
     def test_username_rules(self):
@@ -116,7 +118,7 @@ class LoginTest(unittest.TestCase):
         created = signup_direct(app, "grace", _good(6))[1]
         status, payload = login_direct(app, "grace", _good(6))
         self.assertEqual(status, 200)
-        self.assertEqual(payload["expires_in"], 1800)
+        self.assertEqual(payload["expires_in"], 15 * 24 * 3600)
         self.assertIn("user_session", payload)
         dump = json.dumps(payload)
         self.assertNotIn("hash", dump)

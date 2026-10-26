@@ -36,13 +36,17 @@ SALT_BYTES = 16
 #   inventadas: la entropía la da PBKDF2 600k + salt 16B).
 # - login rate-limit: 10/10min por IP + 5/10min por username.
 # - signup rate-limit: 10/10min por IP (anti-abuso, mismo orden).
-# - sesión de usuario: opaca, 30min (patrón T-044 SESSION_TTL_S).
+# - sesión de usuario: opaca, 15 días deslizantes con tope absoluto de
+#   30 días desde el login inicial (decisión [D] 2026-10-26): cada
+#   actividad válida renueva +15 días sin pasar el tope; superado el
+#   tope o 15 días sin actividad → login de nuevo.
 MIN_PASSWORD_LEN = 12
 MAX_PASSWORD_LEN = 128
 USERNAME_MIN_LEN = 3
 USERNAME_MAX_LEN = 32
 _USERNAME_RE = re.compile(r"[A-Za-z0-9._-]+")
-USER_SESSION_TTL_S = 1800
+USER_SESSION_TTL_S = 15 * 24 * 3600  # 1296000: ventana deslizante
+USER_SESSION_MAX_TTL_S = 30 * 24 * 3600  # 2592000: tope absoluto login
 LOGIN_PER_IP_LIMIT = 10
 LOGIN_PER_IP_WINDOW_S = 600
 LOGIN_PER_USER_LIMIT = 5
