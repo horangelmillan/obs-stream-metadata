@@ -392,6 +392,66 @@ QString fbApplyChainNote(const FbVerifyResult &v)
 	return QStringLiteral(" — title/desc written, not verified");
 }
 
+// Plan v3 Fase 1: puros de escucha/colas (sin I/O/red/logs).
+const char *fbSignalDirLeaf()
+{
+	return "obs-stream-metadata-relay";
+}
+
+const char *fbSignalOnFile()
+{
+	return "signal.on";
+}
+
+const char *fbSignalOffFile()
+{
+	return "signal.off";
+}
+
+long long fbSignalBackupMs()
+{
+	return 3000;
+}
+
+long long fbSignalFastMs(int step)
+{
+	if (step <= 0)
+		return 2000;
+	return 1000;
+}
+
+bool fbSignalDropCountsAsGone(int consecutiveFails)
+{
+	return consecutiveFails >= 3;
+}
+
+bool fbSignalBallotUnstable(int presentCount, int total)
+{
+	if (total != 3)
+		return false;
+	return presentCount == 1 || presentCount == 2;
+}
+
+bool fbAutoEndGuardsOk(qint64 goneContinuousMs, qint64 goLiveAtMs,
+		       qint64 nowMs, bool sameIdFreshConfirmed,
+		       bool initiatedByPlugin)
+{
+	if (!initiatedByPlugin || !sameIdFreshConfirmed)
+		return false;
+	if (goneContinuousMs < 30000)
+		return false;
+	if (goLiveAtMs <= 0 || nowMs - goLiveAtMs < 300000)
+		return false;
+	return true;
+}
+
+bool fbRefireDue(qint64 fireAtMs, qint64 nowMs)
+{
+	if (fireAtMs <= 0)
+		return false;
+	return nowMs >= fireAtMs;
+}
+
 Outcome classifyStatus(int code)
 {
 	if (code >= 200 && code < 300)

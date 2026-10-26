@@ -214,9 +214,31 @@ void RelayManager::refireFromIngest(const QString &secureUrl)
 	sendPatch(dest, false);
 }
 
-void RelayManager::clearForward()
+void RelayManager::refireDest(const QString &dest)
 {
-	if (proc_->state() == QProcess::NotRunning) {
+	// Dest ya derivado y revalidado por el llamante (vive solo en
+	// memoria/transito; jamas se loguea ni se persiste). Sin cooldown
+	// aqui (el llamante espero el disparo diferido); sin reintentos.
+	if (dest.isEmpty() ||
+	    !relay::forwardDestLooksValid(dest)) {
+		setState(relay::State::ForwardFailed);
+		notify(relay::forwardErrorMessage(0));
+		return;
+	}
+	ensureStarted();
+	if (state_ == relay::State::BinaryMissing ||
+	    state_ == relay::State::PortBusy)
+		return; // ensureStarted ya notifico
+	if (proc_->state() == QProcess::NotRunning ||
+	    state_ == relay::State::Starting) {
+		pendingDest_ = dest;
+		return;
+	}
+	sendPatch(dest, false);
+}
+
+void RelayManager::clearForward()
+{	if (proc_->state() == QProcess::NotRunning) {
 		setState(relay::State::Stopped);
 		return;
 	}

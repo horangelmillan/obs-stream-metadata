@@ -26,3 +26,20 @@ moq: false
 paths:
   live:
     source: publisher
+    # Avisos por evento (Fase 1): el plugin observa
+    # %TEMP%/obs-stream-metadata-relay esperando signal.on
+    # (emisor en linea) y signal.off (emisor fuera de linea).
+    # runOnOnline se termina con SIGINT al dejar de estar online;
+    # runOnOffline corre al dejar de estar online.
+    # Variables disponibles en ambos (igual que runOnAvailable):
+    # $MTX_PATH (nombre del path), $MTX_QUERY, $MTX_SOURCE_TYPE,
+    # $MTX_SOURCE_ID, $RTSP_PORT. Aqui solo se usa el dir fijo de
+    # senales; MTX_PATH queda documentada para futuros usos.
+    # Windows [C: upstream internal/externalcmd/cmd_os_windows.go]:
+    # si el comando empieza por "cmd ", MediaMTX pasa el resto como
+    # linea cruda a cmd.exe. $VAR la expande MediaMTX (os.Expand);
+    # %VAR% la expande cmd desde el entorno heredado (ahi viajan
+    # tambien MTX_PATH y demas). Comandos one-shot: no hay proceso
+    # persistente que terminar al caer el stream.
+    runOnOnline: 'cmd /c "mkdir "%TEMP%\obs-stream-metadata-relay" 2>nul & echo online> "%TEMP%\obs-stream-metadata-relay\signal.on" & del /F /Q "%TEMP%\obs-stream-metadata-relay\signal.off" 2>nul"'
+    runOnOffline: 'cmd /c "mkdir "%TEMP%\obs-stream-metadata-relay" 2>nul & echo offline> "%TEMP%\obs-stream-metadata-relay\signal.off" & del /F /Q "%TEMP%\obs-stream-metadata-relay\signal.on" 2>nul"'

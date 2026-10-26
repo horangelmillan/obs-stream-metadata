@@ -49,6 +49,11 @@ public:
 	// Fija en caliente el forward hacia la ingesta en memoria.
 	// Respeta cooldown F-097 (bloquea con mensaje, sin reintentos).
 	void refireFromIngest(const QString &secureUrl);
+	// Plan v3 Fase 1: fija un dest ya derivado (cola diferida de un
+	// solo disparo; el llamante espero el cooldown y revalido el ID).
+	// Sin chequeo de cooldown aqui (el llamante lo respeto); sin
+	// reintentos.
+	void refireDest(const QString &dest);
 	// Limpia el forward (PATCH {"forward":[]}); sin cooldown.
 	void clearForward();
 
