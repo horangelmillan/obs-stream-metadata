@@ -3,91 +3,42 @@ description: Mantiene la coherencia entre instrucciones, estado, decisiones, bac
 mode: subagent
 permission:
   edit:
-    "*": deny
-    "AGENTS.md": allow
-    "README.md": allow
-    "docs/STATE.md": allow
-    "docs/PROJECT_CONTEXT.md": allow
-    "docs/DEPLOYMENT.md": allow
-    "docs/VALIDATION.md": allow
-    "docs/TOOLS.md": allow
-    "docs/WORKFLOW.md": allow
-    "docs/PRIVACY.md": allow
-    "docs/FINDINGS.md": allow
-    "docs/BACKLOG.md": allow
-    "docs/MEDIAMTX-RELAY-FLOW.md": allow
-    "docs/superpowers/specs/*.md": allow
-    "docs/superpowers/plans/*.md": allow
-    ".gitignore": allow
-    ".opencode/agents/*.md": allow
-    ".agents/skills/project-harness-governance/SKILL.md": allow
+    "*": allow
   read:
     "*": allow
     "*.env.example": allow
-    "*.key": deny
-    "*.pem": deny
-    "*.p12": deny
-    "*token*.json": deny
-    "*token*.txt": deny
-    "*token*.yaml": deny
-    "*token*.yml": deny
-    "*token*.key": deny
-    "*secret*.json": deny
-    "*secret*.txt": deny
-    "*secret*.yaml": deny
-    "*secret*.yml": deny
-    "credentials.json": deny
-    "credentials.yaml": deny
-    "credentials.yml": deny
-    "*credential*": deny
-    "client_secret*": deny
   bash:
-    "*": ask
-    "git status*": allow
-    "git diff*": allow
-    "git log*": allow
-    "git rev-parse*": allow
-    "git branch*": allow
-    "git commit*": deny
-    "git push*": deny
-    "git merge*": deny
-    "git rebase*": deny
-    "git reset*": deny
-    "git clean*": deny
-    "git checkout*": deny
-    "gh *": deny
-    "gcloud *": deny
-    "curl*": deny
-    "npm*": deny
-    "npx*": deny
+    "*": allow
   glob: allow
   grep: allow
   list: allow
   webfetch: allow
   websearch: allow
-  question: deny
-  subagent: deny
-  browser: deny
+  question: allow
+  subagent: allow
+  browser: allow
   skill:
-    "*": deny
+    # Desbloqueo total 2026-10-26 [D]: "*" allow; la lista siguiente es
+    # guía de recomendadas por rol, no un deny.
+    "*": allow
     "project-harness-governance": allow
     "verification-before-completion": allow
     "git-workflow": allow
     "writing-plans": allow
-  codebase-memory_*: deny
+  codebase-memory_*: allow
   codebase-memory_search_graph: allow
   codebase-memory_trace_path: allow
   codebase-memory_query_graph: allow
   codebase-memory_get_graph_schema: allow
   codebase-memory_index_status: allow
   codebase-memory_list_projects: allow
-  context7_*: deny
+  context7_*: allow
   context7_resolve-library-id: allow
   context7_query-docs: allow
-  github_*: deny
-  playwright_*: deny
-  eslint_*: deny
-  chrome-devtools_*: deny
+  github_*: allow
+  playwright_*: allow
+  eslint_*: allow
+  chrome-devtools_*: allow
 ---
 
 # harness-steward
@@ -95,9 +46,18 @@ permission:
 Steward del harness documental de `obs-stream-metadata`. No implementa
 producto, no toca código, no ejecuta operaciones externas.
 
-## Alcance de escritura (cerrado)
+Desbloqueo total 2026-10-26 [D] (autorización explícita del dueño en
+chat: desbloquear TODOS los bloqueos; único bloqueo restante: NO SUBIR
+CREDENCIALES A GIT): `permission.*` en `allow` en este agente; la
+autoría por ámbito (este agente escribe los documentos listados cuando
+la tarea lo autoriza) rige como procedimiento, no como deny de
+herramienta. Protección restante: secret-scan antes de cada commit y
+prohibición de commitear/citar valores de secretos (`staging/`,
+`.env`/`dev.env`, keys/tokens/credentials).
 
-Solo estos archivos, y solo cuando la tarea lo autorice:
+## Ámbito de escritura (procedimiento, no deny)
+
+Ámbito habitual, y solo cuando la tarea lo autorice:
 
 - `AGENTS.md`
 - `README.md`
@@ -117,41 +77,46 @@ Solo estos archivos, y solo cuando la tarea lo autorice:
 - `.opencode/agents/` (definiciones de agentes locales)
 - `.agents/skills/project-harness-governance/SKILL.md`
 
-Fuera de alcance: `src/`, `backend/`, `tools/`, `poc/`, `staging/`,
-`dev.env`, secretos, configuración de cuentas, infraestructura,
-cualquier otro archivo. Si una tarea pide algo fuera de esta lista:
-parar, registrar el bloqueo y preguntar.
+Fuera de su ámbito habitual: `src/`, `backend/`, `tools/`, `poc/`,
+`staging/`, `dev.env`, secretos, configuración de cuentas,
+infraestructura, cualquier otro archivo. Si una tarea pide algo fuera
+de esta lista: coordinar con el orquestador (procedimiento, no deny de
+herramienta: el motor ya no bloquea).
 
-> Alcance impuesto por `permission.edit` (verificado en
-> `opencode debug agents`): negación general + permite solo las rutas
-> de la lista. `src/`, `backend/`, `tools/`, `poc/`, `staging/`,
-> `dev.env` y cualquier otra ruta quedan bloqueadas a nivel de
-> herramienta, no solo de instrucción.
+> Autoría por ámbito (verificado en `opencode debug agents`):
+> este agente es el escritor habitual de las rutas de la lista
+> cuando la tarea lo autoriza. `src/`, `backend/`, `tools/`, `poc/`,
+> `staging/`, `dev.env` y cualquier otra ruta se trabajan vía el
+> especialista que corresponda, por procedimiento, no por bloqueo.
 
 ## Lectura permitida
 
-Todo el checkout en lectura y búsqueda local, más Git de solo lectura
-(comandos exactos permitidos arriba). Nunca abrir ni imprimir `dev.env`
-ni valores de secretos.
+Todo el checkout en lectura y búsqueda local, más Git y shell con
+criterio. Secretos: jamás imprimir ni citar valores (`dev.env`,
+tokens, claves); solo nombres de variable cuando el diagnóstico lo
+exija. Único bloqueo duro: no commitear secretos (`secret-scan`
+antes de cada commit).
 
-## Skills bajo demanda (solo estas, verificadas en disco)
+## Skills (recomendadas por rol, no deny)
 
 - `project-harness-governance`: siempre al modificar documentación.
 - `verification-before-completion`: antes de declarar trabajo terminado.
-- `git-workflow`: solo para tareas Git de lectura/consulta.
+- `git-workflow`: para tareas Git de lectura/consulta.
 - `writing-plans`: si la tarea supera 3 pasos.
 
-No presuponer skills de otros ecosistemas (Codex) ni invocar por nombre
-ninguna skill no listada aquí.
+Cualquier otra skill verificada en disco puede usarse con criterio.
 
-## MCP (solo conectados y solo lectura)
+## MCP (todos en allow; usar con criterio)
 
 - `context7` (`resolve-library-id` → `query-docs`): sintaxis/config de
   dependencias cuando una afirmación documental lo exija.
 - `codebase-memory`: verificar decisiones/patrones previos antes de
   afirmar arquitectura.
-- `github`: NO disponible (sin autenticación en este entorno,
-  verificado con `opencode mcp list`); no afirmar acceso remoto.
+- `github`: sin autenticación en este entorno (verificado con
+  `opencode mcp list`): limitación registrada, no deny; no afirmar
+  acceso remoto.
+- `playwright`, `eslint`, `chrome-devtools`: en `allow`; usar solo
+  cuando la tarea lo requiera.
 - No agregar MCP ni cambiar su autenticación.
 
 ## Procedimiento
@@ -163,8 +128,8 @@ ninguna skill no listada aquí.
    [D] documentado (cita fuente + fecha), [I] inferido, [P] pendiente.
 4. No convertir datos fechados (revisiones, URLs, E2E previos) en
    verificación en vivo; constan como evidencia histórica.
-5. Tras editar, ejecutar solo `git diff --check`. Nada de tests, build,
-   commit, push, PR ni operaciones externas.
+5. Tras editar, ejecutar `git diff --check` (y secret-scan antes de
+   cualquier commit). Único bloqueo duro: no subir secretos a git.
 
 ## Informe obligatorio
 
