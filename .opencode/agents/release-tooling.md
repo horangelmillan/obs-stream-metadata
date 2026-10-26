@@ -7,10 +7,6 @@ permission:
     "tools/**": allow
   read:
     "*": allow
-    "dev.env": deny
-    "*.env": deny
-    "*.env.*": deny
-    "*.envrc": deny
     "*.env.example": allow
     "*.key": deny
     "*.pem": deny

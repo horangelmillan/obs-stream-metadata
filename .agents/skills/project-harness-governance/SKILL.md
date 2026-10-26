@@ -67,6 +67,11 @@ usar solo la formulación sostenible: (a) alcance del procedimiento
 autorizada; sin ella, el salto es [I] y sin base es [P]. Si la lectura
 o huella está prohibida, reportar la limitación y quedarse en (a)/(b).
 
+Excepción G3 2026-10-26 [D] (autorización del usuario): lectura
+`.env`/`dev.env` permitida; citar solo nombres de variable
+(presencia/ausencia), jamás valores; `staging/` sigue excluida de
+inspección de contenido salvo `status`.
+
 ## 4. Documentación oficial con MCP/web
 
 Consultar fuente oficial cuando una afirmación documental dependa de

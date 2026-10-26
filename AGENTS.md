@@ -2320,6 +2320,12 @@ nube), consultar al subagente persistente:
     sostenible. Correspondencia: (a)/(b) como [C] de procedimiento u
     observación; cualquier salto a contenido sin su evidencia es [I];
     sin base, [P].
+    Excepción G3 2026-10-26 [D] (autorización del usuario, opción
+    "Quitar todo" para `.env`/`dev.env`): la lectura de ficheros
+    `.env`/`dev.env` queda permitida para diagnosticar por nombres de
+    variable (presencia/ausencia, jamás valores); el contenido con
+    secretos jamás se cita en informes, logs o prompts. `staging/`
+    sigue excluida de inspección de contenido salvo `status`.
 11. Evidencia documental frente a verificación operativa: `GET /health`,
     `/ready` o `/version` no demuestran por sí solos a qué URL apunta un
     job de Cloud Scheduler. Afirmar el destino operativo del job exige

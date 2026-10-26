@@ -14,15 +14,13 @@ permission:
     "docs/WORKFLOW.md": allow
     "docs/FINDINGS.md": allow
     "docs/BACKLOG.md": allow
+    "docs/MEDIAMTX-RELAY-FLOW.md": allow
+    "docs/superpowers/specs/*.md": allow
     ".gitignore": allow
     ".opencode/agents/*.md": allow
     ".agents/skills/project-harness-governance/SKILL.md": allow
   read:
     "*": allow
-    "dev.env": deny
-    "*.env": deny
-    "*.env.*": deny
-    "*.envrc": deny
     "*.env.example": allow
     "*.key": deny
     "*.pem": deny
@@ -109,6 +107,8 @@ Solo estos archivos, y solo cuando la tarea lo autorice:
 - `docs/WORKFLOW.md`
 - `docs/FINDINGS.md` (añadir hallazgos F-###, nunca reescribir historia)
 - `docs/BACKLOG.md` (estado canónico: solo edición autorizada por tarea, nunca cambiar estados sin evidencia)
+- `docs/MEDIAMTX-RELAY-FLOW.md` (excepción puntual 2026-10-26 [D], autorización del usuario a la guía: `harness-steward` dueño del doc guía MediaMTX; precedente Fase 1: `docs/BACKLOG.md` y `.gitignore`)
+- `docs/superpowers/specs/*.md` (excepción puntual 2026-10-26 [D], autorización del usuario al spec: `harness-steward` transcribe el diseño "Cuentas de usuario Managed" aprobado en chat al destino `docs/superpowers/specs/2026-10-26-managed-user-accounts-design.md`; precedentes: `docs/BACKLOG.md`, `.gitignore` y `docs/MEDIAMTX-RELAY-FLOW.md`; solo specs autorizados por tarea, sin código ni producto)
 - `.gitignore` (solo entradas de ignorado; sin tocar reglas de secretos sin ADR)
 - `.opencode/agents/` (definiciones de agentes locales)
 - `.agents/skills/project-harness-governance/SKILL.md`

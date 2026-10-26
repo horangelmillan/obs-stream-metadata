@@ -41,7 +41,10 @@ invocación de subagentes se expresa con `subagent: deny` (comprobado
 efectivo en los 4 agentes, igual que en los built-ins `explore` y
 `general`). `edit` negado salvo alcance
 (`harness-steward` = 13 rutas listadas (11 documentales + `docs/BACKLOG.md`
-+ `.gitignore`, reforma 2026-10-25);
++ `.gitignore`, reforma 2026-10-25; excepción puntual 2026-10-26 [D],
+autorización del usuario a la guía: + `docs/MEDIAMTX-RELAY-FLOW.md` → allow,
+`harness-steward` dueño del doc guía MediaMTX; precedente Fase 1:
+`docs/BACKLOG.md` y `.gitignore` + specs Managed 2026-10-26 [D]: + `docs/superpowers/specs/*.md` → allow, transcribe diseño "Cuentas de usuario Managed" aprobado en chat; solo specs autorizados por tarea);
 `obs-plugin` = `src/**`; `backend-integrations` = `backend/**` + `lab/**`
 (dueño ejecutor lab, reforma 2026-10-25);
 `release-tooling` = `tools/**` (ampliado desde `tools/deploy.ps1` exacto
@@ -60,6 +63,18 @@ comprobados `dev.env`, `config.env`, `secrets.yaml`,
 `api_tokens.txt`, `credentials.yml`, `client_secret_abc.json`→deny y
 `backend/token_crypto.py`, `ADR-008-byod-secrets-dpapi.md`→allow
 (verificado por glob que ningún archivo legítimo del repo colisiona).
+Excepción G3 2026-10-26 [D] (autorización del usuario, "Quitar todo"):
+`.env`/`dev.env` legibles en los 7 roles; solo nombres de variable +
+presencia/ausencia, jamás valores; resto de denies intacto:
+
+- `harness-steward`: `.env` legible, secretos no.
+- `obs-plugin`: `.env` legible, secretos no.
+- `backend-integrations`: `.env` legible, secretos no.
+- `gcp-stream-metadata`: `.env` legible, secretos no.
+- `release-tooling`: `.env` legible, secretos no.
+- `orquestador`: `.env` legible, secretos no.
+- `git-integration`: `.env` legible, secretos no (sigue prohibido
+  `git add`/commit de `.env` y secretos).
 Shell en `ask` salvo Git de solo lectura (`status/diff/log/rev-parse/
 branch`→allow; `commit/push/merge/rebase/reset/clean/checkout`,
 `gh`, `gcloud` salvo GCP, `curl`→deny comprobados;
@@ -78,6 +93,8 @@ nombres exactos comprobados en disco): añadidos reforma 2026-10-25
 historial local): solo lecturas necesarias por rol; denegados
 `index_repository/delete_project/ingest_traces/manage_adr`,
 `github_*`, `playwright_*`, `eslint_*`, `chrome-devtools_*`
+(excepción: `backend-integrations` `playwright_*`/`chrome-devtools_*`→`allow`
+por orden explícita del dueño 2026-10-26, E2E lab T-077, ver F-091)
 (`search_graph`→allow y `delete_project/ingest_traces`→deny
 comprobados; `github_list_issues`, `playwright_browser_navigate`,
 `eslint_lint-files`→deny comprobados). `github` sigue sin
@@ -90,6 +107,15 @@ navegador);
 `webfetch` permitido, `websearch` permitido en steward y `ask` en
 dominio. GCP además: sin skills y sin MCP (solo shell + webfetch),
 coherente con su rol auditor.
+Apertura solo-lab T-077 (2026-10-26, autorización del usuario) [D]:
+`backend-integrations.browser`: `ask`→`allow` (solo E2E lab T-077
+`localhost:3002` + observación por el operador); orden explícita del
+dueño del repositorio 2026-10-26 [D]: se elimina la regla que impedía
+usar `chrome-devtools` MCP para el E2E del lab → `playwright_*` y
+`chrome-devtools_*` en `backend-integrations` pasan a `allow`
+(autorización standing lab T-077 ya registrada; riesgo aceptado por el
+dueño, ver F-091); standing T-077 = batería lab completa sin OK por paso; GoLive/LIVE_NOW y todo lo productivo siguen
+con gates y OK explícito separado.
 Limitaciones del motor: sin expansión por llaves (enumerar por
 extensión); rutas evaluadas como relativas a la raíz según los
 ejemplos oficiales (sin prueba de edición real en esta sesión);
@@ -170,6 +196,8 @@ integrar el Todo-junto en commits atómicos ordenados.
 - Destructivos: requieren autorización explícita del usuario.
 - Rutas excluidas (`staging/`, `dev.env`): no inspeccionar contenido;
   evidencia solo según Skill (`project-harness-governance` §3) y
-  `AGENTS.md` §55.10.
+  `AGENTS.md` §55.10 (excepción G3 2026-10-26: `.env`/`dev.env`
+  legibles por nombres de variable, jamás valores; `staging/` sigue
+  excluida salvo `status`).
 - Estado operativo (Scheduler): `/health`, `/ready`, `/version` no
   sustituyen la evidencia del propio job (`AGENTS.md` §55.11).

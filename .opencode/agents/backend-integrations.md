@@ -8,10 +8,6 @@ permission:
     "lab/**": allow
   read:
     "*": allow
-    "dev.env": deny
-    "*.env": deny
-    "*.env.*": deny
-    "*.envrc": deny
     "*.env.example": allow
     "*.key": deny
     "*.pem": deny
@@ -59,7 +55,7 @@ permission:
   websearch: ask
   question: deny
   subagent: deny
-  browser: ask
+  browser: allow # solo E2E lab T-077 (localhost:3002) + observación por el operador
   skill:
     "*": deny
     "test-driven-development": allow
@@ -81,9 +77,9 @@ permission:
   context7_resolve-library-id: allow
   context7_query-docs: allow
   github_*: deny
-  playwright_*: deny
+  playwright_*: allow # E2E lab T-077, orden del dueño 2026-10-26
   eslint_*: deny
-  chrome-devtools_*: deny
+  chrome-devtools_*: allow # E2E lab T-077, orden del dueño 2026-10-26
 ---
 
 # backend-integrations
@@ -108,12 +104,20 @@ local; sin infraestructura productiva ni despliegues.
 > herramienta. Si la tarea exige infraestructura, parar y devolver el
 > bloqueo al orquestador.
 >
-> Nota `browser: ask` (2026-10-25): el permiso se declara como `ask`
-> para validación del lab solo contra `localhost`; su efectividad en el
-> motor queda [P] pendiente de comprobar con `opencode debug agents`
-> en la Fase 2. Si el motor no lo admite, rige `deny` y el lab se
-> valida sin navegador (curl prohibido; `node*`/`python*` locales sí
-> permitidos).
+> Nota `browser: allow` (2026-10-26, apertura máxima SEGURA autorizada por
+> el usuario): solo E2E lab T-077 (`localhost:3002`) + observación por el
+> operador. `playwright_*` y `chrome-devtools_*` en `allow` por orden
+> explícita del dueño del repositorio 2026-10-26 (E2E lab T-077; riesgo
+> aceptado por él, ver F-091): el lab se valida con `browser` +
+> `node*`/`python*` locales y con los MCP `playwright`/`chrome-devtools`
+> donde el motor los exponga.
+>
+> Autorización standing T-077 (2026-10-26, usuario): batería lab completa
+> (creates UNPUBLISHED, read-back, updates, deletes, ingesta manual por
+> operador) SIN pedir autorización por paso; GoLive/LIVE_NOW y todo lo
+> productivo siguen exigiendo OK explícito separado; jamás
+> tokens/secretos/ingesta en logs, jamás staging/dev.env en git, jamás
+> prod.
 
 ## Lectura y análisis
 
