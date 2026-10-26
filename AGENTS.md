@@ -2306,51 +2306,31 @@ nube), consultar al subagente persistente:
     `docs/FINDINGS.md`. Si las fuentes no permiten una jerarquía
     coherente, se documenta el hueco como regla provisional marcada
     (`[P] provisional`) sin inventar decisiones de producto.
-10. Rutas protegidas o excluidas (`staging/`, `dev.env` y análogas): no
-    leer, listar, hashear ni inspeccionar su contenido. Registrar el
-    estado Git inicial y final de esas rutas solo con comandos de
-    lectura (p. ej. `git status --porcelain`). Distinguir siempre:
+10. Rutas sensibles (`staging/`, `.env`/`dev.env` y análogas):
+    Desbloqueo total 2026-10-26 [D] (autorización explícita del dueño
+    en chat: desbloquear TODOS los bloqueos; único bloqueo restante:
+    NO SUBIR CREDENCIALES A GIT). Lectura permitida con criterio
+    (nombres de variable, presencia/ausencia; jamás citar valores de
+    secretos en informes, logs o prompts); edición solo con
+    autorización explícita por tarea y verificando antes y después que
+    los archivos están ignorados (`git check-ignore -v .env dev.env`
+    debe listarlos; si alguno no está ignorado, PARAR y pedir
+    instrucciones). `staging/` no se commitea jamás; su estado se
+    registra con `git status --porcelain` (solo `status` = [C] de
+    observación, nunca de contenido). Distinguir siempre:
     (a) "no se ejecutaron acciones dirigidas a esta ruta" (alcance del
     procedimiento); (b) "el estado Git observado al inicio y al final
     fue el mismo" (solo `status`, [C] de observación, no de contenido);
     (c) "se comprobó que el contenido no cambió" (requiere una
     comprobación de contenido autorizada y adecuada; `git status` solo
-    nunca basta). Si la ruta tiene prohibida la lectura o la huella, se
-    reporta la limitación y se usa la formulación más acotada
-    sostenible. Correspondencia: (a)/(b) como [C] de procedimiento u
+    nunca basta). Correspondencia: (a)/(b) como [C] de procedimiento u
     observación; cualquier salto a contenido sin su evidencia es [I];
     sin base, [P].
-    Excepción G3 2026-10-26 [D] (autorización del usuario, opción
-    "Quitar todo" para `.env`/`dev.env`): la lectura de ficheros
-    `.env`/`dev.env` queda permitida para diagnosticar por nombres de
-    variable (presencia/ausencia, jamás valores); el contenido con
-    secretos jamás se cita en informes, logs o prompts. `staging/`
-    sigue excluida de inspección de contenido salvo `status`.
-    Excepción G4 2026-10-26 [D] (autorización del usuario en chat:
-    documentar el desbloqueo para que no vuelva a bloquear + URL
-    canónica confirmada): actualizar SOLO bases de URL en
-    `.env`/`dev.env` está permitido únicamente con autorización
-    explícita del usuario por tarea, con procedimiento obligatorio:
-    (1) verificar antes de tocar que ambos archivos están ignorados
-    (`git check-ignore -v .env dev.env` debe listarlos); (2)
-    mostrar/imprimir solo líneas con URL, jamás valores de secretos;
-    (3) reemplazar solo la base conservando rutas; (4) re-verificar el
-    ignorado después; (5) si algún archivo no está ignorado, PARAR y
-    pedir instrucciones. Regla dura del usuario (única regla de
-    bloqueo duro): "NO SUBIR SECRETOS A GIT". Las protecciones de
-    lectura de secretos se mantienen porque son las que la hacen
-    cumplir.
-    Excepción G5 2026-10-26 [D] (autorización total explícita del
-    usuario en chat: los agentes apartan/devuelven `dev.env` ellos
-    mismos y el harness deja de bloquear; ÚNICA regla dura:
-    "NO SUBIR SECRETOS A GIT"): apartar/devolver `.env`/`dev.env`
-    IGNORADOS por los agentes con autorización explícita por tarea
-    (rename ciego con `Rename-Item`, SIN leer contenido jamás,
-    verificando ignorado con `git check-ignore -v .env dev.env`
-    antes y después, restauración obligatoria al terminar; si no
-    está ignorado, PARAR). Las denegaciones de LECTURA de secretos
-    se mantienen porque son las que impiden que un secreto llegue a
-    un commit/log.
+    Excepciones G3/G4/G5 2026-10-26 [D] (autorizaciones del usuario para
+    lectura/URLs/apartado de `.env`/`dev.env`): subsumidas en este
+    punto; se conservan como historia y ya no operan como gates. Las
+    protecciones que impiden citar valores de secretos se mantienen
+    porque son las que hacen cumplir el único bloqueo duro.
 11. Evidencia documental frente a verificación operativa: `GET /health`,
     `/ready` o `/version` no demuestran por sí solos a qué URL apunta un
     job de Cloud Scheduler. Afirmar el destino operativo del job exige
@@ -2362,37 +2342,46 @@ nube), consultar al subagente persistente:
 
 # 56. Agentes locales y Skill compartida
 
+Desbloqueo total 2026-10-26 [D] (autorización explícita del dueño en
+chat: desbloquear TODOS los bloqueos; único bloqueo restante: NO SUBIR
+CREDENCIALES A GIT): `permission.*` en `allow` en los 8 agentes. La
+autoría por ámbito y la serialización de un solo escritor rigen como
+procedimiento, no como deny de herramienta.
+
 Definiciones en `.opencode/agents/` (descubrimiento:
 `opencode debug agents` desde la raíz del checkout):
 
--   `harness-steward`: coherencia documental; edita solo los
-    documentos de su alcance (único escritor de `docs/BACKLOG.md`;
+-   `harness-steward`: coherencia documental; escritor habitual de los
+    documentos de su ámbito (único que edita `docs/BACKLOG.md`;
     dueño de `.gitignore` para entradas de ignorado); sin código ni
-    operaciones externas.
+    operaciones externas por procedimiento.
 -   `obs-plugin`: C++/Qt6 y cliente del plugin; lógica en `src/`
-    (auth/red/storage); sin despliegues ni cuentas externas.
+    (auth/red/storage); sin despliegues ni cuentas externas por
+    procedimiento.
 -   `ux-ui`: diseñador-constructor de la interfaz del dock (Qt6
     Widgets: pantallas, estados, textos, estilos); vista en `src/`;
     investiga documentación oficial; no toca lógica de auth/red/
-    secretos. Reparto con `obs-plugin` en §tabla: serializados por
-    el orquestador, jamás a la vez (creación 2026-10-26 [D],
-    autorización del usuario en chat).
+    secretos por procedimiento. Reparto con `obs-plugin` en §tabla:
+    serializados por el orquestador, jamás a la vez (creación
+    2026-10-26 [D], autorización del usuario en chat).
 -   `backend-integrations`: backend Python/OAuth/pruebas; trabaja en
     `backend/`; dueño ejecutor del lab Facebook (`lab/**`, Node);
-    sin infraestructura productiva ni despliegues.
+    producción solo con autorización explícita por run.
 -   `release-tooling`: herramientas de publicación; trabaja en
-    `tools/**` (`deploy.ps1`, `package.ps1`); modifica sin ejecutar.
+    `tools/**` (`deploy.ps1`, `package.ps1`); ejecuta con criterio,
+    despliega a producción solo con autorización explícita por run.
 -   `git-integration`: integración Git atómica (add por paths
-    explícitos, commit, push, PRs) del trabajo ya revisado; sin
-    edición de archivos (`permission.edit` denegado total); solo
-    actúa bajo autorización escrita del gate vigente (fase G1,
-    2026-10-25 [D]).
--   `gcp-stream-metadata`: auditoría GCP en solo lectura; sus datos
-    fechados son evidencia histórica hasta re-verificar.
+    explícitos, commit, push, PRs) del trabajo ya revisado; puede editar
+    archivos con criterio; secret-scan antes de cada commit; jamás
+    commitea secretos, `staging/`, `.env`/`dev.env`.
+-   `gcp-stream-metadata`: especialista GCP; audita con criterio
+    (prefiere solo lectura); escrituras productivas solo con plan +
+    autorización explícita por run; sus datos fechados son evidencia
+    histórica hasta re-verificar.
 -   `orquestador` (`orquestador.md`, `mode: primary`): clasifica,
     planea, obtiene autorización, delega a un especialista a la vez,
-    revisa, valida y cierra; no edita archivos directamente
-    (`permission.edit` denegado en su totalidad).
+    revisa, valida y cierra; por procedimiento delega la edición al
+    especialista que corresponda, pero el motor ya no se lo deniega.
 
 Tabla de propiedad (un escritor por ruta; reforma 2026-10-25):
 
@@ -2405,8 +2394,8 @@ Tabla de propiedad (un escritor por ruta; reforma 2026-10-25):
 | `src/**` (vista: pantallas, textos, estados, estilos) | `ux-ui` |
 | `backend/**` | `backend-integrations` |
 | `lab/**` | `backend-integrations` (ejecutor lab) |
-| `tools/**` | `release-tooling` (sin ejecución) |
-| Integración Git (add/commit/push/PR/merge por paths, sin edición de archivos) | `git-integration` (solo bajo autorización escrita del gate vigente) |
+| `tools/**` | `release-tooling` (ejecuta con criterio; despliegue a prod solo con autorización por run) |
+| Integración Git (add/commit/push/PR/merge por paths, con edición si conviene) | `git-integration` (procedimiento habitual; único bloqueo: jamás secretos/staging/.env) |
 
 Reparto `src/**` (2026-10-26 [D]): `obs-plugin` = lógica,
 `ux-ui` = vista; el orquestador los serializa, jamás escriben a la
@@ -2421,9 +2410,13 @@ etiquetas [C]/[D]/[I]/[P], límites). La cargan `harness-steward`
 documentación.
 
 Coordinación: OpenCode principal orquesta e integra; un solo agente
-escribe a la vez; ningún agente hace commit, push, PR, merge,
-despliegue ni cambios externos sin autorización separada — la única
-excepción es `git-integration`, que ejecuta exactamente lo autorizado
-por el gate vigente sin editar archivos. Detalle de
+escribe a la vez por procedimiento; el único bloqueo duro es no subir
+secretos a git (secret-scan antes de cada commit; jamás commitear
+`staging/`, `.env`/`dev.env`, claves, tokens ni credenciales). Los
+gates de autorización por run para commit/push/PR/merge/despliegue/
+cambios externos quedan fundidos en ese único bloqueo (decisión
+2026-10-26 [D], autorización explícita del dueño): producción y
+secretos siguen exigiendo criterio y autorización explícita por run
+como procedimiento, no como deny de herramienta. Detalle de
 permisos y herramientas por agente en cada definición y en
 `docs/TOOLS.md`.

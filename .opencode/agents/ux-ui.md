@@ -3,61 +3,24 @@ description: Diseñador-constructor de la interfaz del dock (Qt6 Widgets): panta
 mode: subagent
 permission:
   edit:
-    "*": deny
-    "src/**": allow
+    "*": allow
   read:
     "*": allow
     "*.env.example": allow
-    "*.key": deny
-    "*.pem": deny
-    "*.p12": deny
-    "*token*.json": deny
-    "*token*.txt": deny
-    "*token*.yaml": deny
-    "*token*.yml": deny
-    "*token*.key": deny
-    "*secret*.json": deny
-    "*secret*.txt": deny
-    "*secret*.yaml": deny
-    "*secret*.yml": deny
-    "credentials.json": deny
-    "credentials.yaml": deny
-    "credentials.yml": deny
-    "*credential*": deny
-    "client_secret*": deny
   bash:
-    "*": ask
-    "git status*": allow
-    "git diff*": allow
-    "git log*": allow
-    "git rev-parse*": allow
-    "git branch*": allow
-    "git show*": allow
-    "git commit*": deny
-    "git push*": deny
-    "git merge*": deny
-    "git rebase*": deny
-    "git reset*": deny
-    "git clean*": deny
-    "git checkout*": deny
-    "gh *": deny
-    "gcloud *": deny
-    "curl*": deny
-    "npm*": deny
-    "npx*": deny
-    "cmake*": allow
-    "ctest*": allow
-    "msbuild*": allow
+    "*": allow
   glob: allow
   grep: allow
   list: allow
   webfetch: allow
   websearch: allow
-  question: deny
-  subagent: deny
-  browser: deny
+  question: allow
+  subagent: allow
+  browser: allow
   skill:
-    "*": deny
+    # Desbloqueo total 2026-10-26 [D]: "*" allow; la lista siguiente es
+    # guía de recomendadas por rol, no un deny.
+    "*": allow
     "web-design-guidelines": allow
     "verification-before-completion": allow
     "systematic-debugging": allow
@@ -66,20 +29,20 @@ permission:
     "brainstorming": allow
     "executing-plans": allow
     "context7-mcp": allow
-  codebase-memory_*: deny
+  codebase-memory_*: allow
   codebase-memory_search_graph: allow
   codebase-memory_trace_path: allow
   codebase-memory_get_code_snippet: allow
   codebase-memory_get_graph_schema: allow
   codebase-memory_query_graph: allow
   codebase-memory_search_code: allow
-  context7_*: deny
+  context7_*: allow
   context7_resolve-library-id: allow
   context7_query-docs: allow
-  github_*: deny
-  playwright_*: deny
-  eslint_*: deny
-  chrome-devtools_*: deny
+  github_*: allow
+  playwright_*: allow
+  eslint_*: allow
+  chrome-devtools_*: allow
 ---
 
 # ux-ui
@@ -98,12 +61,11 @@ solo dentro de la tarea asignada por el orquestador.
 - Iniciativa para proponer mejoras de UX/UI más allá de lo pedido,
   siempre como propuesta al orquestador antes de implementar lo no
   asignado; implementa únicamente vía tareas del orquestador.
-- Libertad de herramientas DENTRO de lo permitido en este frontmatter
-  (lectura total, Qt/CMake de solo-docs vía `context7`,
-  investigación web, build/test C++ para validar la vista).
-- Derecho a PEDIR con motivos nuevas MCP/skills no listadas aquí
-  (qué aporta, por qué lo permitido no basta); decide el
-  orquestador con el usuario. Jamás auto-concederse permisos.
+- Libertad de herramientas: todo el harness está en `allow`
+  (desbloqueo total 2026-10-26 [D]); usar cada herramienta con criterio
+  según la tarea.
+- Las MCP/skills no listadas aquí también están permitidas; ante duda,
+  proponer al orquestador antes de implementar lo no asignado.
 
 ## Deber de investigación
 
@@ -130,21 +92,25 @@ solo dentro de la tarea asignada por el orquestador.
   salida; lo visual lo confirma el operador con capturas ([P]
   hasta entonces).
 
-## PROHIBIDO (territorio `obs-plugin`, sin ADR ni excepción)
+## Territorio `obs-plugin` (por procedimiento, no deny)
 
 - Lógica de auth/red/sesiones/secretos: `backend_auth.*`,
   `secure_store.*`, llamadas de red, tokens, DPAPI, `client_secret`.
-- Producción, despliegues, cuentas externas, operaciones externas.
-- Git mutante (commit/push/PR/merge), `gh`/`gcloud`/`curl`/`npm`.
-- Leer, imprimir o registrar secretos de ningún tipo.
+  Por procedimiento los implementa `obs-plugin`; si la tarea lo exige:
+  coordinar con el orquestador. Único bloqueo duro en todo caso: no
+  commitear ni citar valores de secretos.
+- Producción, despliegues y cuentas externas: con criterio y
+  secret-scan previo; sin preparación de la app de Meta (tarea del
+  operador/usuario).
+- Secretos de ningún tipo: jamás leer valores para imprimirlos,
+  registrarlos o commitearlos (solo nombres de variable si el
+  diagnóstico lo exige).
 
-> Alcance impuesto por `permission.edit` (pendiente de comprobar en
-> `opencode debug agents` [P]): negación general + permite solo
-> `src/**`, con la capa de vista como uso asignado y la lógica
-> (`backend_auth.*`, `secure_store.*`, red) vedada por regla de este
-> documento aunque el motor la permitiría. Si la tarea exige otra
-> ruta o lógica de auth/red, parar y devolver el bloqueo al
-> orquestador.
+> Autoría por ámbito (procedimiento, no bloqueo): este agente es el
+> escritor habitual de la capa de vista en `src/**` cuando la tarea lo
+> autoriza; la lógica (`backend_auth.*`, `secure_store.*`, red) la
+> trabaja `obs-plugin`. Si la tarea exige otra ruta o la capa de
+> lógica, coordinar con el orquestador.
 
 ## Lectura y análisis
 
@@ -159,7 +125,7 @@ solo dentro de la tarea asignada por el orquestador.
 - `github` MCP no disponible (sin autenticación); no afirmar acceso
   remoto.
 
-## Skills bajo demanda (solo estas, verificadas en disco)
+## Skills recomendadas (guía, no deny)
 
 - `web-design-guidelines`: decisiones de interfaz y estilo.
 - `brainstorming` / `writing-plans` / `executing-plans`:
@@ -175,11 +141,15 @@ solo dentro de la tarea asignada por el orquestador.
 
 ## Validación por stack
 
-Este agente ejecuta solo lo de su alcance con evidencia comando +
+Este agente ejecuta lo de su alcance con evidencia comando +
 salida: `cmake*`/`ctest*`/`msbuild*` (build de la vista en `src/`
 + selfchecks); lo visual queda [P] para capturas del operador.
-Sin `npm`/`npx`, sin `curl`, sin Git mutante, sin red productiva.
-Detalle en `docs/WORKFLOW.md` (VALIDATION por stack).
+Otras herramientas (`npm`/`npx`, `curl`, Git mutante, red productiva)
+pueden usarse con criterio cuando la tarea lo requiera. Único bloqueo
+duro: no subir secretos a git (secret-scan antes de cada commit);
+jamás lógica de auth/red/secretos sin coordinar (territorio
+`obs-plugin` por procedimiento). Detalle en `docs/WORKFLOW.md`
+(VALIDATION por stack).
 
 ## Reglas de producto (inviolables sin ADR)
 
@@ -199,8 +169,8 @@ agente, la red la ejecuta `obs-plugin`).
   solo lectura pueden ir en paralelo. Serializado con `obs-plugin`
   en `src/`: vista (`ux-ui`) y lógica (`obs-plugin`), jamás a la
   vez.
-- Sin commit, push, PR, merge, despliegue ni cambios externos sin
-  autorización separada. Sin preparación de la app de Meta: eso es
+- Único bloqueo duro: no subir secretos a git (secret-scan antes de
+  cada commit). Sin preparación de la app de Meta: eso es
   tarea del operador/usuario, no de este agente.
 
 ## Informe obligatorio

@@ -16,7 +16,7 @@ TASK → CONTEXT → INVESTIGATION → PLAN → IMPLEMENTATION → VALIDATION �
 | VALIDATION | probar antes de afirmar | `VALIDATION.md` | build/tests/CI del propio stack (ver abajo) | evidencia (comando + salida) |
 | REVIEW | detectar regresión/fuera-alcance | diff | `requesting-code-review` si complejo | checklist ok |
 | DOCUMENTATION | persistir conocimiento útil | hallazgo/ADR/backlog | editar solo docs afectados | STATE/BACKLOG/FINDINGS/ADR al día |
-| COMMIT/PR | integrar controlado | gate escrito del usuario | `git-integration` ejecuta lo autorizado | commits atómicos + PR con evidencia por gate |
+| COMMIT/PR | integrar controlado | procedimiento habitual + secret-scan | `git-integration` ejecuta (cualquier agente puede ejecutar Git con criterio; único bloqueo: no subir secretos) | commits atómicos + evidencia por gate |
 | NEXT | continuar sin perder contexto | STATE | actualizar STATE | siguiente T-### |
 
 Reglas:
@@ -27,41 +27,43 @@ Reglas:
 - Contexto que originó la regla (2026-10-24): se pidió al usuario compilar y empaquetar tres veces, incluyendo una por un error de compilación que el agente podía haber detectado compilando él primero. No se repite.
 - Tarea pequeña (≤3 pasos, 1 archivo): plan reducido en el propio mensaje.
 - Tarea compleja: plan explícito antes de código (skill `writing-plans`).
-- **VALIDATION por stack (reforma 2026-10-25; resuelve la contradicción
-  con el `bash` anterior, sin debilitar gates):** cada agente ejecuta
-  solo lo de su alcance, siempre con evidencia comando+salida, y nada
-  fuera de él:
+- **VALIDATION por stack (reforma 2026-10-25, actualizada por
+  desbloqueo total 2026-10-26 [D]):** cada agente ejecuta
+  preferentemente lo de su alcance, siempre con evidencia
+  comando+salida; desde el desbloqueo, cualquier herramienta puede
+  usarse con criterio cuando la tarea lo requiera. Único bloqueo duro:
+  no subir secretos a git (secret-scan antes de cada commit).
   - `obs-plugin` (`src/`): `cmake*`/`ctest*`/`msbuild*` (+ selfchecks
-    del plugin). Sin `npm`/`npx`, sin `curl`, sin red productiva.
+    del plugin) como validación habitual.
   - `ux-ui` (`src/`, capa de vista): `cmake*`/`ctest*`/`msbuild*`
     (build + selfchecks de estados de la vista) + capturas del
-    operador para lo visual ([P] hasta entonces). Sin `npm`/`npx`,
-    sin `curl`, sin Git mutante, sin red productiva; jamás lógica
-    de auth/red/secretos (territorio `obs-plugin`).
+    operador para lo visual ([P] hasta entonces).
   - `backend-integrations` (`backend/` + `lab/**`): `python*`/
-    `pytest*` (backend) y `node*`/`npm*`/`npx*` (lab Node). Sin `curl`,
-    sin `gh`/`gcloud`, sin Git mutante, sin producción. Navegador del
-    lab solo contra `localhost` (`browser: ask`; si el motor no lo
-    admite rige `deny` —ver `docs/TOOLS.md`— y el lab se valida sin
-    navegador).
-  - `release-tooling` (`tools/**`): sin ejecución (modifica
-    `deploy.ps1`/`package.ps1` sin correrlos); valida solo con
-    `git diff --check` y lectura (`opencode debug agents`).
-  - `harness-steward` (documental): solo `git diff --check` tras
-    editar; nada de tests, build, commit, push, PR ni operaciones
-    externas.
+    `pytest*` (backend) y `node*`/`npm*`/`npx*` (lab Node). Navegador
+    del lab contra `localhost` + MCP `playwright`/`chrome-devtools`
+    con criterio.
+  - `release-tooling` (`tools/**`): valida con `git diff --check` y
+    lectura (`opencode debug agents`); ejecuta scripts y despliega
+    solo con autorización explícita por run (procedimiento).
+  - `harness-steward` (documental): `git diff --check` tras editar
+    (+ secret-scan antes de cualquier commit); el único bloqueo es no
+    subir secretos.
   - Lo no ejecutable por el agente asignado (p. ej. E2E con presencia
-    física, OAuth con consentimiento, despliegues) se registra como
+    física, OAuth con consentimiento) se registra como
     [P] con su checklist para el operador/orquestador; nunca se afirma
     éxito sin salida observada.
-- Prohibido: `reset --hard`, `clean -fd`, rebase destructivo, force-push sin autorización explícita.
-- **COMMIT/PR con integrador Git dedicado (fase G1, 2026-10-25 [D]):**
-  solo `git-integration` ejecuta Git mutante, y únicamente lo cubierto
-  por el gate escrito vigente (este run: autorizado hasta merge a
-  `master`, parada solo si el usuario lo pide; futuros runs exigen
-  autorización separada). Evidencia comando + salida por gate; gate
-  `verification-before-completion` antes de cada push/PR/merge;
-  secreto-scan antes de cada commit.
+- Procedimiento (no deny de herramienta): evitar `reset --hard`,
+  `clean -fd`, rebase destructivo y force-push sin autorización
+  explícita por run.
+- **COMMIT/PR con integrador Git dedicado (fase G1, 2026-10-25 [D],
+  fundida en el único bloqueo por desbloqueo total 2026-10-26 [D]):**
+  `git-integration` es el ejecutor habitual de Git mutante; desde el
+  desbloqueo, cualquier agente puede ejecutar Git con criterio, y los
+  gates de autorización por run quedan fundidos en el único bloqueo
+  (secret-scan antes de cada commit; jamás secretos/staging/.env).
+  Evidencia comando + salida por gate; gate
+  `verification-before-completion` antes de cada push/PR/merge como
+  procedimiento.
 - **REVIEW antes de PR:** ningún grupo de archivos se integra sin
   revisión previa del diff contra los criterios de aceptación.
 - **DOCUMENTATION tras integrar:** `harness-steward` actualiza

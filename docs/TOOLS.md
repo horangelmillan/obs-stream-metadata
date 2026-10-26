@@ -33,7 +33,31 @@ Estado real 2026-10-24: MCP conectados `chrome-devtools`,
 `codebase-memory` (14 tools confirmadas por `tools/list` contra el
 binario local), `context7` (2), `eslint` (1), `playwright` (25);
 `github` requiere autenticación (no disponible).
-Permisos endurecidos por agente con sintaxis v2 vigente (`permission:`,
+Desbloqueo total 2026-10-26 [D] (autorización explícita del dueño en
+chat: desbloquear TODOS los bloqueos; único bloqueo restante: NO SUBIR
+CREDENCIALES A GIT). Desde esta fecha, en los 8 frontmatters:
+`permission.edit` = `"*": allow`; `permission.read` = `"*": allow` +
+`"*.env.example": allow` (eliminados todos los denies de
+secretos/keys/tokens/credentials/client_secret: la protección pasa a
+ser solo no commitear ni citar valores, no deny de lectura);
+`permission.bash` = `"*": allow` (eliminados los denies de git
+commit/push/merge/rebase/reset/clean/checkout, `gh`, `gcloud`, `curl`,
+`npm`/`npx`, `powershell`/`pwsh`, `python`, `cmake`); `glob`/`grep`/
+`list`/`read`/`webfetch`/`websearch` = `allow`; `question` = `allow`;
+`subagent` = `allow` (eliminada la prohibición de delegación anidada;
+el orquestador sigue serializando escritores por procedimiento);
+`browser` = `allow`; `skill` = `"*": allow` (las listas por rol quedan
+como guía de recomendadas, no como deny); MCP (`codebase-memory`,
+`context7`, `github`, `playwright`, `eslint`, `chrome-devtools`) =
+`allow` (`github` sigue sin autenticación en este entorno: limitación
+registrada, no deny). La autoría por ámbito (harness-steward = docs;
+obs-plugin = lógica `src/`; ux-ui = vista `src/`; backend-integrations
+= `backend/`+`lab/`; release-tooling = `tools/`; git-integration =
+integración Git) rige como procedimiento, no como deny. El texto
+histórico que sigue (régimen de denies anterior, reforma 2026-10-25 y
+aperturas T-077) se conserva como evidencia de lo que había, ya sin
+efecto: lo vigente es este párrafo.
+Histórico [D]: permisos endurecidos por agente con sintaxis v2 vigente (`permission:`,
 forma actual según la documentación oficial; el `tools:` booleano está
 heredado en desuso y no se usa; sin sección global `permission` en la
 configuración efectiva; expansión comprobada en
@@ -204,10 +228,11 @@ integrar el Todo-junto en commits atómicos ordenados.
 - Lectura: `read`/`glob`/`grep`; `bash` solo para comandos de sistema (git, gh) o cómputo puntual.
 - Edición: `read` antes de `edit`; `oldString` mínimo; verificar región editada.
 - Destructivos: requieren autorización explícita del usuario.
-- Rutas excluidas (`staging/`, `dev.env`): no inspeccionar contenido;
+- Rutas sensibles (`staging/`, `.env`/`dev.env`): lectura con criterio
+  (nombres de variable, presencia/ausencia; jamás valores);
+  edición solo con autorización explícita por tarea verificando
+  ignorado (`git check-ignore`); `staging/` no se commitea jamás;
   evidencia solo según Skill (`project-harness-governance` §3) y
-  `AGENTS.md` §55.10 (excepción G3 2026-10-26: `.env`/`dev.env`
-  legibles por nombres de variable, jamás valores; `staging/` sigue
-  excluida salvo `status`).
+  `AGENTS.md` §55.10. Único bloqueo duro: NO SUBIR SECRETOS A GIT.
 - Estado operativo (Scheduler): `/health`, `/ready`, `/version` no
   sustituyen la evidencia del propio job (`AGENTS.md` §55.11).
