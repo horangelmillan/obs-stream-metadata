@@ -6,14 +6,11 @@
 > · [D] documentado (E2E/sesión previa citada, no re-ejecutado aquí)
 > · [P] pendiente.
 
-- **Checkout [C]:** rama `master` (`master == origin/master == c6b5b26`,
-  "chore: fijar permisos del subagente GCP (#58)"). Baseline al inicio
-  de esta tarea documental: árbol limpio salvo `staging/` preexistente
-  sin seguimiento (no modificado). Estado actual: mismo HEAD + 8
-  archivos documentales modificados sin commitear (AGENTS.md, README.md,
-  STATE.md, PROJECT_CONTEXT.md, DEPLOYMENT.md, VALIDATION.md, TOOLS.md,
-  WORKFLOW.md); `staging/` preexistente sin seguimiento, no modificado;
-  sin commit/push en esta tarea.
+- **Checkout [C]:** rama `master` (HEAD `174b144`, merge PR #71
+  `feat/sesion-persistente-t086`). Árbol limpio al inicio de esta
+  tarea documental (`git status --porcelain` vacío); sin commit/push
+  en esta tarea. `.env`/`dev.env` ignorados (`.gitignore:61/63`);
+  sin lectura de secretos ni de `staging/` aquí.
 - **Fase actual:** sin ciclo de desarrollo abierto. BACKLOG reconciliado
   [C contra `docs/BACKLOG.md`]: todo hecha salvo `T-002` (en-progreso,
   informe Phase 0, no bloquea), `T-059`/`T-066` (futuro: licencias/firma)
@@ -140,13 +137,19 @@
   pendiente, BACKLOG canonico).
 - **Regla logout/login Managed (T-085, 2026-10-26) [D]:** logout explícito = desconexión total Managed de la PC; re-login mismo usuario conserva; otro usuario entra limpio; reinicio sin logout conserva. Pendiente [P]: desplegar backend + E2E operador.
 - **Sesión Managed persistente (T-086, 2026-10-26) [D, decisión del usuario; sustituye spec §5 memoria-solo]:** la sesión de usuario Managed persiste cifrada en DPAPI (`managedUser`: token+expiry+username, fail-closed ante mismatch de `backendBaseUrl`) hasta logout explícito/401/expiración; al abrir OBS con sesión válida → directo al panel; login solo si venció o hubo logout. Implementado por obs-plugin + routing ux-ui (cambios sin commitear en este checkout [C]); build+selfcheck verdes según sesión implementadora (`startup-*`/`muser-*`/`card-*`/`f6-f8` PASS, DLL OK) [D]. Pendientes [P]: integrar (commit/PR), recompilar instalador, E2E operador con capturas.
+- **E2E operador single-PC Managed (2026-10-26) [D, chat del operador; autorización: confirmó en prod los 3 puntos con "OK OK OK"]:** 1. reapertura con sesión válida → directo al panel (sesión persistente T-086 OK en vivo); 2. logout → pantalla entrar + plataformas en gris neutro, sin rojos (T-086 OK en vivo); 3. logout desconectó las 4 plataformas (regla T-085 funcionando en vivo). Pendiente [P]: T-084 multi-PC (requiere 2 máquinas) + OAuth real con Apply de título real del operador. Detalle en VALIDATION.md. Sin cambios de estado BACKLOG en esta tarea (fuera de alcance).
 - **Rama base:** `master` (ADR-004; CI anclado a `master`).
 - **Repo remoto:** `horangelmillan/obs-stream-metadata` (público,
   GitHub-flow con PRs).
 - **Restricción vigente:** `poc/` es evidencia histórica + regresión
   (no tocar salvo corrección justificada); el producto vive en `src/`
   + `backend/`.
-- **Última actualización:** 2026-10-26 — T-086 hecha (sesión Managed persistente DPAPI + routing arranque + estados gris/rojo tarjeta; sustituye spec §5 por decisión del usuario [D]; build+selfcheck verdes [D]; pendientes [P]: integrar, recompilar instalador, E2E operador con capturas); sin commit/push en esta tarea documental.
+- **Última actualización:** 2026-10-26 — E2E operador single-PC
+  Managed PASS (sesión persistente → directo al panel + logout a
+  entrar en gris neutro + desconexión total de las 4 plataformas;
+  "OK OK OK" en prod [D]; T-084 multi-PC + OAuth real con Apply
+  pendientes [P]); sin commit/push en esta tarea documental.
+  Anterior (2026-10-26): T-086 hecha (sesión Managed persistente DPAPI + routing arranque + estados gris/rojo tarjeta; sustituye spec §5 por decisión del usuario [D]; build+selfcheck verdes [D]; pendientes [P]: integrar, recompilar instalador, E2E operador con capturas); sin commit/push en esta tarea documental.
   Anterior (2026-10-26): T-085 hecha (regla "logout limpia, entrar limpio" implementada y verificada según autorización [D]; 8 tests nuevos + suite 345 OK; pendiente [P]: desplegar backend + E2E operador); sin commit/push en esta tarea documental.
   Anterior (2026-10-26): loop deploy+verificación
   Managed v1 cerrado (rev `00039-7jl` al 100%, migración 003 en prod,
