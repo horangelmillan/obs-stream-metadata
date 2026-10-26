@@ -179,6 +179,18 @@ QStringList forbiddenUserSessionShapes();
 // Aviso v1 sin email (spec §7): sin recuperación de cuenta. Solo UI.
 QString userNoRecoveryNotice();
 
+// f7 (bug 2026-10-26): resolucion del texto de sesion cuando NO hay
+// sesion de usuario. El llamador pasa el mensaje vigente (p. ej. el
+// error especifico de signup/login); si esta vacio se muestra el gate
+// "login required", que SOLO aparece cuando no hay otro mensaje.
+// Puro QtCore, sin I/O/red/logs. La vista lo usa para que
+// refreshManagedLoginUi() no pise el error recien fijado (QLabel::
+// setText limpia el contenido previo; https://doc.qt.io/qt-6/qlabel.html).
+QString managedLoggedOutStatus(const QString &pending);
+// f7: mensaje 409/nombre posiblemente usado: sugiere pulsar Log in en
+// vez de reintentar Sign up. Sin secretos, sin detalles del backend.
+QString managedSignupTakenMessage();
+
 // f6 ENTRAR-primero: dos pantallas excluyentes en Managed (ENTRAR sin
 // sesión, PANEL con sesión); Independent siempre una sola pantalla
 // (panel, sin login). Puro QtCore, sin I/O/red/logs. La vista los usa

@@ -482,6 +482,24 @@ QString userNoRecoveryNotice()
 		"Keep your password safe.");
 }
 
+// f7: sin mensaje vigente (vacio) => gate; con mensaje (error
+// especifico) => se preserva. El gate nunca pisa un error recien
+// fijado: el llamador (vista) pasa el texto a mostrar.
+QString managedLoggedOutStatus(const QString &pending)
+{
+	if (!pending.trimmed().isEmpty())
+		return pending;
+	return managedLoginRequiredMessage();
+}
+
+// f7: 409 signup => sugerir Log in en vez de reintentar Sign up.
+QString managedSignupTakenMessage()
+{
+	return QStringLiteral(
+		"Sign up failed (username may be taken or invalid). "
+		"Try Log in with that username instead of signing up again.");
+}
+
 // f6 ENTRAR-primero: Managed sin sesión => ENTRAR; con sesión => PANEL.
 // Independent => jamás ENTRAR (una sola pantalla, intacto).
 bool managedEnterVisible(bool isManaged, bool hasUserSession)

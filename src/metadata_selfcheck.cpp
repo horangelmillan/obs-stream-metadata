@@ -1242,6 +1242,24 @@ int main(int argc, char **argv)
 		      meta::managedPanelVisible(false, true),
 	      "f6-independent-panel-always");
 
+	// f7 Managed login/signup: el error especifico sobrevive al
+	// refresh; el 409 sugiere pulsar Log in; el gate solo aparece
+	// sin otro mensaje vigente. TDD rojo-primero (bug 2026-10-26:
+	// refreshManagedLoginUi pisaba 201/409/401/red con el gate).
+	CHECK(meta::managedLoggedOutStatus(QString()) ==
+		      meta::managedLoginRequiredMessage(),
+	      "f7-gate-when-empty");
+	CHECK(meta::managedLoggedOutStatus(QStringLiteral("Wrong username or password.")) ==
+		      QStringLiteral("Wrong username or password."),
+	      "f7-error-survives");
+	CHECK(meta::managedLoggedOutStatus(
+		      meta::managedSignupTakenMessage()) ==
+		      meta::managedSignupTakenMessage(),
+	      "f7-taken-survives");
+	CHECK(meta::managedSignupTakenMessage().contains(
+		      QStringLiteral("Log in")),
+	      "f7-409-suggests-login");
+
 	std::printf("SELFCHECK OK\n");
 	return 0;
 }
