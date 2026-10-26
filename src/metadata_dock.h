@@ -165,6 +165,10 @@ private slots:
 	// 401 Managed normalizado (auth doble): cae la conexión local,
 	// mensaje de login y formulario al frente. Independent intacto.
 	void noteManagedAuthFailure(meta::Platform p);
+	// Motivo del fin de sesion Managed ([D 2026-10-26]): obs_log con
+	// codigo (sin secretos) + mensaje de persona para la UI. El
+	// mensaje basta por si solo (jamas "mira los logs").
+	QString reportUserSessionEnd(const char *where);
 	// Estados del formulario de cuenta Managed (solo Managed). f7 (bug
 	// 2026-10-26): statusOverride preserva el mensaje vigente (error
 	// especifico) cuando no hay sesion; vacio => gate "login required".

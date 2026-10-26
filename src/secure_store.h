@@ -39,12 +39,17 @@ struct ManagedSnapshot {
 // incluida la etiqueta username); ligado a backendBaseUrl (fail-closed
 // ante mismatch, igual que loadInstallation). Los snapshots Managed
 // siguen en claro porque no son secretos; la sesion SI lo es. TTL lo
-// manda el backend (30 min); expirada = login de nuevo.
+// manda el backend: ventana deslizante de 15 d renovada por actividad +
+// tope absoluto de 30 d desde el login (contrato
+// backend/tests/test_users_session_sliding.py); expirada = login de nuevo.
 struct ManagedUserSession {
 	bool loggedIn = false;
 	QString username; // etiqueta "Conectado como" (dentro del blob)
 	QString token;    // user_session opaco (jamas en claro)
-	QDateTime expiry; // UTC
+	QDateTime expiry; // UTC (ventana deslizante, la renueva el backend)
+	QDateTime loginAt; // UTC: origen del tope de 30 d (sesiones
+			   // heredadas sin el pueden traerlo invalido:
+			   // entonces el tope lo aplica el servidor)
 };
 
 struct Record {

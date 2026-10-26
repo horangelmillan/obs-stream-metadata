@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include "metadata.h"
+
 #include <QDateTime>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
@@ -106,12 +108,35 @@ public:
 	// [D 2026-10-26]: restaura la sesion persistida (DPAPI) a memoria.
 	// Lee el store: si hay token no expirado Y ligado a este backendBaseUrl
 	// (fail-closed ante mismatch, igual que loadInstallation), lo carga a
-	// memoria y devuelve true. NO valida red: eso lo hace el dock con me().
-	// Expirada o mismatch = sin sesion (limpia el registro) y false.
-	// Sin store o sin baseUrl: false.
-	bool tryRestoreUserSession();
-	// Limpia memoria Y registro persistido (logout/401/expirada).
+	// memoria y devuelve Restored. NO valida red: eso lo hace el dock con
+	// me(). Expirada = Expired (limpia el registro); mismatch = Mismatch
+	// (limpia el registro: el secreto ajeno jamas se entrega); sin store,
+	// sin baseUrl o sin registro = NoSession. El dock traduce cada caso
+	// a mensaje de persona (meta::userReloginMessage) + obs_log con
+	// codigo; jamas se pide al usuario buscar logs.
+	enum class RestoreResult { Restored, NoSession, Expired, Mismatch };
+	RestoreResult tryRestoreUserSession();
+	// Limpia memoria Y registro persistido (logout/401/expirada). Los
+	// datos del motivo (loginAt, expiracion, ultimo codigo 401) se
+	// conservan para userReloginReason(): describen la sesion que
+	// termino; los borra el proximo login/restore.
 	void clearUserSession();
+	// Motivo del fin de la sesion de usuario para la UI (lenguaje de
+	// persona via meta::userReloginMessage) y obs_log con codigo
+	// (meta::userReloginReasonName, sin secretos). Se calcula con el
+	// ultimo error.code del backend ("session_expired" /
+	// "authentication_error"), el tope local de 30 d (loginAt) y la
+	// expiracion local. Valido tras un restore fallido o un 401.
+	meta::UserReloginReason userReloginReason() const;
+	// Ultimo error.code del backend en un 401 de sesion de usuario
+	// (puede ir vacio si no hubo 401). Solo codigo, jamas secreto.
+	QString lastUserAuthCode() const { return lastUserAuthCode_; }
+	// Origen del tope absoluto de 30 d (invalido si la sesion es
+	// heredada sin el: entonces el tope lo aplica el servidor).
+	QDateTime userLoginAt() const { return userLoginAt_; }
+	// Lo que queda de ventana deslizante (negativo si ya expiro; sirve
+	// para los dias "sin usarlo" del mensaje).
+	qint64 userSecsToExpiry() const;
 
 	// T-048: llamada autenticada contra el backend (asegura sesión
 	// primero). Nunca expone el token: viaja solo como header Bearer.
@@ -170,11 +195,18 @@ private:
 	QString sessionToken_;
 	QDateTime sessionExpiry_;
 	// Fase 4 + [D 2026-10-26]: sesion de usuario en memoria con respaldo
-	// persistido cifrado (managedUser en el store). userExpiry_ con el
-	// mismo margen que la sesion de instalacion.
+	// persistido cifrado (managedUser en el store). TTL largo del regimen
+	// 2026-10-26 (ventana deslizante 15 d + tope absoluto 30 d, contrato
+	// backend/tests/test_users_session_sliding.py): userExpiry_ con margen
+	// de seguridad corto (kUserSessionMarginSecs, 5 min) y userLoginAt_
+	// como origen del tope. lastUserAuthCode_ guarda el ultimo error.code
+	// del backend en un 401 ("session_expired"/"authentication_error",
+	// solo codigo) para distinguir el motivo sin tecnicismos en la UI.
 	QString userSessionToken_;
 	QString loggedUsername_; // etiqueta no sensible ("Conectado como")
 	QDateTime userExpiry_;
+	QDateTime userLoginAt_;
+	QString lastUserAuthCode_;
 };
 
 } // namespace backend_auth

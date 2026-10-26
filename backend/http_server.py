@@ -33,7 +33,8 @@ from backend.stores import (FixedWindowRateLimiter, InMemoryInstallationStore,
 from backend.users import (LOGIN_PER_IP_LIMIT, LOGIN_PER_IP_WINDOW_S,
                            LOGIN_PER_USER_LIMIT, LOGIN_PER_USER_WINDOW_S,
                            SIGNUP_PER_IP_LIMIT, SIGNUP_PER_IP_WINDOW_S,
-                           USER_SESSION_TTL_S, UserExistsError,
+                           USER_SESSION_MAX_TTL_S, USER_SESSION_TTL_S,
+                           UserExistsError,
                            adopt_installation, check_login, hash_password,
                            new_user_id, utc_now, validate_password,
                            validate_username)
@@ -457,7 +458,8 @@ class BackendApp:
         now = self._clock()
         self.user_sessions.save_session(token, {
             "kind": "user", "user_id": user.id,
-            "issued_at": now, "expires_at": now + USER_SESSION_TTL_S,
+            "issued_at": now, "login_at": now,
+            "expires_at": now + USER_SESSION_TTL_S,
             "revoked": False})
         # [D] 2026-10-26: otras cuentas fuera ANTES de adoptar.
         purged = self._purge_foreign_links(user.id, installation_id)
@@ -469,15 +471,38 @@ class BackendApp:
                      "expires_in": USER_SESSION_TTL_S}
 
     def validate_user_session(self, token: str):
-        """Sesión de usuario vigente o AppError 401/401-expired."""
+        """Sesión de usuario vigente o AppError 401/401-expired.
+
+        Deslizante 15d con tope absoluto 30d ([D] 2026-10-26): cada
+        actividad válida renueva `expires_at` a +15d sin pasar
+        `login_at` + 30d; superado el tope o 15d sin actividad →
+        SESSION_EXPIRED (login de nuevo). Sesiones heredadas sin
+        `login_at` toman `issued_at` como origen (fail-closed ante
+        payloads sin origen conocido). La renovación es best-effort:
+        si el guardado falla, la sesión válida no se rechaza.
+        """
         payload = (self.user_sessions.load_session(token)
                    if token else None)
         if payload is None or not payload.get("user_id"):
             raise AppError(ErrorCode.AUTHENTICATION, "no valid user session")
         if payload.get("revoked"):
             raise AppError(ErrorCode.AUTHENTICATION, "user session revoked")
-        if self._clock() >= payload.get("expires_at", 0):
+        now = self._clock()
+        login_at = payload.get("login_at", payload.get("issued_at", 0))
+        if now >= login_at + USER_SESSION_MAX_TTL_S:
+            raise AppError(ErrorCode.SESSION_EXPIRED,
+                           "user session lifetime exceeded")
+        if now >= payload.get("expires_at", 0):
             raise AppError(ErrorCode.SESSION_EXPIRED, "user session expired")
+        renewed = min(now + USER_SESSION_TTL_S,
+                      login_at + USER_SESSION_MAX_TTL_S)
+        if renewed != payload.get("expires_at"):
+            payload["expires_at"] = renewed
+            payload["issued_at"] = now
+            try:
+                self.user_sessions.save_session(token, payload)
+            except Exception:
+                pass
         user = self.users.load_by_id(payload["user_id"])
         if user is None:
             raise AppError(ErrorCode.AUTHENTICATION, "unknown user")

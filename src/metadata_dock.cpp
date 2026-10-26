@@ -2762,9 +2762,29 @@ void MetadataDock::silentRevalidateManaged()
 		return;
 	// 1. Restaurar sesion persistida (cero red, territorio obs-plugin
 	// intacto: solo llamada al cliente). Si ya habia sesion en memoria,
-	// tryRestore es no-op (devuelve true sin tocar nada).
-	if (!managedAuth_->hasUserSession())
-		managedAuth_->tryRestoreUserSession();
+	// tryRestore es no-op (devuelve Restored sin tocar nada).
+	const backend_auth::Client::RestoreResult restored =
+		managedAuth_->hasUserSession()
+			? backend_auth::Client::RestoreResult::Restored
+			: managedAuth_->tryRestoreUserSession();
+	// 1b. Servidor distinto: fail-closed (el secreto ajeno jamas se
+	// entrego). Se dice en la UI en lenguaje de persona, sin logs.
+	if (restored ==
+	    backend_auth::Client::RestoreResult::Mismatch) {
+		obs_log(LOG_WARNING,
+			"managed silent revalidate: saved login belongs to "
+			"another server (reason=server-mismatch)");
+		refreshManagedLoginUi(meta::userReloginMessage(
+			meta::UserReloginReason::ServerMismatch));
+		return;
+	}
+	// 1c. Guardada pero expirada (ventana de 15 d o tope de 30 d): el
+	// motivo con dias "sin usarlo" cuando se conoce, sin tecnicismos.
+	if (restored == backend_auth::Client::RestoreResult::Expired) {
+		refreshManagedLoginUi(reportUserSessionEnd(
+			"managed silent revalidate: saved login expired"));
+		return;
+	}
 	// 2. Gate puro (testeado): sin sesion tras el restore => ENTRAR
 	// directo, CERO red, sin tocar tarjetas (conservan el repaint
 	// inicial de loadStore: nada de parpadeo a gris/rojo ni gate de
@@ -2785,12 +2805,14 @@ void MetadataDock::silentRevalidateManaged()
 		if (!isManaged())
 			return;
 		if (r != backend_auth::Result::Ok) {
-			// 401/expirada => ENTRAR con mensaje normal (sin
-			// dramatismo): limpieza neutra "Not connected" /
-			// "disconnected" (tono Neutral, jamas gate rojo en
-			// tarjetas; el gate vive solo en userStatus_).
+			// 401/expirada => ENTRAR con el motivo en lenguaje
+			// de persona (inactividad con dias, tope de 30 d o
+			// revocada; codigo en el log, sin secretos). La
+			// limpieza es neutra "Not connected" / "disconnected"
+			// (tono Neutral, jamas gate rojo en tarjetas; el
+			// motivo vive solo en userStatus_).
 			// clearUserSession ya ocurrio en el cliente (401).
-			obs_log(LOG_WARNING,
+			const QString reloginWhy = reportUserSessionEnd(
 				"managed silent revalidate user failed");
 			for (meta::Platform p :
 			     {meta::Platform::Twitch,
@@ -2811,7 +2833,7 @@ void MetadataDock::silentRevalidateManaged()
 				}
 			}
 			saveStore(); // drop stale snapshots
-			refreshManagedLoginUi();
+			refreshManagedLoginUi(reloginWhy);
 			return;
 		}
 		refreshManagedLoginUi();
@@ -3195,8 +3217,12 @@ bool MetadataDock::requireManagedLoginMsg()
 void MetadataDock::noteManagedAuthFailure(meta::Platform p)
 {
 	// 401 Managed normalizado: la conexión local cae (pertenece a la
-	// sesión) y se pide re-login con el mensaje exacto. El snapshot
-	// se borra; Independent intacto (sus records no se tocan).
+	// sesión). El motivo en lenguaje de persona va a userStatus_
+	// (refreshManagedLoginUi con override f7: sobrevive al repintado);
+	// la tarjeta conserva el gate generico (ruptura = tono Error, regla
+	// visual 2026-10-26). El snapshot se borra; Independent intacto.
+	const QString reloginWhy = reportUserSessionEnd(
+		"managed auth failure during apply/status");
 	ManagedConn &m = managedAccount(p);
 	m.connected = false;
 	m.userId.clear();
@@ -3204,7 +3230,25 @@ void MetadataDock::noteManagedAuthFailure(meta::Platform p)
 	setStatus(p, meta::managedLoginRequiredMessage());
 	setResult(p, false, meta::managedLoginRequiredMessage());
 	saveStore(); // drop the stale snapshot
-	refreshManagedLoginUi();
+	refreshManagedLoginUi(reloginWhy);
+}
+
+// Motivo del fin de la sesion Managed ([D 2026-10-26]): registra el
+// codigo en obs_log (sin secretos, sin tokens, sin usernames) y devuelve
+// el mensaje en lenguaje de persona para la UI. El mensaje basta por si
+// solo: jamas se pide al usuario buscar logs.
+QString MetadataDock::reportUserSessionEnd(const char *where)
+{
+	const meta::UserReloginReason reason =
+		managedAuth_ ? managedAuth_->userReloginReason()
+			     : meta::UserReloginReason::Unknown;
+	obs_log(LOG_WARNING, "%s (reason=%s)", where,
+		meta::userReloginReasonName(reason));
+	if (!managedAuth_)
+		return meta::managedLoginRequiredMessage();
+	const int idleDays = meta::userSessionIdleDays(
+		meta::kUserSessionTtlSecs, managedAuth_->userSecsToExpiry());
+	return meta::userReloginMessage(reason, idleDays);
 }
 
 // --- f6 ENTRAR-primero -------------------------------------------------
