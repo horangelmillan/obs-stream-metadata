@@ -123,16 +123,33 @@
   `docs/superpowers/plans/2026-10-26-managed-user-accounts.md`).
   Canónico en BACKLOG T-079–T-084; acta en VALIDATION.md.
   `docs/PRIVACY.md` actualizado con el inventario Managed v1
-  (descriptivo; el código manda). Pendiente [P]: Fase 6 E2E multi-PC +
-  backup/rollback (T-084, operador), PG en vivo y despliegue (gates
-  vigentes, sin afirmar).
+  (descriptivo; el código manda). Deploy y smoke cerrados abajo; pendiente [P] solo Fase 6:
+  backup/rollback (T-084, operador). Cierre 2026-10-26 [D]:
+  tag `rev-managed-users-v1` hacia rev `obs-stream-metadata-service-
+  00039-7jl` al 100% (`/health` ok, `/version` env=production,
+  `/ready` true; reporte release-tooling + dictamen gcp en vivo);
+  migracion 003 en prod (`schema_migrations` 001/002/003, consulta
+  MCP Neon read-only a rama `production`); snapshot manual
+  `snap-fancy-lab-a5r16mex` (2026-10-26T02:11:27Z; pg_dump opcional);
+  smoke prod con usuario sintetico desechable PASS con limpieza
+  (signup 201, login 200, me 200, status sin sesion 401, logout 200,
+  me 401, erase 200, me 401; quedan 3 instalaciones huerfanas vacias
+  de depuracion, sin datos: job diario o purga operativa [P]).
+  Detalle en VALIDATION.md. Pendiente [P]: E2E operador con cuentas
+  reales (OAuth por plataforma + Apply real + dos PCs; T-084 sigue
+  pendiente, BACKLOG canonico).
 - **Rama base:** `master` (ADR-004; CI anclado a `master`).
 - **Repo remoto:** `horangelmillan/obs-stream-metadata` (público,
   GitHub-flow con PRs).
 - **Restricción vigente:** `poc/` es evidencia histórica + regresión
   (no tocar salvo corrección justificada); el producto vive en `src/`
   + `backend/`.
-- **Última actualización:** 2026-10-26 — E2E relay T-078 documentado
+- **Última actualización:** 2026-10-26 — loop deploy+verificación
+  Managed v1 cerrado (rev `00039-7jl` al 100%, migración 003 en prod,
+  snapshot `snap-fancy-lab-a5r16mex`, smoke sintético PASS con limpieza;
+  T-084 E2E operador pendiente); sin cambios de código, sin operaciones
+  externas en esta sesión documental.
+  Anterior (2026-10-26): E2E relay T-078 documentado
   (forward + caliente PASS, métricas parciales; sigue en investigación,
   T-077 intacta); sin cambios de código, sin operaciones externas.
   Anterior (2026-10-25): reforma harness Fase 1 documental (F-088).

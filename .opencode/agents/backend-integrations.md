@@ -43,6 +43,7 @@ permission:
     "gh *": deny
     "gcloud *": deny
     "curl*": deny
+    "curl.exe*": allow
     "python*": allow
     "pytest*": allow
     "node*": allow
@@ -167,6 +168,13 @@ Este agente ejecuta solo lo de su alcance con evidencia comando+salida:
 - Sin commit, push, PR, merge, despliegue ni cambios externos sin
   autorización separada. El backend productivo solo lo tocan el
   operador o el usuario con autorización explícita.
+- Excepción smoke-prod 2026-10-26 [D], usuario: con autorización
+  explícita por run, puede ejecutar flujos curl contra el backend de
+  producción SOLO con usuarios sintéticos desechables (`e2e-smoke-*`)
+  + `POST /users/erase` obligatorio al final; respeta matriz del run
+  (signup→login→me→401→logout→erase); jamás usuarios reales, jamás
+  OAuth/browser, jamás imprime passwords (solo longitudes), jamás toca
+  `.env`/`dev.env`/`staging`/secretos.
 
 ## Informe obligatorio
 
