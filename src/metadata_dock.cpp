@@ -1546,9 +1546,16 @@ void MetadataDock::updateFbHappyPath()
 	const bool fwdOk = (relayState_ == relay::State::ForwardOk);
 
 	// 1. Resumen compuesto global (texto siempre; color solo refuerzo).
+	// Trio operador 2026-10-26 [D]: "Listo" exige emisor (predicado
+	// unico meta::fbEmitReadiness, compartido con el semaforo).
+	// Verde solo con verify + forward + senal; sin emisor pero resto
+	// ok: ambar "lista pero sin senal", jamas verde.
 	QString ready;
 	QString rBorder = QStringLiteral("#5a5a5a");
 	QString rBg = QStringLiteral("transparent");
+	const meta::FbEmitReadiness emitReady = meta::fbEmitReadiness(
+		(verified || audPending), fwdOk,
+		relaySignalHasEmitter());
 	if (fb) {
 		if (st == meta::FbLiveState::Live) {
 			ready = tr("Estás al aire — transmitiendo ahora");
@@ -1563,12 +1570,18 @@ void MetadataDock::updateFbHappyPath()
 			rBg = QStringLiteral("rgba(255, 193, 7, 30)");
 		} else if (!hasId) {
 			ready = tr("Conectado. Aún no hay vídeo — pulsa Crear.");
-		} else if ((verified || audPending) && fwdOk) {
+		} else if (emitReady == meta::FbEmitReadiness::Ready) {
 			ready = audPending
 				? tr("Listo para emitir. No pude confirmar quién podrá verlo.")
 				: tr("Listo para emitir.");
 			rBorder = QStringLiteral("#2da44e");
 			rBg = QStringLiteral("rgba(45, 158, 68, 30)");
+		} else if (emitReady ==
+			   meta::FbEmitReadiness::ReadyNoSignal) {
+			ready = tr("Lista pero sin señal — apunta tu programa a la "
+				   "dirección fija (cópiala en Avanzado).");
+			rBorder = QStringLiteral("#ffc107");
+			rBg = QStringLiteral("rgba(255, 193, 7, 30)");
 		} else if (verified || audPending) {
 			ready = tr("Tu vídeo está listo — pulsa Iniciar.");
 			rBorder = QStringLiteral("#ffc107");
@@ -1777,9 +1790,18 @@ void MetadataDock::updateFbSemaphore()
 	    fbVerify_.outcome == meta::FbVerify::Blocked &&
 	    fbVerify_.reason != QStringLiteral("write-accepted") &&
 	    fbVerify_.reason != QStringLiteral("no-expected");
-	const bool ready = fb &&
-	    (fbVerify_.outcome == meta::FbVerify::Verified ||
-	     fbVerify_.outcome == meta::FbVerify::AudienceUnverified);
+	// Trío operador 2026-10-26 [D]: mismo predicado único que el
+	// resumen (meta::fbEmitReadiness). Verde solo con verify +
+	// forward + emisor; sin emisor pero resto ok: ámbar intermedio.
+	const bool verifiedOrAud =
+		fbVerify_.outcome == meta::FbVerify::Verified ||
+		fbVerify_.outcome == meta::FbVerify::AudienceUnverified;
+	const meta::FbEmitReadiness emitReady = meta::fbEmitReadiness(
+		verifiedOrAud, (relayState_ == relay::State::ForwardOk),
+		relaySignalHasEmitter());
+	const bool ready = (emitReady == meta::FbEmitReadiness::Ready);
+	const bool readyNoSignal =
+		(emitReady == meta::FbEmitReadiness::ReadyNoSignal);
 	QString key;
 	QString glyph;
 	QString phrase;
@@ -1809,6 +1831,12 @@ void MetadataDock::updateFbSemaphore()
 		glyph = QString::fromUtf8("\xE2\x97\x8B");
 		phrase = tr("Listo para emitir");
 		color = QStringLiteral("#2da44e");
+	} else if (readyNoSignal) {
+		key = QStringLiteral("ready-nosignal");
+		glyph = QString::fromUtf8("\xE2\x97\x90");
+		phrase = tr("Lista pero sin señal — apunta tu programa a "
+			    "la dirección fija");
+		color = QStringLiteral("#ffc107");
 	} else {
 		key = QStringLiteral("idle");
 		glyph = QString::fromUtf8("\xE2\x97\x8B");
@@ -1832,6 +1860,16 @@ void MetadataDock::ensureCooldownTick()
 	const bool fb = platformUsable(meta::Platform::Facebook);
 	const qint64 now = QDateTime::currentMSecsSinceEpoch();
 	const qint64 lastOk = relay_ ? relay_->lastForwardOkMs() : 0;
+	// Trío operador 2026-10-26 [D]: sin forward aceptado (lastOk==0)
+	// jamás hay contador (cooldownRemainingMs ya da 0, pero el gate
+	// explícito documenta la invariante).
+	if (lastOk <= 0) {
+		fbCooldownTick_->stop();
+		if (fbCooldownLabel_->isVisible())
+			fbCooldownLabel_->setVisible(false);
+		fbCooldownCache_.clear();
+		return;
+	}
 	const qint64 rem = relay::cooldownRemainingMs(lastOk, now);
 	if (fb && rem > 0) {
 		tickFbCooldown();
@@ -1851,6 +1889,14 @@ void MetadataDock::tickFbCooldown()
 		return;
 	const qint64 now = QDateTime::currentMSecsSinceEpoch();
 	const qint64 lastOk = relay_ ? relay_->lastForwardOkMs() : 0;
+	// Sin origen no hay contador: jamás mostrar ~m:ss con lastOk==0.
+	if (lastOk <= 0) {
+		if (fbCooldownTick_)
+			fbCooldownTick_->stop();
+		fbCooldownLabel_->setVisible(false);
+		fbCooldownCache_.clear();
+		return;
+	}
 	const qint64 rem = relay::cooldownRemainingMs(lastOk, now);
 	if (rem <= 0) {
 		// Se detiene en 0 sin afirmar nada: ni mensaje ni estado.
@@ -1860,15 +1906,25 @@ void MetadataDock::tickFbCooldown()
 		fbCooldownCache_.clear();
 		return;
 	}
-	const qint64 total = (rem + 999) / 1000;
-	const QString t = tr("~%1:%2")
-		.arg(total / 60)
-		.arg(total % 60, 2, 10, QLatin1Char('0'));
+	// Trío operador 2026-10-26 [D]: el contador dice su causa (tras
+	// preparar el vídeo al abrir / tras el último reenvío aceptado).
+	const int okCount = relay_ ? relay_->forwardOkCount() : 0;
+	const relay::CooldownOrigin origin =
+		relay::cooldownOrigin(lastOk, okCount);
+	const QString t =
+		relay::cooldownCounterText(rem, now - lastOk, origin);
+	if (t.isEmpty()) {
+		if (fbCooldownTick_)
+			fbCooldownTick_->stop();
+		fbCooldownLabel_->setVisible(false);
+		fbCooldownCache_.clear();
+		return;
+	}
 	if (t != fbCooldownCache_) {
 		fbCooldownCache_ = t;
 		fbCooldownLabel_->setText(t);
 		const QString phrase =
-			tr("Sigo solo en %1 — no tienes que hacer nada").arg(t);
+			tr("Sigo solo %1 — no tienes que hacer nada").arg(t);
 		fbCooldownLabel_->setAccessibleName(phrase);
 		fbCooldownLabel_->setToolTip(phrase);
 	}
@@ -2626,8 +2682,12 @@ void MetadataDock::fbRefireOrDefer(const QString &liveId,
 	    !relay::forwardDestLooksValid(dest))
 		return;
 	fbScheduleRefire(liveId, dest);
+	// Trío operador 2026-10-26 [D]: el mensaje de espera dice su
+	// causa (este camino solo se alcanza con cooldown bloqueado, es
+	// decir, tras un reenvío aceptado previo).
 	generalMsg_->setText(
-		tr("Espero un poco y sigo solo — no tienes que hacer nada."));
+		tr("Espero un poco tras tu último reenvío aceptado y sigo "
+		   "solo — no tienes que hacer nada."));
 }
 
 // --- managed wiring (T-048; Independent handlers untouched) --------------
@@ -8155,9 +8215,9 @@ void MetadataDock::onReply(QNetworkReply *reply)
 		// puros; el cuerpo (con dests) jamas se loguea ni persiste.
 		const bool ok =
 			!netFail && http >= 200 && http < 300;
-		obs_log(LOG_INFO, "relay signal http=%d",
-			netFail ? 0 : http);
 		if (!ok) {
+			obs_log(LOG_INFO, "relay signal http=%d",
+				netFail ? 0 : http);
 			generalMsg_->setText(
 				tr("Relay signal unreadable (is the relay "
 				   "running?)."));
@@ -8168,6 +8228,12 @@ void MetadataDock::onReply(QNetworkReply *reply)
 			return;
 		}
 		relaySignal_ = relay::parseSignal(replyJson(reply));
+		// Trío operador 2026-10-26 [D]: resumen de diagnóstico con
+		// ready/fuente/bytes (jamás URLs/dests/ingestas) para
+		// distinguir "la API dice no-ready" (Aitum no publica de
+		// verdad) de "parse roto o endpoint equivocado".
+		obs_log(LOG_INFO, "relay signal http=%d %s", http,
+			qPrintable(relay::signalSummary(relaySignal_)));
 		// Plan v3 Fase 1: la escucha decide pre-create/auto-End
 		// con este resultado (adaptativo 2 s/1 s, 3 fallos,
 		// votacion 2-de-3, 30 s + 5 min + confirmacion Graph).

@@ -41,6 +41,10 @@ public:
 
 	relay::State state() const { return state_; }
 	qint64 lastForwardOkMs() const { return lastOkMs_; }
+	// Trio operador 2026-10-26 [D]: cuantos forwards acepto este
+	// arranque (origen del contador de vista: 1 = preparacion
+	// inicial, >1 = ultimo reenvio). Se resetea al parar.
+	int forwardOkCount() const { return okCount_; }
 
 	// Idempotente, no bloquea: si ya corre no hace nada.
 	void ensureStarted();
@@ -79,6 +83,7 @@ private:
 	QNetworkAccessManager *net_ = nullptr;
 	relay::State state_ = relay::State::Stopped;
 	qint64 lastOkMs_ = 0;
+	int okCount_ = 0; // forwards aceptados desde el ultimo arranque
 	bool clearPending_ = false; // el PATCH en vuelo es limpieza
 	bool stopping_ = false;     // stop() explicito: muerte esperada
 	QString pendingDest_;       // re-fijado diferido hasta started

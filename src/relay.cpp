@@ -260,10 +260,18 @@ QString forwardErrorMessage(int httpStatus)
 }
 
 // Fase A punto 4: senal del emisor (puro, tolerante a variantes del
-// Control API: /v3/paths/get y /v3/config/paths/get). Sin I/O/red.
+// Control API: runtime /v3/paths/get + deprecated ready/readyTime).
+// Sin I/O/red. Esquema real v1.21.3 (OpenAPI "Path", downloads/
+// openapi-v1.21.3.yaml): online/onlineTime (runtime), source como
+// OBJETO {id, type: rtmpConn|rtmpsConn|...} (nullable; ausente = sin
+// publicador) e inboundBytes uint64 (bytesReceived deprecated).
+// El endpoint de CONFIG (/v3/config/paths/get/...) devuelve PathConf
+// (source: STRING estatico, p. ej. "publisher", SIN online/ready ni
+// bytes): parsea como present=1 ready=0 bytes=-1, es decir, jamas
+// emisor. Por eso la senal lee el runtime, no la config.
 QString controlSignalPath()
 {
-	return QStringLiteral("/v3/config/paths/get/live");
+	return QStringLiteral("/v3/paths/get/live");
 }
 
 Signal parseSignal(const QJsonObject &o)
@@ -272,13 +280,26 @@ Signal parseSignal(const QJsonObject &o)
 	if (o.isEmpty())
 		return s;
 	s.present = true;
-	if (o.value(QStringLiteral("ready")).isBool())
+	// Runtime primero: online (bool). Fallback deprecated ready (bool)
+	// y luego tiempos (onlineTime runtime, readyTime deprecated).
+	const QJsonValue online = o.value(QStringLiteral("online"));
+	if (online.isBool()) {
+		s.ready = online.toBool();
+	} else if (o.value(QStringLiteral("ready")).isBool()) {
 		s.ready = o.value(QStringLiteral("ready")).toBool();
-	else if (o.value(QStringLiteral("readyTime")).isString())
-		s.ready = !o.value(QStringLiteral("readyTime"))
-				   .toString()
-				   .isEmpty();
-	// Fuente entrante: objeto "source" no vacio, o tipo explicito.
+	} else {
+		const QString ot = o.value(QStringLiteral("onlineTime"))
+				       .toString()
+				       .trimmed();
+		const QString rt = o.value(QStringLiteral("readyTime"))
+				       .toString()
+				       .trimmed();
+		s.ready = !ot.isEmpty() || !rt.isEmpty();
+	}
+	// Fuente entrante: runtime PathSource = objeto {id, type}; el tipo
+	// "none" historico y strings vacios no cuentan. La config PathConf
+	// trae source como STRING estatico ("publisher", ...): cuenta como
+	// fuente configurada, pero sin ready/bytes jamas da emisor.
 	const QJsonValue src = o.value(QStringLiteral("source"));
 	if (src.isObject()) {
 		const QJsonObject so = src.toObject();
@@ -307,7 +328,8 @@ Signal parseSignal(const QJsonObject &o)
 					      QStringLiteral("true"),
 					      Qt::CaseInsensitive) == 0;
 	}
-	// Bytes entrantes: nombre tolerante (varias formas del API).
+	// Bytes entrantes: inboundBytes runtime primero; bytesReceived
+	// deprecated despues; resto de variantes al final.
 	for (const char *k : {"inboundBytes", "bytesReceived",
 			      "inBytes", "bytes_received"}) {
 		const QJsonValue v =
@@ -345,6 +367,49 @@ bool signalHasEmitter(const Signal &s)
 {
 	return s.present && s.ready && s.hasSource &&
 	       s.inboundBytes > 0;
+}
+
+QString signalSummary(const Signal &s)
+{
+	// Solo banderas y conteos: jamas URLs, dests, claves ni ingestas
+	// (forwardDests.size(), nunca sus valores).
+	return QStringLiteral("present=%1 ready=%2 source=%3 bytes=%4 fwd=%5")
+		.arg(s.present ? 1 : 0)
+		.arg(s.ready ? 1 : 0)
+		.arg(s.hasSource ? 1 : 0)
+		.arg(s.inboundBytes)
+		.arg(s.forwardDests.size());
+}
+
+CooldownOrigin cooldownOrigin(long long lastOkMs, int okCount)
+{
+	if (lastOkMs <= 0)
+		return CooldownOrigin::None;
+	return okCount > 1 ? CooldownOrigin::LastRefire
+			   : CooldownOrigin::PreparedAtOpen;
+}
+
+QString cooldownCounterText(long long remainingMs, long long elapsedMs,
+			    CooldownOrigin o)
+{
+	if (o == CooldownOrigin::None || remainingMs <= 0)
+		return QString();
+	const long long total = (remainingMs + 999) / 1000;
+	const QString mmss =
+		QStringLiteral("~%1:%2")
+			.arg(total / 60)
+			.arg(total % 60, 2, 10, QLatin1Char('0'));
+	if (o == CooldownOrigin::LastRefire) {
+		const long long ago = elapsedMs > 0 ? elapsedMs / 1000 : 0;
+		return QStringLiteral(
+			       "%1 \u00B7 tras tu \u00FAltimo reenv\u00EDo "
+			       "(hace %2 s)")
+			.arg(mmss)
+			.arg(ago);
+	}
+	return QStringLiteral(
+		       "%1 \u00B7 tras preparar el v\u00EDdeo al abrir")
+		.arg(mmss);
 }
 
 } // namespace relay

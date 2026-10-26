@@ -1923,7 +1923,7 @@ int main(int argc, char **argv)
 	}
 	// Fase A punto 4: senal del emisor (localhost, puro). Sin red.
 	CHECK(relay::controlSignalPath() ==
-		      QStringLiteral("/v3/config/paths/get/live"),
+		      QStringLiteral("/v3/paths/get/live"),
 	      "relay-signal-path");
 	{
 		const relay::Signal empty =
@@ -1976,6 +1976,146 @@ int main(int argc, char **argv)
 			      !relay::signalHasEmitter(
 				      relay::parseSignal(rt)),
 		      "relay-signal-readytime");
+	}
+
+	// Trio operador 2026-10-26 [D] (1): "Listo" exige emisor.
+	// Predicado unico resumen+semaforo: verde solo con las tres;
+	// sin emisor pero resto ok: ambar intermedio; resto: no listo.
+	CHECK(meta::fbEmitReadiness(true, true, true) ==
+		      meta::FbEmitReadiness::Ready,
+	      "emit-ready");
+	CHECK(meta::fbEmitReadiness(true, true, false) ==
+		      meta::FbEmitReadiness::ReadyNoSignal,
+	      "emit-nosignal-amber");
+	CHECK(meta::fbEmitReadiness(false, true, true) ==
+		      meta::FbEmitReadiness::NotReady,
+	      "emit-noverify-notready");
+	CHECK(meta::fbEmitReadiness(true, false, true) ==
+		      meta::FbEmitReadiness::NotReady,
+	      "emit-nofwd-notready");
+	CHECK(meta::fbEmitReadiness(true, false, false) ==
+		      meta::FbEmitReadiness::NotReady,
+	      "emit-fwd-missing");
+	CHECK(meta::fbEmitReadiness(false, false, false) ==
+		      meta::FbEmitReadiness::NotReady,
+	      "emit-nothing");
+	CHECK(meta::fbEmitReadiness(false, true, false) ==
+		      meta::FbEmitReadiness::NotReady,
+	      "emit-only-fwd");
+	CHECK(meta::fbEmitReadiness(false, false, true) ==
+		      meta::FbEmitReadiness::NotReady,
+	      "emit-only-signal");
+
+	// Trio operador (2): contador con causa; sin lastOk jamas hay
+	// contador (origen None + restante 0 => texto vacio => oculto).
+	CHECK(relay::cooldownOrigin(0, 0) ==
+		      relay::CooldownOrigin::None,
+	      "cooldown-origin-none");
+	CHECK(relay::cooldownOrigin(1000000LL, 0) ==
+		      relay::CooldownOrigin::PreparedAtOpen,
+	      "cooldown-origin-prepare-zero");
+	CHECK(relay::cooldownOrigin(1000000LL, 1) ==
+		      relay::CooldownOrigin::PreparedAtOpen,
+	      "cooldown-origin-prepare");
+	CHECK(relay::cooldownOrigin(1000000LL, 2) ==
+		      relay::CooldownOrigin::LastRefire,
+	      "cooldown-origin-refire");
+	CHECK(relay::cooldownRemainingMs(0, 1000000LL) == 0,
+	      "relay-cooldown-zero-never");
+	CHECK(relay::cooldownCounterText(60000LL, 1000LL,
+					 relay::CooldownOrigin::None)
+			      .isEmpty(),
+	      "cooldown-text-none-empty");
+	CHECK(relay::cooldownCounterText(0LL, 1000LL,
+					 relay::CooldownOrigin::LastRefire)
+			      .isEmpty(),
+	      "cooldown-text-zero-empty");
+	{
+		const QString prep = relay::cooldownCounterText(
+			179000LL, 1000LL,
+			relay::CooldownOrigin::PreparedAtOpen);
+		CHECK(prep.startsWith(QStringLiteral("~2:59")) &&
+			      prep.contains(QStringLiteral("preparar")),
+		      "cooldown-text-prepare");
+		const QString ref = relay::cooldownCounterText(
+			45000LL, 135000LL,
+			relay::CooldownOrigin::LastRefire);
+		CHECK(ref.startsWith(QStringLiteral("~0:45")) &&
+			      ref.contains(QStringLiteral("reenv")) &&
+			      ref.contains(QStringLiteral("hace")),
+		      "cooldown-text-refire");
+	}
+
+	// Trio operador (3): esquema REAL v1.21.3 de GET /v3/paths/get/live
+	// (OpenAPI "Path": online/onlineTime + source {id,type} +
+	// inboundBytes; bytesReceived/ready/readyTime deprecated).
+	CHECK(relay::controlPatchPath() ==
+		      QStringLiteral("/v3/config/paths/patch/live"),
+	      "relay-patch-path-intact");
+	{
+		// Payload realista runtime con emisor RTMP publicando.
+		QJsonObject src;
+		src[QStringLiteral("id")] =
+			QStringLiteral("rtmp-conn-9z");
+		src[QStringLiteral("type")] =
+			QStringLiteral("rtmpConn");
+		QJsonObject live;
+		live[QStringLiteral("name")] = QStringLiteral("live");
+		live[QStringLiteral("online")] = true;
+		live[QStringLiteral("onlineTime")] =
+			QStringLiteral("2026-10-26T00:00:00Z");
+		live[QStringLiteral("source")] = src;
+		live[QStringLiteral("inboundBytes")] = 12345;
+		QJsonArray fwd;
+		QJsonObject one;
+		one[QStringLiteral("dest")] = QStringLiteral(
+			"rtmps://h.example.com:443/rtmp#K9z");
+		fwd.append(one);
+		live[QStringLiteral("forward")] = fwd;
+		const relay::Signal s = relay::parseSignal(live);
+		CHECK(s.present && s.ready && s.hasSource &&
+			      s.inboundBytes == 12345LL &&
+			      s.forwardDests.size() == 1 &&
+			      relay::signalHasEmitter(s),
+		      "relay-signal-v1213-live");
+		const QString sum = relay::signalSummary(s);
+		CHECK(sum.contains(QStringLiteral("ready=1")) &&
+			      sum.contains(
+				      QStringLiteral("bytes=12345")) &&
+			      sum.contains(QStringLiteral("fwd=1")) &&
+			      !sum.contains(QStringLiteral("rtmps://")) &&
+			      !sum.contains(QStringLiteral("K9z")),
+		      "relay-signal-summary-safe");
+		// Variante deprecated (ready/readyTime/bytesReceived):
+		// sigue parseando (tolerancia), sin inventar senal.
+		QJsonObject dep;
+		dep[QStringLiteral("ready")] = true;
+		dep[QStringLiteral("readyTime")] =
+			QStringLiteral("2026-10-26T00:00:00Z");
+		QJsonObject dsrc;
+		dsrc[QStringLiteral("type")] =
+			QStringLiteral("rtmpConn");
+		dep[QStringLiteral("source")] = dsrc;
+		dep[QStringLiteral("bytesReceived")] = 777;
+		CHECK(relay::signalHasEmitter(relay::parseSignal(dep)),
+		      "relay-signal-deprecated-shape");
+		// Forma PathConf del endpoint viejo de CONFIG (source como
+		// STRING estatico, sin online/ready ni bytes): presente
+		// pero JAMAS emisor. Documenta el falso "no emitter".
+		QJsonObject conf;
+		conf[QStringLiteral("name")] = QStringLiteral("live");
+		conf[QStringLiteral("source")] =
+			QStringLiteral("publisher");
+		const relay::Signal cs = relay::parseSignal(conf);
+		CHECK(cs.present && !cs.ready &&
+			      !relay::signalHasEmitter(cs),
+		      "relay-signal-config-never-emitter");
+		const QString csum = relay::signalSummary(cs);
+		CHECK(csum.contains(QStringLiteral("present=1")) &&
+			      csum.contains(QStringLiteral("ready=0")) &&
+			      !csum.contains(
+				      QStringLiteral("publisher")),
+		      "relay-signal-config-summary");
 	}
 
 	std::printf("SELFCHECK OK\n");

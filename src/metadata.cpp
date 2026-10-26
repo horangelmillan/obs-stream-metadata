@@ -780,6 +780,20 @@ CardTone cardToneFor(bool connected, const QString &statusText,
 	return CardTone::Neutral;
 }
 
+// Trio operador 2026-10-26 [D]: "Listo" exige emisor. Un solo predicado
+// puro compartido por el resumen compuesto (updateFbHappyPath) y el
+// semaforo (updateFbSemaphore): verde solo con las tres condiciones;
+// ambar intermedio si falta solo el emisor; resto = no listo.
+FbEmitReadiness fbEmitReadiness(bool verifiedOrAudPending, bool fwdOk,
+				bool hasEmitter)
+{
+	if (verifiedOrAudPending && fwdOk && hasEmitter)
+		return FbEmitReadiness::Ready;
+	if (verifiedOrAudPending && fwdOk)
+		return FbEmitReadiness::ReadyNoSignal;
+	return FbEmitReadiness::NotReady;
+}
+
 // Fase 5: borrado de CUENTA (/users/erase) separado de F-C2
 // (/privacy/erase). Rutas canónicas distintas por construcción; el
 // resumen de respuesta solo incrusta enteros (conteos por tabla).
