@@ -1,5 +1,5 @@
 ---
-description: Mantiene las herramientas PowerShell de publicación del proyecto. Modifica tools/** sin ejecutarlas; no opera producción ni despliegues.
+description: Mantiene las herramientas PowerShell de publicación del proyecto (tools/**) y ejecuta `tools/deploy.ps1` solo con autorización explícita de despliegue por run.
 mode: subagent
 permission:
   edit:
@@ -40,11 +40,16 @@ permission:
     "git clean*": deny
     "git checkout*": deny
     "gh *": deny
-    "gcloud *": deny
     "curl*": deny
+    "curl.exe*": allow
+    "gcloud *": deny
+    "gcloud builds*": allow
+    "gcloud run*": allow
     "Invoke-WebRequest*": deny
     "npm*": deny
     "npx*": deny
+    "powershell*": allow
+    "pwsh*": allow
   glob: allow
   grep: allow
   list: allow
@@ -82,10 +87,12 @@ no toca red, cuentas, secretos ni Git mutante.
 ## Alcance de escritura (cerrado)
 
 - `tools/**` y solo dentro de la tarea asignada por el orquestador.
-- Nunca: ejecución de scripts (`pwsh/ps1`, builds, pruebas de escritura),
-  infraestructura productiva, secretos, URLs/callbacks de producción,
-  despliegues, operaciones externas, Git mutante
-  (commit/push/merge/rebase/reset/clean/checkout).
+- Excepción deploy 2026-10-26 [D], usuario: EJECUTAR `tools/deploy.ps1`
+  (y solo ese script) cuando el usuario autorice el despliegue
+  explícitamente por run; jamás con `-AllowDirty` en prod salvo orden
+  expresa; jamás tocar secretos/IAM/scheduler; el backup `pg_dump` con
+  la URL de Neon lo hace el OPERADOR (los agentes nunca leen valores
+  de secretos).
 
 > Alcance impuesto por `permission.edit` (verificado en
 > `opencode debug agents`): negación general + permite solo
