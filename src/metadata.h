@@ -179,6 +179,14 @@ QStringList forbiddenUserSessionShapes();
 // Aviso v1 sin email (spec §7): sin recuperación de cuenta. Solo UI.
 QString userNoRecoveryNotice();
 
+// f6 ENTRAR-primero: dos pantallas excluyentes en Managed (ENTRAR sin
+// sesión, PANEL con sesión); Independent siempre una sola pantalla
+// (panel, sin login). Puro QtCore, sin I/O/red/logs. La vista los usa
+// como gates de un QStackedWidget (doc Qt6 QStackedWidget,
+// https://doc.qt.io/qt-6/qstackedwidget.html).
+bool managedEnterVisible(bool isManaged, bool hasUserSession);
+bool managedPanelVisible(bool isManaged, bool hasUserSession);
+
 // Fase 5: borrado de CUENTA (/users/erase) separado del borrado de DATOS
 // F-C2 (/privacy/erase). Rutas canónicas distintas; la respuesta lleva
 // solo conteos por tabla + revocaciones por proveedor (jamás secretos).

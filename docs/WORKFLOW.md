@@ -33,6 +33,11 @@ Reglas:
   fuera de él:
   - `obs-plugin` (`src/`): `cmake*`/`ctest*`/`msbuild*` (+ selfchecks
     del plugin). Sin `npm`/`npx`, sin `curl`, sin red productiva.
+  - `ux-ui` (`src/`, capa de vista): `cmake*`/`ctest*`/`msbuild*`
+    (build + selfchecks de estados de la vista) + capturas del
+    operador para lo visual ([P] hasta entonces). Sin `npm`/`npx`,
+    sin `curl`, sin Git mutante, sin red productiva; jamás lógica
+    de auth/red/secretos (territorio `obs-plugin`).
   - `backend-integrations` (`backend/` + `lab/**`): `python*`/
     `pytest*` (backend) y `node*`/`npm*`/`npx*` (lab Node). Sin `curl`,
     sin `gh`/`gcloud`, sin Git mutante, sin producción. Navegador del

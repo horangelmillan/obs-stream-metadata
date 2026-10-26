@@ -19,7 +19,9 @@ Manejo de errores: ante fallo de herramienta, registrar comando + salida en el m
 ## Agentes locales y Skill compartida
 
 Descubrimiento: `opencode debug agents` desde la raíz. Definiciones en
-`.opencode/agents/` (`harness-steward`, `obs-plugin`,
+`.opencode/agents/` (`harness-steward`, `obs-plugin`, `ux-ui`
+(2026-10-26 [D]: vista Qt6 en `src/**`, serializado con
+`obs-plugin` por el orquestador, jamás a la vez),
 `backend-integrations`, `release-tooling`, `orquestador` (`mode:
 primary`, sin edición), `gcp-stream-metadata` de solo lectura);
 Skill en `.agents/skills/project-harness-governance/`
@@ -75,6 +77,7 @@ presencia/ausencia, jamás valores; resto de denies intacto:
 - `orquestador`: `.env` legible, secretos no.
 - `git-integration`: `.env` legible, secretos no (sigue prohibido
   `git add`/commit de `.env` y secretos).
+- `ux-ui` (2026-10-26 [D]): `.env` legible, secretos no.
 Shell en `ask` salvo Git de solo lectura (`status/diff/log/rev-parse/
 branch`→allow; `commit/push/merge/rebase/reset/clean/checkout`,
 `gh`, `gcloud` salvo GCP, `curl`→deny comprobados;
@@ -82,13 +85,19 @@ validación por stack, reforma 2026-10-25: `backend-integrations` =
 `python*`/`pytest*`/`node*`/`npm*`/`npx*`→allow (lab Node + backend
 Python; `lab/` aún no existe en el checkout [C, 2026-10-25], permiso
 anticipado para la Fase 2); `obs-plugin` = `cmake*`/`ctest*`/
-`msbuild*`→allow (C++/Qt de `src/`); `release-tooling` = sin ejecución
+`msbuild*`→allow (C++/Qt de `src/`); `ux-ui` (2026-10-26 [D]) =
+`cmake*`/`ctest*`/`msbuild*`→allow (build + selfchecks de la vista)
++ capturas del operador para lo visual; `release-tooling` = sin ejecución
 (`Invoke-WebRequest`→deny intacto);
 `git push` en GCP queda en `ask` heredado); allowlist exacta de shell
 de GCP intacta. Skills restringidas por ID (denegación general +
 nombres exactos comprobados en disco): añadidos reforma 2026-10-25
 (`executing-plans` + `requesting-code-review` en `backend-integrations`;
-`requesting-code-review` en `obs-plugin`; resto intacto). MCP por nombre real
+`requesting-code-review` en `obs-plugin`; resto intacto) + `ux-ui`
+2026-10-26 [D] (`web-design-guidelines`, `verification-before-
+completion`, `systematic-debugging`, `test-driven-development`,
+`writing-plans`, `brainstorming`, `executing-plans`, `context7-mcp`;
+las 8 verificadas en `C:\Users\Horan\.agents\skills\` en esta sesión). MCP por nombre real
 `<servidor>_<tool>` (inventario confirmado por `tools/list` y el
 historial local): solo lecturas necesarias por rol; denegados
 `index_repository/delete_project/ingest_traces/manage_adr`,
@@ -105,7 +114,8 @@ efectividad [P] pendiente de comprobar con `opencode debug agents` en
 la Fase 2; si el motor no lo admite rige `deny` y el lab se valida sin
 navegador);
 `webfetch` permitido, `websearch` permitido en steward y `ask` en
-dominio. GCP además: sin skills y sin MCP (solo shell + webfetch),
+dominio (excepción 2026-10-26 [D]: `ux-ui` = `allow`, deber de
+investigación de documentación oficial y buenas prácticas). GCP además: sin skills y sin MCP (solo shell + webfetch),
 coherente con su rol auditor.
 Apertura solo-lab T-077 (2026-10-26, autorización del usuario) [D]:
 `backend-integrations.browser`: `ask`→`allow` (solo E2E lab T-077

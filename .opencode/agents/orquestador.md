@@ -53,6 +53,7 @@ permission:
     "*": deny
     "harness-steward": allow
     "obs-plugin": allow
+    "ux-ui": allow
     "backend-integrations": allow
     "gcp-stream-metadata": allow
     "release-tooling": allow
@@ -103,6 +104,7 @@ Subagentes invocables, y solo estos:
 
 - `harness-steward`: coherencia documental y gobierno del harness.
 - `obs-plugin`: implementación en `src/` (C++/Qt6).
+- `ux-ui`: vista del dock en `src/` (Qt6 Widgets: pantallas, estados, textos, estilos); serializado con `obs-plugin`, jamás a la vez.
 - `backend-integrations`: implementación en `backend/` (Python).
 - `gcp-stream-metadata`: auditoría GCP en solo lectura.
 - `release-tooling`: mantenimiento de `tools/deploy.ps1` (modifica, no ejecuta).
