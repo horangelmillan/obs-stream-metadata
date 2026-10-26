@@ -52,9 +52,19 @@ QString pathName();         // "live"
 QString controlPatchPath(); // "/v3/config/paths/patch/live"
 QString controlBase();      // "http://127.0.0.1:9997"
 
-// Nombres del binario integrado (el instalador lo coloca junto al
-// plugin; el dock lo busca sin bloquear la UI). Jamas en el repo.
+// Nombres del binario integrado (aviso MIT incluido; el binario jamas
+// se versiona, ver .gitignore). El instalador lo coloca en el data path
+// del modulo (data/obs-plugins/obs-stream-metadata/relay/); el dock lo
+// busca ahi primero y luego en los legados, sin bloquear la UI.
 QStringList binaryCandidates(); // ["mediamtx.exe", "mediamtx"]
+
+// Rutas relativas del binario dentro del data path del modulo, en orden
+// de busqueda: relay/ primero (destino del instalador), luego la raiz
+// del data dir. Puro QtCore, testeable sin runtime OBS.
+QStringList dataRelativeBinaryPaths();
+// Expande un dataDir absoluto a candidatos absolutos (mismo orden).
+// Puro (solo QDir::filePath), sin I/O ni runtime OBS.
+QStringList dataBinaryCandidates(const QString &dataDir);
 
 // F-096: secure_stream_url (memoria/transito) -> dest del forward
 // "base#clave". base = scheme://host[:port]/path-sin-ultimo-segmento;

@@ -8,6 +8,7 @@
 #include "secure_store.h"
 
 #include <QCoreApplication>
+#include <QDir>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -1598,6 +1599,47 @@ int main(int argc, char **argv)
 		      relay::binaryCandidates().contains(
 			      QStringLiteral("mediamtx")),
 	      "relay-binary-names");
+	// relay-find-data: el data path del modulo es el destino del
+	// instalador (data/.../relay/mediamtx.exe). Solo construccion
+	// de rutas relativas/expansion pura (sin runtime OBS ni I/O).
+	{
+		const QStringList rel =
+			relay::dataRelativeBinaryPaths();
+		CHECK(rel.size() == 4, "relay-find-data-count");
+		CHECK(rel.at(0) ==
+			      QStringLiteral("relay/mediamtx.exe") &&
+			      rel.at(1) ==
+				      QStringLiteral("relay/mediamtx"),
+		      "relay-find-data-relay-first");
+		CHECK(rel.at(2) ==
+			      QStringLiteral("mediamtx.exe") &&
+			      rel.at(3) ==
+				      QStringLiteral("mediamtx"),
+		      "relay-find-data-root-fallback");
+		bool anyAbs = false;
+		for (const QString &r : rel) {
+			if (QDir::isAbsolutePath(r))
+				anyAbs = true;
+		}
+		CHECK(!anyAbs, "relay-find-data-relative-only");
+		const QString fakeBase =
+			QStringLiteral("/fake/data");
+		const QStringList abs =
+			relay::dataBinaryCandidates(fakeBase);
+		CHECK(abs.size() == rel.size(),
+		      "relay-find-data-expand-count");
+		bool orderOk = true;
+		for (int i = 0; i < rel.size(); ++i) {
+			if (abs.at(i) !=
+			    QDir::cleanPath(
+				    QDir(fakeBase).filePath(rel.at(i))))
+				orderOk = false;
+		}
+		CHECK(orderOk, "relay-find-data-expand-order");
+		CHECK(abs.at(0).endsWith(
+			      QStringLiteral("relay/mediamtx.exe")),
+		      "relay-find-data-installer-first");
+	}
 	{
 		// F-096: base + '#' + clave, jamas URL integra.
 		const QString dest = relay::forwardDestFromIngest(
