@@ -5,6 +5,7 @@ Ver relay.h para el contrato. Sin I/O, sin red, sin UI, sin logs.
 
 #include "relay.h"
 
+#include <QDir>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -46,6 +47,27 @@ QStringList binaryCandidates()
 {
 	return QStringList{QStringLiteral("mediamtx.exe"),
 			   QStringLiteral("mediamtx")};
+}
+
+QStringList dataRelativeBinaryPaths()
+{
+	// Orden de busqueda: data-relay primero (destino del
+	// instalador), luego la raiz del data dir.
+	return QStringList{
+		QStringLiteral("relay/mediamtx.exe"),
+		QStringLiteral("relay/mediamtx"),
+		QStringLiteral("mediamtx.exe"),
+		QStringLiteral("mediamtx"),
+	};
+}
+
+QStringList dataBinaryCandidates(const QString &dataDir)
+{
+	const QDir base(dataDir);
+	QStringList out;
+	for (const QString &rel : dataRelativeBinaryPaths())
+		out << QDir::cleanPath(base.filePath(rel));
+	return out;
 }
 
 QString forwardDestFromIngest(const QString &secureUrl)

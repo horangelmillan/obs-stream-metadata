@@ -60,8 +60,37 @@ void RelayManager::notify(const QString &msg)
 QString RelayManager::findBinary() const
 {
 	const QStringList names = relay::binaryCandidates();
-	// 1. Junto al plugin instalado (obs-plugins/64bit) y junto a la
-	// app (bin/64bit): el instalador coloca ahi el binario + yml.
+	auto usable = [](const QFileInfo &fi, const QString &name) {
+		if (!fi.isFile())
+			return false;
+#ifdef Q_OS_WIN
+		// En Windows basta isFile para .exe (el bit ejecutable no
+		// aplica igual que en POSIX).
+		if (name.endsWith(QStringLiteral(".exe"),
+				  Qt::CaseInsensitive))
+			return true;
+#endif
+		return fi.isExecutable();
+	};
+	// 1. Data path del modulo (destino real del instalador:
+	// data/obs-plugins/obs-stream-metadata/relay/mediamtx.exe).
+	// Primero, antes que los legados y que PATH.
+	const char *data =
+		obs_get_module_data_path(obs_current_module());
+	if (data && *data) {
+		const QString dataDir = QString::fromUtf8(data);
+		// <data>/relay/mediamtx[.exe], <data>/mediamtx[.exe];
+		// <data>/relay/ actua ademas como dir base (prefijo de
+		// las dos primeras relativas).
+		for (const QString &abs :
+		     relay::dataBinaryCandidates(dataDir)) {
+			const QFileInfo fi(abs);
+			if (usable(fi, abs))
+				return fi.absoluteFilePath();
+		}
+	}
+	// 2. Legados (junto al plugin instalado, junto a la app,
+	// dir de trabajo): fallback, no destino del instalador.
 	const QStringList dirs{
 		QCoreApplication::applicationDirPath(),
 		QCoreApplication::applicationDirPath() +
@@ -71,11 +100,11 @@ QString RelayManager::findBinary() const
 	for (const QString &dir : dirs) {
 		for (const QString &name : names) {
 			const QFileInfo fi(QDir(dir).filePath(name));
-			if (fi.isFile() && fi.isExecutable())
+			if (usable(fi, name))
 				return fi.absoluteFilePath();
 		}
 	}
-	// 2. PATH del sistema.
+	// 3. PATH del sistema.
 	for (const QString &name : names) {
 		const QString found =
 			QStandardPaths::findExecutable(name);

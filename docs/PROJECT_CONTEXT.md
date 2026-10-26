@@ -128,7 +128,17 @@ diff-check 0, secret-scan limpio, WhatIf OK; T-078 sigue en
 investigación sin cambio de estado [C contra BACKLOG]. Pendientes [P]:
 E2E operador instalar→relay→forward→GoLive→LIVE, métricas F-099,
 audiencia F-093, build E2E del instalador con descarga real, capturas
-visuales. Sin afirmar Live/App Review/requisitos (sin evidencia);
+visuales. Fix 2026-10-26 [D delegada de la sesión implementadora, no
+re-ejecutado aquí; C estático en sesión documental:
+`src/relay_manager.cpp:79` usa `obs_get_module_data_path` y
+`src/metadata_selfcheck.cpp` contiene 7 checks `relay-find-data-*`]:
+`findBinary` buscaba junto al programa pero el instalador pone el
+relay en el data path; ahora busca primero en data-path/`relay/`
+(causa del "binary missing" del operador con instalador nuevo);
+build OK, selfcheck 322/0 con relay-find-data 7/7, diff-check y scan
+limpios. T-078 sigue en investigación sin cambio de estado [C contra
+BACKLOG]. Pendiente [P]: operador reinstala/reabre OBS → Start relay
+→ E2E. Sin afirmar Live/App Review/requisitos (sin evidencia);
 separado del despliegue del backend en Cloud Run; requiere confirmación
 y alcance explícito antes de ejecutar nada.
 NEXT REQUIRED TECHNICAL TASK: NONE.

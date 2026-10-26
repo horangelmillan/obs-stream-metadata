@@ -4,9 +4,11 @@ local MediaMTX (ADR-016).
 
 QProcess + QNetworkAccessManager con senales, sin bloquear la UI:
 
-- El binario integrado se busca sin bloquear (candidatos de relay.h en
-  PATH + junto al plugin + dir de la app); ausente => estado
-  BinaryMissing + mensaje honesto (aviso MIT, nunca se versiona).
+- El binario integrado se busca sin bloquear (data path del modulo
+  primero —destino del instalador: relay/—, luego legados junto al
+  plugin + dir de la app, luego PATH; candidatos de relay.h);
+  ausente => estado BinaryMissing + mensaje honesto (aviso MIT,
+  nunca se versiona).
 - Puertos 1935/9997: comprobacion previa honesta (otro proceso/otra
   instancia); el plugin nunca toca Aitum/OBS.
 - Al crear LiveVideo el dock pasa secure_stream_url (memoria) y aqui se
