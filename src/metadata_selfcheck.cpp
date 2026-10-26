@@ -1850,6 +1850,51 @@ int main(int argc, char **argv)
 			      QStringLiteral("UNPUBLISHED"), QString(),
 			      QStringLiteral("2")),
 	      "fbauto-should-delete");
+	// Plan v3 Fase 1: escucha/colas (puros QtCore, sin I/O/red/logs).
+	// Contrato de archivos-senal para release-tooling: dir leaf +
+	// signal.on/off; respaldo 3 s; adaptativo 2 s/1 s; 3 fallos =
+	// apagado probable; 2-de-3 = inestable; auto-End con 30 s + 5 min
+	// + confirmacion del MISMO ID + sesion propia; refire de un disparo.
+	CHECK(QString::fromLatin1(meta::fbSignalDirLeaf()) ==
+		      QStringLiteral("obs-stream-metadata-relay") &&
+		      QString::fromLatin1(meta::fbSignalOnFile()) ==
+			      QStringLiteral("signal.on") &&
+		      QString::fromLatin1(meta::fbSignalOffFile()) ==
+			      QStringLiteral("signal.off"),
+	      "v3-signal-files");
+	CHECK(meta::fbSignalBackupMs() == 3000 &&
+		      meta::fbSignalFastMs(0) == 2000 &&
+		      meta::fbSignalFastMs(1) == 1000 &&
+		      meta::fbSignalFastMs(9) == 1000,
+	      "v3-signal-timings");
+	CHECK(!meta::fbSignalDropCountsAsGone(2) &&
+		      meta::fbSignalDropCountsAsGone(3) &&
+		      meta::fbSignalDropCountsAsGone(4),
+	      "v3-signal-drop-3");
+	CHECK(meta::fbSignalBallotUnstable(1, 3) &&
+		      meta::fbSignalBallotUnstable(2, 3) &&
+		      !meta::fbSignalBallotUnstable(0, 3) &&
+		      !meta::fbSignalBallotUnstable(3, 3) &&
+		      !meta::fbSignalBallotUnstable(2, 2),
+	      "v3-signal-ballot-2of3");
+	CHECK(meta::fbAutoEndGuardsOk(30000, 0 + 1000000 - 300000,
+				      1000000, true, true) &&
+		      !meta::fbAutoEndGuardsOk(29999, 1000000 - 300000,
+					       1000000, true, true) &&
+		      !meta::fbAutoEndGuardsOk(30000, 1000000 - 299999,
+					       1000000, true, true) &&
+		      !meta::fbAutoEndGuardsOk(30000, 1000000 - 300000,
+					       1000000, false, true) &&
+		      !meta::fbAutoEndGuardsOk(30000, 1000000 - 300000,
+					       1000000, true, false) &&
+		      !meta::fbAutoEndGuardsOk(30000, 0, 1000000, true,
+					       true),
+	      "v3-autoend-guards");
+	CHECK(!meta::fbRefireDue(0, 1000000) &&
+		      meta::fbRefireDue(1000000, 1000000) &&
+		      meta::fbRefireDue(999999, 1000000) &&
+		      !meta::fbRefireDue(1000001, 1000000),
+	      "v3-refire-due");
 	{
 		// Punto 3: Verified no anade nota (Apply ya dijo exito);
 		// audiencia no verificada afirma titulo/desc pero jamas
