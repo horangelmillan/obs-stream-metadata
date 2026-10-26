@@ -143,8 +143,14 @@ private slots:
 	// 401 Managed normalizado (auth doble): cae la conexión local,
 	// mensaje de login y formulario al frente. Independent intacto.
 	void noteManagedAuthFailure(meta::Platform p);
-	// Estados del formulario de cuenta Managed (solo Managed).
-	void refreshManagedLoginUi();
+	// Estados del formulario de cuenta Managed (solo Managed). f7 (bug
+	// 2026-10-26): statusOverride preserva el mensaje vigente (error
+	// especifico) cuando no hay sesion; vacio => gate "login required".
+	// Sin override, QLabel::setText limpiaria el error recien fijado
+	// (https://doc.qt.io/qt-6/qlabel.html: "Setting the text clears
+	// any previous content").
+	void refreshManagedLoginUi(
+		const QString &statusOverride = QString());
 	// f6 ENTRAR-primero: pagina visible del QStackedWidget segun los
 	// predicados puros meta::managedEnterVisible/PanelVisible
 	// (excluyentes en Managed; Independent siempre PANEL). Sin red.

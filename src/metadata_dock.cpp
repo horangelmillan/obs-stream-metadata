@@ -1573,7 +1573,7 @@ void MetadataDock::refreshManagedScreen()
 		userNameEdit_->setFocus();
 }
 
-void MetadataDock::refreshManagedLoginUi()
+void MetadataDock::refreshManagedLoginUi(const QString &statusOverride)
 {
 	// f6: la línea de sesión del PANEL solo existe en Managed con
 	// sesión; en Independent (o sin sesión) queda oculta. userStatus_
@@ -1615,8 +1615,11 @@ void MetadataDock::refreshManagedLoginUi()
 					? tr("Logged in.")
 					: tr("Logged in as %1").arg(label));
 		} else {
+			// f7: el gate solo aparece sin mensaje vigente; un
+			// error especifico recien fijado sobrevive (el
+			// llamador lo pasa como override).
 			userStatus_->setText(
-				meta::managedLoginRequiredMessage());
+				meta::managedLoggedOutStatus(statusOverride));
 		}
 	}
 	refreshManagedScreen();
@@ -1640,8 +1643,11 @@ QString MetadataDock::userAuthError(backend_auth::Result r, bool isSignup)
 	}
 	// InvalidResponse cubre 400/409/duplicado según el llamador, sin
 	// inventar el motivo exacto (el backend normaliza el login).
+	// f7: el 409 de signup sugiere pulsar Log in en vez de reintentar
+	// Sign up (texto puro meta::managedSignupTakenMessage, sin
+	// secretos; el gate "login required" ya no lo pisa).
 	if (isSignup)
-		return tr("Sign up failed (username may be taken or invalid).");
+		return meta::managedSignupTakenMessage();
 	return tr("Login failed.");
 }
 
@@ -1668,9 +1674,9 @@ void MetadataDock::onUserSignup()
 				return; // user switched mode
 			userPassEdit_->clear(); // jamás permanece en el widget
 			if (r != backend_auth::Result::Ok) {
-				userStatus_->setText(
-					userAuthError(r, true));
-				refreshManagedLoginUi();
+				// f7: el error especifico viaja como override;
+				// el gate ya no lo pisa (bug 2026-10-26).
+				refreshManagedLoginUi(userAuthError(r, true));
 				return;
 			}
 			// 201 no abre sesión (backend Fase 2): login
@@ -1684,10 +1690,11 @@ void MetadataDock::onUserSignup()
 						return;
 					if (lr !=
 					    backend_auth::Result::Ok) {
-						userStatus_->setText(
+						// f7: idem tras el auto-login
+						// encadenado.
+						refreshManagedLoginUi(
 							userAuthError(
 								lr, false));
-						refreshManagedLoginUi();
 						return;
 					}
 					refreshManagedLoginUi();
@@ -1716,9 +1723,10 @@ void MetadataDock::onUserLogin()
 				    if (!isManaged())
 					    return;
 				    if (r != backend_auth::Result::Ok) {
-					    userStatus_->setText(
+					    // f7: el error especifico viaja
+					    // como override (bug 2026-10-26).
+					    refreshManagedLoginUi(
 						    userAuthError(r, false));
-					    refreshManagedLoginUi();
 					    return;
 				    }
 				    refreshManagedLoginUi();
