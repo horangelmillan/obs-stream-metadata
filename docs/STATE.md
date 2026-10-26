@@ -94,6 +94,7 @@
   §§23/51 antes de implementar producto. BACKLOG canónico: T-077 sigue
   en investigación, sin cambio de estado. Detalle en VALIDATION.md.
 - **Relay local MediaMTX [D E2E lab 2026-10-26, T-078 en investigación]:** propuesta validada en lab (`docs/MEDIAMTX-RELAY-FLOW.md` como guía; T-078): MediaMTX v1.21.3 local con forward RTMPS en caliente (PATCH sin reinicio, formato base+`#`+clave) → 2 emisiones LIVE+DIRECTO con movimiento sin tocar Aitum entre ellas; responde a F-092 (sin URL única de ingesta) con URL fija local + re-fijado del forward. Nuevo punto de partida arquitectónico pendiente de port al plugin y de resolución del conflicto de alcance §§23/51. Pendientes [P]: métricas latencia/CPU/recovery (F-099), audiencia en producción (sigue "Solo yo" pese a EVERYONE 200, como F-093), rate-limit a re-handshakes (~3 min, F-097). Detalle en VALIDATION.md T-078 y F-096–F-099. BACKLOG canónico: T-078 sigue en investigación (aceptación parcialmente cubierta), T-077 intacta.
+- **Fix relay findBinary → data path primero (2026-10-26) [D delegada + C estático parcial]:** `findBinary` buscaba junto al programa pero el instalador pone el relay en el data path del módulo; ahora busca primero en `obs_get_module_data_path()/relay/` (causa del "binary missing" del operador con instalador nuevo). Evidencia delegada [D, no re-ejecutada aquí]: build OK, selfcheck 322/0 con relay-find-data 7/7, diff-check y secret-scan limpios. [C en esta sesión: `src/relay_manager.cpp:79` usa `obs_get_module_data_path`, `src/metadata_selfcheck.cpp` contiene 7 checks `relay-find-data-*`, y `git status --porcelain` lista 5 ficheros `src/` modificados sin commit]. Sin cambios de alcance §§23/51 (ADR-016 intacto). T-078 SIGUE en investigación sin cambio de estado (canónico BACKLOG). Pendiente [P]: operador reinstala/reabre OBS → Start relay → E2E instalar→forward→GoLive→LIVE + métricas F-099 + audiencia F-093. Detalle en VALIDATION.md.
 - **Relay Fases 2–6 port lab→plugin (2026-10-26) [D delegada, no re-ejecutada aquí]:** `src/relay.h`/`src/relay.cpp` + `src/relay_manager.*` + vista en el dock + `tools/package.ps1` con relay/MIT (aviso MIT incluido en el empaquetado); build RelWithDebInfo OK; selfcheck 315 PASS/0 FAIL; `git diff --check` 0; secret-scan limpio; `package.ps1 -WhatIf` OK. Excepción acotada §§23/51 (ADR-016): proceso hijo + forward vía `:9997`, destino operador fijo `rtmp://127.0.0.1:1935/live`; sin automatizar Aitum/OBS, sin multistream general. T-078 SIGUE en investigación sin cambio de estado (canónico BACKLOG). Pendientes [P]: E2E operador instalar→relay→forward→GoLive→LIVE, métricas F-099, audiencia F-093, build E2E del instalador con descarga real, capturas visuales. Detalle en VALIDATION.md.
 - **Port lab→plugin Fase D (2026-10-26) [D delegada + C parcial]:** Status sin privacy en ambos modos + fallback, persistent opt-OFF en ambos modos + mapeo `persistent-key-not-allowed`, mensajes F-097 (cooldown ~3 min) y F-098 (auto-VOD) en el dock; NO portado el formato lab base+clave (`#`) ni relay/scripts lab (quedan en `docs/MEDIAMTX-RELAY-FLOW.md` + `lab/**`). Evidencia delegada [D, no re-ejecutada aquí]: backend 334 passed/11 skipped + selfcheck 287/0 DLL OK + diff-check limpio + secret-scan limpio. [C en esta sesión: `git status --porcelain` lista 5 ficheros `src/` modificados sin commit (`metadata.cpp/.h`, `metadata_dock.cpp/.h`, `metadata_selfcheck.cpp`); sin commit/push]. T-077/T-078 siguen en investigación sin cambio de estado (canónico BACKLOG). Pendientes [P]: E2E operador del port + resolución del conflicto de alcance §§23/51. Detalle en VALIDATION.md.
 - **Reforma harness en curso [C, 2026-10-25, Fase 1 documental]:** apertura
@@ -146,7 +147,13 @@
 - **Restricción vigente:** `poc/` es evidencia histórica + regresión
   (no tocar salvo corrección justificada); el producto vive en `src/`
   + `backend/`.
-- **Última actualización:** 2026-10-26 — Relay Fases 2–6
+- **Última actualización:** 2026-10-26 — Fix relay findBinary
+  documentado (data path primero, causa del "binary missing" con
+  instalador nuevo; build OK, selfcheck 322/0 con relay-find-data 7/7
+  [D delegada + C estático]; T-078 sigue en investigación sin cambio
+  de estado; pendientes [P]: reinstalar/reabrir OBS, Start relay, E2E);
+  sin commit/push en esta tarea documental.
+  Anterior (2026-10-26): Relay Fases 2–6
   documentadas (relay.h/cpp + relay_manager + vista + package.ps1 con
   relay/MIT; build RelWithDebInfo OK, selfcheck 315 PASS/0 FAIL,
   diff-check 0, secret-scan limpio, WhatIf OK [D delegada]; T-078 sigue

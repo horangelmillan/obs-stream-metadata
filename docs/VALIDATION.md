@@ -9,6 +9,36 @@
 > `#define`; conteo estático [C], sin ejecutar aquí). Últimos resultados documentados [D]: backend 250 OK
 > (T-076) + SELFCHECK OK (T-073).
 
+## Fix relay findBinary → data path primero (2026-10-26, sin commit; T-078 sin cambio de estado)
+
+```text
+FUENTE [D, delegada de la sesión implementadora; no re-ejecutada en
+  esta sesión documental]: fix en `src/relay_manager.cpp::findBinary`
+  (+ `src/relay.h`/`src/relay.cpp`/`src/relay_manager.h` + checks en
+  `src/metadata_selfcheck.cpp`): buscaba el binario junto al programa
+  pero el instalador coloca el relay en el data path del módulo; ahora
+  busca primero en `obs_get_module_data_path()/relay/` (causa del
+  "binary missing" del operador con instalador nuevo). Build OK;
+  selfcheck 322/0 con relay-find-data 7/7; `git diff --check` y
+  secret-scan limpios. Aquí solo edición de docs + `git diff --check`;
+  sin commit/push, sin secretos, sin staging/dev.env.
+ESTÁTICO [C, esta sesión documental, sin ejecutar]: `src/relay_manager.cpp:79`
+  usa `obs_get_module_data_path`; `src/metadata_selfcheck.cpp`
+  contiene 7 checks `relay-find-data-*`; `git status --porcelain`
+  lista 5 ficheros `src/` modificados sin commit (relay.cpp/.h,
+  relay_manager.cpp/.h, metadata_selfcheck.cpp).
+ALCANCE [D]: solo orden de búsqueda del binario (data path primero,
+  resto como fallback); sin cambios de alcance AGENTS.md §§23/51
+  (ADR-016 intacto).
+ESTADO [C contra BACKLOG]: T-078 SIGUE en investigación, sin cambio
+  de estado en esta tarea (canónico BACKLOG; esta entrada no cambia
+  estados).
+PENDIENTE [P]: operador reinstala/reabre OBS → Start relay → E2E
+  instalar→relay→forward→GoLive→LIVE + métricas F-099 + audiencia
+  F-093.
+FINAL: fix documentado; E2E de aceptación pendiente.
+```
+
 ## Relay Fases 2–6 port lab→plugin (2026-10-26, sin commit; T-078 sin cambio de estado)
 
 ```text
