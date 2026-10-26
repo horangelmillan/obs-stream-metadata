@@ -9,6 +9,25 @@
 > `#define`; conteo estático [C], sin ejecutar aquí). Últimos resultados documentados [D]: backend 250 OK
 > (T-076) + SELFCHECK OK (T-073).
 
+## E2E operador single-PC Managed (2026-10-26, autorización [D usuario: confirmó en prod los 3 puntos con "OK OK OK"])
+
+```text
+FUENTE:    chat del operador 2026-10-26 [D] (no re-ejecutado en esta
+           sesión documental; aquí solo edición de docs +
+           `git diff --check`; sin commit/push, sin secretos, sin
+           staging/dev.env).
+1. SESIÓN: reapertura con sesión válida → directo al panel
+           (sesión persistente T-086 OK en vivo).
+2. LOGOUT: logout → pantalla entrar + plataformas en gris neutro
+           (sin rojos) (routing/estados T-086 OK en vivo).
+3. REGLA:  logout desconectó las 4 plataformas (regla T-085
+           funcionando en vivo).
+PENDIENTE: T-084 multi-PC sigue pendiente [P] (requiere 2 máquinas);
+           OAuth real con Apply de título real sigue pendiente del
+           operador [P].
+FINAL: E2E single-PC PASS operador; multi-PC + OAuth real pendientes.
+```
+
 ## T-086 Sesión Managed persistente + routing arranque + estados tarjeta (2026-10-26, decisión [D usuario])
 
 ```text
