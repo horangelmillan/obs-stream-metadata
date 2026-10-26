@@ -590,6 +590,37 @@ bool managedPanelVisible(bool isManaged, bool hasUserSession)
 	return !isManaged || hasUserSession;
 }
 
+// AUTORIZACION [D usuario 2026-10-26]: solo con sesion en memoria tras
+// el restore tiene sentido una llamada de red (me); sin sesion, ENTRAR
+// directo sin red. Puro QtCore.
+bool managedStartupShouldRevalidate(bool hasUserSession)
+{
+	return hasUserSession;
+}
+
+// Bugfix visual 2026-10-26 [D]: clasificacion pura estado->tono.
+// Espeja exactamente la regla que la vista aplica en updateCardStyle:
+// tono Error si el status empieza por "Error", es "Needs
+// reconnection." o el gate login-required, o el result lleva " ✗ "
+// (formato "%1 ✗ %3" de setResult); Brand si conectada sin error;
+// Neutral en otro caso (limpio/nunca-tocado/logout = gris, sin texto
+// de error). La vista garantiza no escribir textos de error en
+// plataformas limpias, asi el rojo nunca se pega.
+CardTone cardToneFor(bool connected, const QString &statusText,
+		     const QString &resultText)
+{
+	const bool failed =
+		statusText.startsWith(QStringLiteral("Error")) ||
+		statusText == QStringLiteral("Needs reconnection.") ||
+		statusText == managedLoginRequiredMessage() ||
+		resultText.contains(QStringLiteral(" \u2717 "));
+	if (failed)
+		return CardTone::Error;
+	if (connected)
+		return CardTone::Brand;
+	return CardTone::Neutral;
+}
+
 // Fase 5: borrado de CUENTA (/users/erase) separado de F-C2
 // (/privacy/erase). Rutas canónicas distintas por construcción; el
 // resumen de respuesta solo incrusta enteros (conteos por tabla).

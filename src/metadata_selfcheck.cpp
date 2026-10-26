@@ -1321,6 +1321,178 @@ int main(int argc, char **argv)
 		      QStringLiteral("Log in")),
 	      "f8-409-suggests-login");
 
+	// Bugfix visual 2026-10-26 [D]: tres estados visuales excluyentes
+	// por plataforma. Rojo SOLO tras accion fallida del usuario o
+	// ruptura de una conectada; limpio/nunca-tocado o
+	// desconectado-por-logout = gris neutro. Predicado puro
+	// estado->estilo (la vista lo usa en updateCardStyle).
+	CHECK(meta::cardToneFor(
+		      false, QStringLiteral("Not connected"),
+		      QStringLiteral("Twitch \u2014")) ==
+		      meta::CardTone::Neutral,
+	      "card-clean-neutral");
+	CHECK(meta::cardToneFor(
+		      false, QStringLiteral("Not connected"),
+		      QStringLiteral("Twitch \u2713 disconnected")) ==
+		      meta::CardTone::Neutral,
+	      "card-logout-neutral");
+	CHECK(meta::cardToneFor(
+		      true, QStringLiteral("Connected as canal"),
+		      QStringLiteral("YouTube \u2713 connected")) ==
+		      meta::CardTone::Brand,
+	      "card-connected-brand");
+	CHECK(meta::cardToneFor(
+		      false, QStringLiteral("Error: boom"),
+		      QStringLiteral("Twitch \u2014")) ==
+		      meta::CardTone::Error,
+	      "card-action-error");
+	CHECK(meta::cardToneFor(
+		      false, QStringLiteral("Not connected"),
+		      QStringLiteral("Twitch \u2717 boom")) ==
+		      meta::CardTone::Error,
+	      "card-result-error");
+	// El rojo se limpia al cambiar de estado: mismos inputs limpios
+	// vuelven a gris (documenta que la vista debe reescribir
+	// status+result al limpiar, no pegarse).
+	CHECK(meta::cardToneFor(
+		      false, QStringLiteral("Not connected"),
+		      QStringLiteral("Twitch \u2014")) ==
+		      meta::CardTone::Neutral,
+	      "card-error-cleared");
+	// Mecanismo del bug: el gate "login required" y el "Needs
+	// reconnection." cuentan como tono Error; por eso la vista JAMAS
+	// debe escribirlos en plataformas limpias (logout/login limpio
+	// usa "Not connected" neutro).
+	CHECK(meta::cardToneFor(false,
+				meta::managedLoginRequiredMessage(),
+				QStringLiteral("Twitch \u2014")) ==
+		      meta::CardTone::Error,
+	      "card-gate-is-error");
+	CHECK(meta::cardToneFor(false,
+				QStringLiteral("Needs reconnection."),
+				QStringLiteral("Twitch \u2014")) ==
+		      meta::CardTone::Error,
+	      "card-reconnect-is-error");
+
+#ifdef Q_OS_WIN
+	// [D 2026-10-26 usuario]: managedUser persistido (DPAPI, ligado a
+	// backendBaseUrl). SUSTITUYE spec §5 memoria-solo: "si entraste
+	// antes, al abrir OBS vuelve directo al panel". Round-trip DPAPI con
+	// valores falsos (convencion fk-...): el fichero crudo NUNCA contiene
+	// el token, la etiqueta ni formas user_session; la URL de binding es
+	// plaintext (no es secreto); expirada se ignora; logout limpia.
+	{
+		QTemporaryDir tmp;
+		CHECK(tmp.isValid(), "muser-tmpdir");
+		const QString path =
+			tmp.filePath(QStringLiteral("accounts.json"));
+		secure::Store store(path);
+		secure::Data d;
+		d.managedUser.loggedIn = true;
+		d.managedUser.username = QStringLiteral("fake-user-9z");
+		d.managedUser.token = QStringLiteral("fk-usersess-9z");
+		d.managedUser.expiry =
+			QDateTime::currentDateTimeUtc().addSecs(1800);
+		d.backendBaseUrl =
+			QStringLiteral("http://127.0.0.1:8080");
+		CHECK(store.save(d), "muser-save");
+		QFile raw(path);
+		CHECK(raw.open(QIODevice::ReadOnly), "muser-raw");
+		const QByteArray bytes = raw.readAll();
+		raw.close();
+		CHECK(!bytes.contains("fk-usersess-9z"),
+		      "muser-no-plaintext-token");
+		CHECK(!bytes.contains("fake-user-9z"),
+		      "muser-no-plaintext-username");
+		CHECK(bytes.contains("\"managed_user\""),
+		      "muser-key-present");
+		CHECK(bytes.contains("http://127.0.0.1:8080"),
+		      "muser-url-plaintext-binding");
+		for (const QString &shape :
+		     meta::forbiddenUserSessionShapes()) {
+			if (bytes.contains(shape.toUtf8())) {
+				std::printf("FAIL muser-no-user-session\n");
+				return 1;
+			}
+		}
+		std::printf("PASS muser-no-user-session\n");
+		secure::Data back;
+		// load() reporta presencia de proveedores (aquí ninguno):
+		// false con la sesion restaurada, igual que los snapshots.
+		CHECK(!store.load(back) && back.managedUser.loggedIn &&
+			      back.managedUser.username ==
+				      QStringLiteral("fake-user-9z") &&
+			      back.managedUser.token ==
+				      QStringLiteral("fk-usersess-9z") &&
+			      back.managedUser.expiry.toSecsSinceEpoch() ==
+				      d.managedUser.expiry
+					      .toSecsSinceEpoch() &&
+			      back.backendBaseUrl ==
+				      QStringLiteral("http://127.0.0.1:8080"),
+		      "muser-roundtrip");
+		// Mismatch de URL = sin sesion (mismo predicado fail-closed que
+		// loadInstallation/tryRestoreUserSession, sin duplicar logica).
+		CHECK(secure::installationUrlMatches(
+			      back.backendBaseUrl,
+			      QStringLiteral("http://127.0.0.1:8080")),
+		      "muser-match-same");
+		CHECK(!secure::installationUrlMatches(
+			      back.backendBaseUrl,
+			      QStringLiteral("https://backend.example.com")),
+		      "muser-mismatch-cross");
+		CHECK(!secure::installationUrlMatches(QStringLiteral(""),
+						      QStringLiteral(
+							      "http://127.0.0.1:8080")),
+		      "muser-legacy-empty");
+		// Expirada se ignora (login de nuevo): save la guarda, load no
+		// la restaura. (load() devuelve presencia de proveedores, aquí
+		// ninguno: se comprueba el registro, no el retorno.)
+		secure::Data old = back;
+		old.managedUser.expiry =
+			QDateTime::currentDateTimeUtc().addSecs(-60);
+		CHECK(store.save(old), "muser-exp-save");
+		secure::Data gone;
+		store.load(gone);
+		CHECK(!gone.managedUser.loggedIn &&
+			      gone.managedUser.token.isEmpty(),
+		      "muser-expired-ignored");
+		// Logout limpia: reset del registro + save, sin rastro en crudo.
+		secure::Data out = back;
+		out.managedUser = secure::ManagedUserSession{};
+		CHECK(store.save(out), "muser-logout-save");
+		secure::Data clean;
+		store.load(clean);
+		CHECK(!clean.managedUser.loggedIn &&
+			      clean.managedUser.username.isEmpty() &&
+			      clean.managedUser.token.isEmpty(),
+		      "muser-logout-clean");
+		QFile rawAfter(path);
+		CHECK(rawAfter.open(QIODevice::ReadOnly),
+		      "muser-logout-raw");
+		const QByteArray after = rawAfter.readAll();
+		rawAfter.close();
+		CHECK(!after.contains("fk-usersess-9z") &&
+			      !after.contains("fake-user-9z"),
+		      "muser-logout-no-trace");
+	}
+#else
+	CHECK(true, "muser-skipped-non-windows");
+#endif
+
+	// AUTORIZACION [D usuario 2026-10-26]: arranque Managed directo al
+	// PANEL. Sin sesion restaurable -> ENTRAR sin red; con sesion ->
+	// revalidar (me) y PANEL directo; 401/expirada -> ENTRAR normal.
+	CHECK(!meta::managedStartupShouldRevalidate(false),
+	      "startup-no-restore-no-net");
+	CHECK(meta::managedStartupShouldRevalidate(true),
+	      "startup-restore-revalidate");
+	CHECK(meta::managedEnterVisible(true, false) &&
+		      !meta::managedPanelVisible(true, false),
+	      "startup-enter-without-session");
+	CHECK(!meta::managedEnterVisible(true, true) &&
+		      meta::managedPanelVisible(true, true),
+	      "startup-panel-with-session");
+
 	std::printf("SELFCHECK OK\n");
 	return 0;
 }

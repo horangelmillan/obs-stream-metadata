@@ -139,13 +139,15 @@
   reales (OAuth por plataforma + Apply real + dos PCs; T-084 sigue
   pendiente, BACKLOG canonico).
 - **Regla logout/login Managed (T-085, 2026-10-26) [D]:** logout explícito = desconexión total Managed de la PC; re-login mismo usuario conserva; otro usuario entra limpio; reinicio sin logout conserva. Pendiente [P]: desplegar backend + E2E operador.
+- **Sesión Managed persistente (T-086, 2026-10-26) [D, decisión del usuario; sustituye spec §5 memoria-solo]:** la sesión de usuario Managed persiste cifrada en DPAPI (`managedUser`: token+expiry+username, fail-closed ante mismatch de `backendBaseUrl`) hasta logout explícito/401/expiración; al abrir OBS con sesión válida → directo al panel; login solo si venció o hubo logout. Implementado por obs-plugin + routing ux-ui (cambios sin commitear en este checkout [C]); build+selfcheck verdes según sesión implementadora (`startup-*`/`muser-*`/`card-*`/`f6-f8` PASS, DLL OK) [D]. Pendientes [P]: integrar (commit/PR), recompilar instalador, E2E operador con capturas.
 - **Rama base:** `master` (ADR-004; CI anclado a `master`).
 - **Repo remoto:** `horangelmillan/obs-stream-metadata` (público,
   GitHub-flow con PRs).
 - **Restricción vigente:** `poc/` es evidencia histórica + regresión
   (no tocar salvo corrección justificada); el producto vive en `src/`
   + `backend/`.
-- **Última actualización:** 2026-10-26 — T-085 hecha (regla "logout limpia, entrar limpio" implementada y verificada según autorización [D]; 8 tests nuevos + suite 345 OK; pendiente [P]: desplegar backend + E2E operador); sin commit/push en esta tarea documental.
+- **Última actualización:** 2026-10-26 — T-086 hecha (sesión Managed persistente DPAPI + routing arranque + estados gris/rojo tarjeta; sustituye spec §5 por decisión del usuario [D]; build+selfcheck verdes [D]; pendientes [P]: integrar, recompilar instalador, E2E operador con capturas); sin commit/push en esta tarea documental.
+  Anterior (2026-10-26): T-085 hecha (regla "logout limpia, entrar limpio" implementada y verificada según autorización [D]; 8 tests nuevos + suite 345 OK; pendiente [P]: desplegar backend + E2E operador); sin commit/push en esta tarea documental.
   Anterior (2026-10-26): loop deploy+verificación
   Managed v1 cerrado (rev `00039-7jl` al 100%, migración 003 en prod,
   snapshot `snap-fancy-lab-a5r16mex`, smoke sintético PASS con limpieza;

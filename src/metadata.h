@@ -224,6 +224,23 @@ QString managedPasswordPolicyNotice();
 bool managedEnterVisible(bool isManaged, bool hasUserSession);
 bool managedPanelVisible(bool isManaged, bool hasUserSession);
 
+// AUTORIZACION [D usuario 2026-10-26]: arranque Managed directo al PANEL.
+// Puro QtCore, sin I/O/red/logs: con sesion en memoria tras
+// tryRestoreUserSession() hay que revalidar (me, una llamada); sin
+// sesion se va a ENTRAR con CERO red. La vista lo usa como gate de
+// silentRevalidateManaged().
+bool managedStartupShouldRevalidate(bool hasUserSession);
+
+// Bugfix visual 2026-10-26 [D]: tres estados visuales excluyentes por
+// plataforma (regla del usuario: rojo SOLO si (a) el usuario hizo una
+// accion y fallo, o (b) estaba conectada y se rompio sola;
+// limpio/nunca-tocado o desconectado-por-logout = gris neutro).
+// Puro QtCore, sin I/O/red/logs: la vista lo usa en updateCardStyle
+// como unica fuente del tono de cada tarjeta.
+enum class CardTone { Neutral, Brand, Error };
+CardTone cardToneFor(bool connected, const QString &statusText,
+		     const QString &resultText);
+
 // Fase 5: borrado de CUENTA (/users/erase) separado del borrado de DATOS
 // F-C2 (/privacy/erase). Rutas canónicas distintas; la respuesta lleva
 // solo conteos por tabla + revocaciones por proveedor (jamás secretos).

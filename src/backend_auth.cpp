@@ -296,7 +296,8 @@ void Client::revokeInstallation(std::function<void(Result)> cb)
 	     [cb](Result r, const QJsonObject &) { cb(r); });
 }
 
-// --- Fase 4: cuenta de usuario Managed (solo memoria) --------------------
+// --- Fase 4: cuenta de usuario Managed ([D 2026-10-26]: memoria +
+// managedUser persistido cifrado; el 401 remoto borra ambos) ----------
 
 bool Client::hasUserSession() const
 {
@@ -310,6 +311,76 @@ void Client::clearUserSession()
 	userSessionToken_.clear();
 	loggedUsername_.clear();
 	userExpiry_ = QDateTime();
+	// [D 2026-10-26]: memoria y disco van juntos (logout/401/expirada
+	// nunca dejan una sesion muerta que reaparezca al reiniciar).
+	clearPersistedUserSession();
+}
+
+// [D 2026-10-26]: el registro managedUser sigue las reglas de
+// backendInstall (DPAPI + binding a backendBaseUrl). Best-effort load
+// para no perder providers/snapshots al persistir la sesion.
+bool Client::persistUserSession()
+{
+	if (!store_ || baseUrl_.isEmpty() || userSessionToken_.isEmpty() ||
+	    loggedUsername_.isEmpty() || !userExpiry_.isValid())
+		return false;
+	secure::Data d;
+	store_->load(d); // best-effort: keep provider records when present
+	d.managedUser.loggedIn = true;
+	d.managedUser.username = loggedUsername_;
+	d.managedUser.token = userSessionToken_;
+	d.managedUser.expiry = userExpiry_;
+	d.backendBaseUrl = baseUrl_;
+	return store_->save(d);
+}
+
+void Client::clearPersistedUserSession()
+{
+	if (!store_)
+		return;
+	secure::Data d;
+	store_->load(d); // best-effort
+	if (!d.managedUser.loggedIn && d.managedUser.token.isEmpty())
+		return; // nothing persisted: avoid a pointless rewrite
+	d.managedUser = secure::ManagedUserSession{};
+	store_->save(d); // best-effort: memory is already clean
+}
+
+bool Client::tryRestoreUserSession()
+{
+	// Ya en memoria y vigente: nada que restaurar.
+	if (hasUserSession())
+		return true;
+	userSessionToken_.clear();
+	loggedUsername_.clear();
+	userExpiry_ = QDateTime();
+	if (!store_ || baseUrl_.isEmpty())
+		return false;
+	secure::Data d;
+	store_->load(d); // false = no usable file; managedUser stays empty
+	if (!d.managedUser.loggedIn || d.managedUser.username.isEmpty() ||
+	    d.managedUser.token.isEmpty() ||
+	    !d.managedUser.expiry.isValid())
+		return false;
+	// Fail-closed ante mismatch (igual que loadInstallation): un secreto
+	// de otro backend jamas se entrega al configurado. Legacy/sin binding
+	// nunca coincide.
+	if (!secure::installationUrlMatches(d.backendBaseUrl, baseUrl_)) {
+		clearPersistedUserSession();
+		return false;
+	}
+	// Expirada (con el mismo margen que hasUserSession): se ignora y se
+	// limpia; el dock pide login de nuevo. NO hay red aqui: la revalida
+	// contra el backend la hace el dock con me().
+	if (QDateTime::currentDateTimeUtc().secsTo(d.managedUser.expiry) <=
+	    kExpiryMarginSecs) {
+		clearPersistedUserSession();
+		return false;
+	}
+	userSessionToken_ = d.managedUser.token;
+	loggedUsername_ = d.managedUser.username;
+	userExpiry_ = d.managedUser.expiry;
+	return true;
 }
 
 // POST público con bearer de instalación best-effort (adopción sin
@@ -447,6 +518,15 @@ void Client::login(const QString &username, const QString &password,
 				   userExpiry_ =
 					   QDateTime::currentDateTimeUtc().addSecs(
 						   expiresIn);
+				   // [D 2026-10-26]: sesion OK -> persiste
+				   // cifrada para volver directo al panel al
+				   // reabrir. Sin persistencia no hay restore:
+				   // fail-closed (memoria limpia + StorageError).
+				   if (!persistUserSession()) {
+					   clearUserSession();
+					   cb(Result::StorageError);
+					   return;
+				   }
 				   cb(Result::Ok);
 			   });
 	});
@@ -523,6 +603,9 @@ void Client::userSend(const QString &verb, const QString &path,
 void Client::logoutUser(std::function<void(Result)> cb)
 {
 	if (!hasUserSession()) {
+		// Sin memoria puede quedar registro (p. ej. restore pendiente
+		// nunca cargado): el logout siempre limpia el disco.
+		clearPersistedUserSession();
 		cb(Result::Ok);
 		return;
 	}

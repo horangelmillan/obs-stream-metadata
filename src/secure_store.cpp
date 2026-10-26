@@ -30,6 +30,12 @@ const char *kBackendBaseUrl = "backend_base_url";
 // como userId/display; jamas token/secreto).
 const char *kFacebookLiveId = "facebook_live_id";
 
+// [D 2026-10-26]: sesion de usuario Managed. Clave del registro; el
+// contenido vive SOLO dentro del blob DPAPI (incluida la etiqueta
+// username): el fichero crudo jamas contiene el token ni formas
+// "user_session". Expiry como epoch UTC (qint64, clave "e").
+const char *kManagedUser = "managed_user";
+
 // Canonical wire strings (T-049 helpers are the single source of truth).
 QString modeToString(meta::ConnectionMode m)
 {
@@ -209,6 +215,68 @@ bool managedFromJson(const QJsonObject &o, ManagedSnapshot &m)
 	return !m.userId.isEmpty() && !m.display.isEmpty();
 }
 
+// [D 2026-10-26]: sesion de usuario Managed (blob DPAPI, fail-closed).
+// Todo el contenido dentro del blob ("u" username, "t" token opaco,
+// "e" expiry epoch UTC): nada en claro fuera de el. Expirada (no futura)
+// se ignora: el llamador pide login de nuevo. Sin DPAPI (no-Windows)
+// siempre ausente, como el resto de secretos.
+#ifdef Q_OS_WIN
+QJsonObject managedUserRecordToJson(const ManagedUserSession &m)
+{
+	QJsonObject plain;
+	plain[QStringLiteral("u")] = m.username;
+	plain[QStringLiteral("t")] = m.token;
+	plain[QStringLiteral("e")] = static_cast<qint64>(
+		m.expiry.toSecsSinceEpoch());
+	const QByteArray blob = protect(QJsonDocument(plain)
+						.toJson(QJsonDocument::Compact));
+	if (blob.isEmpty())
+		return QJsonObject(); // signal failure via empty object
+	QJsonObject o;
+	o[QStringLiteral("connected")] = true;
+	o[QStringLiteral("blob")] = QString::fromLatin1(blob.toBase64());
+	return o;
+}
+#endif
+
+bool managedUserRecordFromJson(const QJsonObject &o, ManagedUserSession &m)
+{
+	m = ManagedUserSession();
+	if (o.isEmpty() || !o.value(QStringLiteral("connected")).isBool() ||
+	    !o.value(QStringLiteral("connected")).toBool())
+		return false;
+#ifdef Q_OS_WIN
+	const QByteArray blob = QByteArray::fromBase64(
+		o.value(QStringLiteral("blob")).toString().toLatin1());
+	const QByteArray plainBytes = unprotect(blob);
+	if (plainBytes == QByteArray("__dpapi_fail__") ||
+	    plainBytes.isEmpty())
+		return false;
+	const QJsonObject p =
+		QJsonDocument::fromJson(plainBytes).object();
+	if (p.isEmpty())
+		return false;
+	const QString username = p.value(QStringLiteral("u")).toString();
+	const QString token = p.value(QStringLiteral("t")).toString();
+	const qint64 expSecs = p.value(QStringLiteral("e")).toInteger();
+	if (username.isEmpty() || token.isEmpty() || expSecs <= 0)
+		return false;
+	QDateTime expiry;
+	expiry.setSecsSinceEpoch(expSecs); // UTC, sin zona deprecada
+	if (!expiry.isValid() ||
+	    QDateTime::currentDateTimeUtc().secsTo(expiry) <= 0)
+		return false; // expirada se ignora (login de nuevo)
+	m.loggedIn = true;
+	m.username = username;
+	m.token = token;
+	m.expiry = expiry;
+	return true;
+#else
+	Q_UNUSED(o);
+	return false;
+#endif
+}
+
 } // namespace
 
 // T-053: installation↔backend binding (see secure_store.h). External
@@ -268,6 +336,15 @@ bool Store::save(const Data &d)
 	if (!d.facebookLiveId.isEmpty())
 		root[QString::fromLatin1(kFacebookLiveId)] =
 			d.facebookLiveId;
+	// [D 2026-10-26]: sesion de usuario Managed (blob DPAPI, jamas en
+	// claro). Omitida al cerrar sesion: el fichero no conserva sesiones
+	// muertas. DPAPI fallido = no persistir nada (fail-closed).
+	if (d.managedUser.loggedIn) {
+		const QJsonObject o = managedUserRecordToJson(d.managedUser);
+		if (o.isEmpty())
+			return false;
+		root[QString::fromLatin1(kManagedUser)] = o;
+	}
 	// T-053: installation↔backend binding (plaintext endpoint). Written
 	// whenever known so a later backend switch is detectable; like the
 	// mode, it survives the load-time reset below.
@@ -343,8 +420,17 @@ bool Store::load(Data &d)
 	// reset so it survives it, like snapshots/mode.
 	const QString fbLiveId =
 		root.value(QString::fromLatin1(kFacebookLiveId)).toString();
+	// [D 2026-10-26]: sesion de usuario Managed (blob DPAPI). Parsed
+	// before the reset so it survives it, like snapshots/mode. Expirada
+	// o corrupta -> ausente (el llamador pide login de nuevo). El binding
+	// a backendBaseUrl lo verifica el cliente (fail-closed ante mismatch,
+	// igual que loadInstallation): aqui solo se restaura el registro.
+	ManagedUserSession userSess;
+	const bool userManaged = managedUserRecordFromJson(
+		root.value(QString::fromLatin1(kManagedUser)).toObject(),
+		userSess);
 	if (!any && !backendOk && !ytManaged && !kkManaged && !twManaged &&
-	    !fbManaged && fbLiveId.isEmpty())
+	    !fbManaged && !userManaged && fbLiveId.isEmpty())
 		d = Data();
 	d.connectionMode = modeToString(mode);
 	// T-053: binding parsed after the reset so it is always faithful to
@@ -352,6 +438,8 @@ bool Store::load(Data &d)
 	d.backendBaseUrl =
 		root.value(QString::fromLatin1(kBackendBaseUrl)).toString();
 	d.facebookLiveId = fbLiveId;
+	// [D 2026-10-26]: la sesion sobrevive al reset (fiel al fichero).
+	d.managedUser = userSess;
 	return any;
 #else
 	d = Data();
