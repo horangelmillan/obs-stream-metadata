@@ -1,10 +1,14 @@
 # Flujo propuesto con relay local MediaMTX
 
-> Estado: propuesta `[P]`, no contrato validado ni comportamiento de
-> extremo a extremo confirmado. Preparado el 2026-10-26 para orientar
-> la investigación T-078. No implica autorización para modificar RTMP,
+> Estado: contrato vigente desde 2026-10-26 [D] (ADR-016, Fase 1 del
+> port relay→producto; autorización del dueño 2026-10-26) en lo
+> aplicable: diagrama de secuencia + forward en caliente vía Control
+> API `:9997` (formato base+`#`+clave, F-096) + destino operador fijo
+> `rtmp://127.0.0.1:1935/live`. Lo no evidenciado sigue `[P]` explícito
+> (ver Preguntas abiertas). No autoriza por sí solo a modificar RTMP,
 > claves, Aitum ni outputs de OBS. La fuente canónica de tareas sigue
-> siendo `docs/BACKLOG.md` (T-077 intacta en investigación; T-078 nueva).
+> siendo `docs/BACKLOG.md` (T-077 intacta en investigación; T-078 en
+> investigación hasta E2E de aceptación).
 
 ## Qué es MediaMTX
 
