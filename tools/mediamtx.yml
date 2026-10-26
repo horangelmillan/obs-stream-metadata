@@ -1,0 +1,28 @@
+# obs-stream-metadata — MediaMTX mínimo de producto (ADR-016).
+# Fuente canónica: tools/mediamtx.yml (el instalador lo copia a
+# data/obs-plugins/obs-stream-metadata/relay/). El plugin gobierna el
+# proceso hijo y fija el forward vía Control API :9997 (formato F-096).
+# Puertos fijos: RTMP 1935 (destino operador rtmp://127.0.0.1:1935/live),
+# Control API 127.0.0.1:9997, path "live" con source publisher.
+# Todo lo demás apagado para superficie mínima (igual que lab T-078).
+logLevel: info
+logDestinations: [stdout]
+
+api: true
+apiAddress: 127.0.0.1:9997
+
+metrics: false
+pprof: false
+playback: false
+
+rtsp: false
+rtmp: true
+rtmpAddress: :1935
+hls: false
+webrtc: false
+srt: false
+moq: false
+
+paths:
+  live:
+    source: publisher
