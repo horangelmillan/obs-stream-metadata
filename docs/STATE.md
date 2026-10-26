@@ -138,13 +138,15 @@
   Detalle en VALIDATION.md. Pendiente [P]: E2E operador con cuentas
   reales (OAuth por plataforma + Apply real + dos PCs; T-084 sigue
   pendiente, BACKLOG canonico).
+- **Regla logout/login Managed (T-085, 2026-10-26) [D]:** logout explícito = desconexión total Managed de la PC; re-login mismo usuario conserva; otro usuario entra limpio; reinicio sin logout conserva. Pendiente [P]: desplegar backend + E2E operador.
 - **Rama base:** `master` (ADR-004; CI anclado a `master`).
 - **Repo remoto:** `horangelmillan/obs-stream-metadata` (público,
   GitHub-flow con PRs).
 - **Restricción vigente:** `poc/` es evidencia histórica + regresión
   (no tocar salvo corrección justificada); el producto vive en `src/`
   + `backend/`.
-- **Última actualización:** 2026-10-26 — loop deploy+verificación
+- **Última actualización:** 2026-10-26 — T-085 hecha (regla "logout limpia, entrar limpio" implementada y verificada según autorización [D]; 8 tests nuevos + suite 345 OK; pendiente [P]: desplegar backend + E2E operador); sin commit/push en esta tarea documental.
+  Anterior (2026-10-26): loop deploy+verificación
   Managed v1 cerrado (rev `00039-7jl` al 100%, migración 003 en prod,
   snapshot `snap-fancy-lab-a5r16mex`, smoke sintético PASS con limpieza;
   T-084 E2E operador pendiente); sin cambios de código, sin operaciones

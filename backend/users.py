@@ -351,3 +351,190 @@ def erase_user(user_id: str, *, services, sessions, transactions,
                        "sessions": sess_n, "connections": conns_n,
                        "tokens": toks_n, "transactions": txn_n},
             "revoked": revoked}
+
+
+def _installation_providers(connections, installation_id: str,
+                            services) -> list:
+    """Proveedores con connection en la instalacion (limpieza por usuario).
+
+    Prefiere `providers_for_installation` del store; sin ese metodo cae a
+    las claves de `services` (suficiente en prod: las connections solo
+    nacen via ConnectService). Sin stores = lista vacia, sin efectos.
+    """
+    getter = getattr(connections, "providers_for_installation", None)
+    if callable(getter):
+        try:
+            return sorted(getter(installation_id) or [])
+        except Exception:
+            return []
+    if isinstance(services, dict):
+        return sorted(services)
+    return []
+
+
+def _load_account(provider: str, entry: dict):
+    """`(Account, provider_user_id)` o `(None, None)` si no hay cuenta
+    valida (proveedor desconocido: la connection cae igual, la fila de
+    tokens se deja en paz)."""
+    data = entry.get("account") if isinstance(entry, dict) else None
+    puid = (data.get("provider_user_id")
+            if isinstance(data, dict) else None)
+    if not puid:
+        return None, None
+    try:
+        account = Account(
+            provider=Provider(provider),
+            provider_user_id=puid,
+            display_name=data.get("display_name") or "",
+            scopes=tuple(data.get("scopes") or ()))
+    except ValueError:
+        return None, None  # proveedor desconocido
+    return account, puid
+
+
+def _entry_owner(provider: str, entry: dict, tokens):
+    """Dueno de la connection: marca `user_id`, o `owner` del token como
+    respaldo (legado sin marca). None = fila sin dueno (pre-usuarios)."""
+    marker = entry.get("user_id") if isinstance(entry, dict) else None
+    if marker is not None:
+        return marker
+    account, puid = _load_account(provider, entry)
+    if account is None or tokens is None:
+        return None
+    try:
+        return tokens.owner_of(provider, puid)
+    except Exception:
+        return None
+
+
+def _delete_guarded(provider: str, installation_id: str, *,
+                    services, connections, tokens, pending) -> tuple:
+    """Borrado protegido de UNA connection (semantica disconnect F-C2).
+
+    DELETE local primero (tokens copiados en memoria para el revoke
+    posterior); la fila de tokens cae solo sin mas referencias en
+    ninguna instalacion (cuenta compartida multi-PC: cae con la ultima
+    referencia). `pending` acumula `(provider, puid) -> TokenPair` para
+    el revoke best-effort. Devuelve `(connections, tokens)`.
+    """
+    try:
+        entry = connections.load(installation_id, provider)
+    except Exception:
+        return 0, 0
+    if not isinstance(entry, dict):
+        return 0, 0
+    account, puid = _load_account(provider, entry)
+    stored = None
+    if account is not None and tokens is not None:
+        try:
+            stored = tokens.load(account)
+        except Exception:
+            stored = None
+    try:
+        connections.delete(installation_id, provider)
+    except Exception:
+        return 0, 0
+    toks = 0
+    if stored is not None and account is not None and puid:
+        try:
+            refs = connections.list_referencing(provider, puid)
+        except Exception:
+            refs = [installation_id]  # ante duda, conservar la fila
+        if not refs:
+            try:
+                tokens.delete(account)
+            except Exception:
+                pass
+            else:
+                toks = 1
+        pending.setdefault((provider, puid), stored)
+    return 1, toks
+
+
+def _revoke_pending(pending: dict, services) -> dict:
+    """Revoke remoto best-effort (F-030: el borrado local ya ocurrio; un
+    fallo de red jamas resucita estado). Solo conteos y bools."""
+    services = services if isinstance(services, dict) else {}
+    revoked: dict = {}
+    for (provider, _puid), stored in pending.items():
+        service = services.get(provider)
+        provider_obj = getattr(service, "_provider", None)
+        ok, attempted = True, False
+        for token in (stored.access_token, stored.refresh_token):
+            if not token:
+                continue
+            attempted = True
+            try:
+                if provider_obj is None:
+                    ok = False
+                else:
+                    provider_obj.revoke(token)
+            except AppError:
+                ok = False
+            except Exception:
+                ok = False
+        revoked[provider] = ok if attempted else True
+    return revoked
+
+
+def purge_foreign_connections(user_id: str, installation_id: str, *,
+                              services, connections, tokens) -> dict:
+    """Limpieza al entrar (decision [D] 2026-10-26): tras autenticar y
+    ANTES de adoptar, elimina las connections de la instalacion llamante
+    con dueno DISTINTO al entrante (borrado protegido + revoke
+    best-effort, como un disconnect). El entrante NUNCA hereda enlaces
+    ajenos. Filas SIN dueno (legado NULL) y del MISMO usuario: intactas
+    (las primeras las adopta `adopt_installation` despues).
+
+    Contrato: `{"cleaned": {"connections": n, "tokens": n},
+    "revoked": {provider: bool}}`. Solo conteos y bools: jamas tokens,
+    secretos ni IDs. Sin instalacion o sin stores = ceros, sin efectos.
+    """
+    zero = {"cleaned": {"connections": 0, "tokens": 0}, "revoked": {}}
+    if not user_id or not installation_id or connections is None:
+        return zero
+    conns_n = toks_n = 0
+    pending: dict = {}
+    for provider in _installation_providers(connections, installation_id,
+                                            services):
+        try:
+            entry = connections.load(installation_id, provider)
+        except Exception:
+            continue
+        if not isinstance(entry, dict):
+            continue
+        owner = _entry_owner(provider, entry, tokens)
+        if owner is None or owner == user_id:
+            continue
+        cleared = _delete_guarded(
+            provider, installation_id, services=services,
+            connections=connections, tokens=tokens, pending=pending)
+        conns_n += cleared[0]
+        toks_n += cleared[1]
+    return {"cleaned": {"connections": conns_n, "tokens": toks_n},
+            "revoked": _revoke_pending(pending, services)}
+
+
+def clean_installation_connections(installation_id: str, *, services,
+                                   connections, tokens) -> dict:
+    """Limpieza total Managed de UNA instalacion (logout, [D] 2026-10-26):
+    borra TODAS sus connections (borrado protegido + revoke best-effort)
+    sin tocar otras instalaciones (multi-PC del mismo usuario intacto)
+    ni sesiones de instalacion. Mismo contrato que
+    `purge_foreign_connections` (solo conteos y bools). Idempotente:
+    instalacion sin connections = ceros.
+    """
+    zero = {"cleaned": {"connections": 0, "tokens": 0}, "revoked": {}}
+    if not installation_id or connections is None:
+        return zero
+    conns_n = toks_n = 0
+    pending: dict = {}
+    for provider in _installation_providers(connections, installation_id,
+                                            services):
+        cleared = _delete_guarded(
+            provider, installation_id, services=services,
+            connections=connections, tokens=tokens, pending=pending)
+        conns_n += cleared[0]
+        toks_n += cleared[1]
+    return {"cleaned": {"connections": conns_n, "tokens": toks_n},
+            "revoked": _revoke_pending(pending, services)}
