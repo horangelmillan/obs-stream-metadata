@@ -191,6 +191,31 @@ QString managedLoggedOutStatus(const QString &pending);
 // vez de reintentar Sign up. Sin secretos, sin detalles del backend.
 QString managedSignupTakenMessage();
 
+// f8 REDISENO ENTRAR (2026-10-26 [D]): dos modos excluyentes en la
+// pantalla ENTRAR ("Entrar | Crear cuenta"). La vista los muestra con
+// un QTabWidget (doc oficial Qt6 QTabWidget,
+// https://doc.qt.io/qt-6/qtabwidget.html: tab bar + page area, solo la
+// pagina actual visible); estos predicados puros son su gate, como f6
+// lo es del QStackedWidget ENTRAR/PANEL. Sin I/O/red/logs.
+enum class ManagedAuthMode { Login, Signup };
+const char *managedAuthModeName(ManagedAuthMode m);
+bool managedAuthLoginVisible(ManagedAuthMode m);
+bool managedAuthSignupVisible(ManagedAuthMode m);
+// f8: validacion LOCAL inmediata (sin red) antes de enviar, con las
+// reglas exactas del backend (backend/users.py 2026-10-26, solo
+// lectura): username strip + 3-32 + [A-Za-z0-9._-], password 12-128
+// sin complejidad inventada. Vacio = valido; si no, mensaje claro
+// para mostrar inline junto al campo. Puro QtCore.
+QString validateManagedUsername(const QString &raw);
+QString validateManagedPassword(const QString &raw);
+// Username primero, luego password (el primer error gana, como el
+// formulario muestra un campo a la vez). Vacio = listo para enviar.
+QString validateManagedCredentials(const QString &user,
+				  const QString &pass);
+// f8: aviso visible de la politica en "Crear cuenta" (minimo 12, sin
+// email, sin recuperacion). Solo UI, sin secretos.
+QString managedPasswordPolicyNotice();
+
 // f6 ENTRAR-primero: dos pantallas excluyentes en Managed (ENTRAR sin
 // sesión, PANEL con sesión); Independent siempre una sola pantalla
 // (panel, sin login). Puro QtCore, sin I/O/red/logs. La vista los usa

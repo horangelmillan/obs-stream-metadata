@@ -500,6 +500,84 @@ QString managedSignupTakenMessage()
 		"Try Log in with that username instead of signing up again.");
 }
 
+// f8 REDISENO ENTRAR (2026-10-26 [D]): modos excluyentes + validacion
+// local con las reglas exactas del backend (backend/users.py, solo
+// lectura: USERNAME_MIN_LEN=3, USERNAME_MAX_LEN=32,
+// _USERNAME_RE=[A-Za-z0-9._-] fullmatch con strip previo;
+// MIN_PASSWORD_LEN=12, MAX_PASSWORD_LEN=128, sin strip ni complejidad
+// inventada).
+const char *managedAuthModeName(ManagedAuthMode m)
+{
+	switch (m) {
+	case ManagedAuthMode::Login:
+		return "Login";
+	case ManagedAuthMode::Signup:
+		return "Signup";
+	}
+	return "?";
+}
+
+bool managedAuthLoginVisible(ManagedAuthMode m)
+{
+	return m == ManagedAuthMode::Login;
+}
+
+bool managedAuthSignupVisible(ManagedAuthMode m)
+{
+	return m == ManagedAuthMode::Signup;
+}
+
+static bool managedUserCharOk(QChar c)
+{
+	const ushort u = c.unicode();
+	return (u >= 'A' && u <= 'Z') || (u >= 'a' && u <= 'z') ||
+	       (u >= '0' && u <= '9') || c == QLatin1Char('.') ||
+	       c == QLatin1Char('_') || c == QLatin1Char('-');
+}
+
+QString validateManagedUsername(const QString &raw)
+{
+	const QString user = raw.trimmed();
+	if (user.size() < 3 || user.size() > 32)
+		return QStringLiteral(
+			"Username must be 3-32 characters.");
+	for (const QChar c : user) {
+		if (!managedUserCharOk(c))
+			return QStringLiteral(
+				"Username may only contain letters, numbers, "
+				"dot, underscore or hyphen.");
+	}
+	return QString();
+}
+
+QString validateManagedPassword(const QString &raw)
+{
+	if (raw.size() < 12)
+		return QStringLiteral(
+			"Password must be at least 12 characters.");
+	if (raw.size() > 128)
+		return QStringLiteral(
+			"Password must be at most 128 characters.");
+	return QString();
+}
+
+QString validateManagedCredentials(const QString &user,
+				  const QString &pass)
+{
+	const QString uErr = validateManagedUsername(user);
+	if (!uErr.isEmpty())
+		return uErr;
+	return validateManagedPassword(pass);
+}
+
+QString managedPasswordPolicyNotice()
+{
+	return QStringLiteral(
+		"Password: minimum 12 characters (up to 128). "
+		"v1 account has no email: no account recovery. "
+		"Keep your password safe.");
+}
+
 // f6 ENTRAR-primero: Managed sin sesión => ENTRAR; con sesión => PANEL.
 // Independent => jamás ENTRAR (una sola pantalla, intacto).
 bool managedEnterVisible(bool isManaged, bool hasUserSession)

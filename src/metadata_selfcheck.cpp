@@ -1260,6 +1260,67 @@ int main(int argc, char **argv)
 		      QStringLiteral("Log in")),
 	      "f7-409-suggests-login");
 
+	// f8 REDISEÑO ENTRAR (2026-10-26 [D]): dos modos excluyentes
+	// (QTabWidget en la vista), validación local inmediata (sin red)
+	// con las reglas exactas del backend (backend/users.py:
+	// username 3–32 [A-Za-z0-9._-], password 12–128), política
+	// visible y 409 de signup sugiriendo Entrar como respaldo.
+	CHECK(meta::managedAuthLoginVisible(
+		      meta::ManagedAuthMode::Login) &&
+		      !meta::managedAuthSignupVisible(
+			      meta::ManagedAuthMode::Login),
+	      "f8-login-tab-only");
+	CHECK(!meta::managedAuthLoginVisible(
+		       meta::ManagedAuthMode::Signup) &&
+		      meta::managedAuthSignupVisible(
+			      meta::ManagedAuthMode::Signup),
+	      "f8-signup-tab-only");
+	CHECK(meta::validateManagedUsername(QStringLiteral("ab"))
+			      .contains(QStringLiteral("3-32")),
+	      "f8-user-short");
+	CHECK(meta::validateManagedUsername(
+		      QStringLiteral("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+			      .contains(QStringLiteral("3-32")),
+	      "f8-user-long");
+	CHECK(meta::validateManagedUsername(QStringLiteral("a!b"))
+			      .contains(QStringLiteral("letters")),
+	      "f8-user-charset");
+	CHECK(meta::validateManagedUsername(QStringLiteral("abc"))
+			      .isEmpty() &&
+		      meta::validateManagedUsername(
+			      QStringLiteral("a.b_c-d9")).isEmpty(),
+	      "f8-user-ok");
+	CHECK(meta::validateManagedPassword(
+		      QString(11, QLatin1Char('x')))
+			      .contains(QStringLiteral("12")),
+	      "f8-pass-short");
+	CHECK(meta::validateManagedPassword(
+		      QString(129, QLatin1Char('x')))
+			      .contains(QStringLiteral("128")),
+	      "f8-pass-long");
+	CHECK(meta::validateManagedPassword(
+		      QString(12, QLatin1Char('x')))
+			      .isEmpty(),
+	      "f8-pass-ok");
+	CHECK(!meta::validateManagedCredentials(
+		      QStringLiteral("ab"),
+		      QString(11, QLatin1Char('x')))
+			      .isEmpty(),
+	      "f8-local-blocks");
+	CHECK(meta::validateManagedCredentials(
+		      QStringLiteral("valid.user_9"),
+		      QString(12, QLatin1Char('x')))
+			      .isEmpty(),
+	      "f8-local-allows");
+	CHECK(meta::managedPasswordPolicyNotice().contains(
+		      QStringLiteral("12")) &&
+		      meta::managedPasswordPolicyNotice().contains(
+			      QStringLiteral("no account recovery")),
+	      "f8-policy-visible");
+	CHECK(meta::managedSignupTakenMessage().contains(
+		      QStringLiteral("Log in")),
+	      "f8-409-suggests-login");
+
 	std::printf("SELFCHECK OK\n");
 	return 0;
 }

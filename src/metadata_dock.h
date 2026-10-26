@@ -40,6 +40,7 @@ class QNetworkReply;
 class QPlainTextEdit;
 class QPushButton;
 class QStackedWidget;
+class QTabWidget;
 class QTcpServer;
 class QTimer;
 
@@ -226,6 +227,10 @@ private slots:
 	void onUserLogin();
 	void onUserSignup();
 	void onUserLogout();
+	// f8: cambio de pestana Entrar|Crear cuenta: limpia errores
+	// inline y lleva el foco al primer campo (sin red, solo vista).
+	void onAuthTabChanged(int index);
+	void clearAuthInlineErrors();
 
 private:
 	// One request at a time; replies carry their Op in a property.
@@ -420,6 +425,24 @@ private:
 	QPushButton *userLogoutBtn_ = nullptr;
 	QLabel *userStatus_ = nullptr;
 	QLabel *userNotice_ = nullptr;
+	// f8 REDISENO ENTRAR (2026-10-26 [D]): ENTRAR en dos modos
+	// excluyentes con QTabWidget ("Entrar | Crear cuenta"). El modo
+	// Entrar reusa userNameEdit_/userPassEdit_/userLoginBtn_; el modo
+	// Crear cuenta tiene sus propios campos (signupNameEdit_/
+	// signupPassEdit_) + el boton Crear cuenta (userSignupBtn_
+	// reparentado) + aviso visible de la politica (signupPolicy_).
+	// Errores inline junto a cada campo; jamas red sin validacion.
+	QTabWidget *authTabs_ = nullptr;
+	QWidget *loginTab_ = nullptr;
+	QWidget *signupTab_ = nullptr;
+	QLineEdit *signupNameEdit_ = nullptr;
+	QLineEdit *signupPassEdit_ = nullptr;
+	QLabel *loginNameError_ = nullptr;
+	QLabel *loginPassError_ = nullptr;
+	QLabel *signupNameError_ = nullptr;
+	QLabel *signupPassError_ = nullptr;
+	QLabel *signupPolicy_ = nullptr;
+	meta::ManagedAuthMode authMode() const;
 	// Fase 5b: borrado de CUENTA Managed (POST /users/erase en cascada).
 	// Operación distinta de POST /privacy/erase (F-C2, por
 	// instalación): aquí cae el usuario con TODAS sus instalaciones.
