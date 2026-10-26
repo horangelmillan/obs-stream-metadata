@@ -446,6 +446,15 @@ class SqliteConnectionStore(SqliteStore):
                           "account", {}).get("provider_user_id")
                       == provider_user_id)
 
+    def providers_for_installation(self, installation_id: str) -> list:
+        """Proveedores con conexión en la instalación (limpieza por
+        usuario [D] 2026-10-26). Ordenados."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT provider FROM connections "
+                "WHERE installation_id=?", (installation_id,)).fetchall()
+        return sorted(row[0] for row in rows)
+
     def list_for_user(self, user_id: str,
                       installation_ids=()) -> list:
         """Parejas `(installation_id, provider)` del usuario (Fase 5a):

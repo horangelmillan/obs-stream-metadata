@@ -374,6 +374,22 @@ class BackendApp:
             user_id, installation_id, installations=self.installations,
             sessions=self.sessions, connections=connections, tokens=tokens)
 
+    def _purge_foreign_links(self, user_id: str,
+                             installation_id: str | None) -> dict:
+        """Limpieza al entrar ([D] 2026-10-26): otras cuentas fuera ANTES
+        de adoptar (el entrante nunca hereda enlaces ajenos). Filas sin
+        dueño y del mismo usuario: intactas. Solo conteos; sin
+        instalación o sin stores = ceros, sin efectos."""
+        from backend.users import purge_foreign_connections
+        zero = {"cleaned": {"connections": 0, "tokens": 0},
+                "revoked": {}}
+        if not user_id or not installation_id:
+            return zero
+        if self.connections is None:
+            return zero
+        return purge_foreign_connections(
+            user_id, installation_id, services=self.providers,
+            connections=self.connections, tokens=self.tokens)
     def installation_id_for_adoption(self, headers) -> str | None:
         """Instalación llamante para adopción. Nunca eleva: bearer
         ausente/inválido = None (signup/login siguen sin adopción)."""
@@ -406,13 +422,16 @@ class BackendApp:
         except UserExistsError:
             raise AppError(ErrorCode.USER_EXISTS,
                            "duplicate username") from None
+        # [D] 2026-10-26: otras cuentas fuera ANTES de adoptar (el
+        # entrante nunca hereda enlaces ajenos; NULL se adopta).
+        purged = self._purge_foreign_links(user.id, installation_id)
         adopted = self._adopt_installation(user.id, installation_id)
         # Auditoría (spec §4): solo user_id opaco + conteos. Jamás
         # username (identificador de persona, spec §6), password ni hash.
-        self.log.info("users signup ok user_id=%s adopted=%s", user.id,
-                      adopted, extra={"requestId": request_id})
+        self.log.info("users signup ok user_id=%s purged=%s adopted=%s",
+                      user.id, purged, adopted,
+                      extra={"requestId": request_id})
         return 201, {"user_id": user.id, "username": user.username}
-
     def login_user(self, body: dict, client_ip: str = "unknown",
                    installation_id: str | None = None,
                    request_id: str = "-") -> tuple[int, dict]:
@@ -440,9 +459,12 @@ class BackendApp:
             "kind": "user", "user_id": user.id,
             "issued_at": now, "expires_at": now + USER_SESSION_TTL_S,
             "revoked": False})
+        # [D] 2026-10-26: otras cuentas fuera ANTES de adoptar.
+        purged = self._purge_foreign_links(user.id, installation_id)
         adopted = self._adopt_installation(user.id, installation_id)
-        self.log.info("users login ok user_id=%s adopted=%s", user.id,
-                      adopted, extra={"requestId": request_id})
+        self.log.info("users login ok user_id=%s purged=%s adopted=%s",
+                      user.id, purged, adopted,
+                      extra={"requestId": request_id})
         return 200, {"user_session": token,
                      "expires_in": USER_SESSION_TTL_S}
 
@@ -462,26 +484,52 @@ class BackendApp:
         return user
 
     def logout_user(self, token: str,
+                    installation_id: str | None = None,
                     request_id: str = "-") -> tuple[int, dict]:
-        """POST /users/logout. 200 idempotente (token ausente/repetido
-        también es 200); revoca la sesión de usuario."""
+        """POST /users/logout ([D] 2026-10-26): limpieza total Managed de
+        la instalación llamante (TODAS sus connections: borrado protegido
+        + revoke best-effort) + revoca la sesión de usuario llamante.
+        Responde solo conteos. 200 idempotente (token ausente/repetido
+        también es 200; repetir devuelve ceros). Sin instalación o sin
+        sesión conocida: solo revoca (o ceros), sin borrar nada ajeno."""
+        from backend import users as _users
+        cleaned = {"connections": 0, "tokens": 0, "sessions": 0}
+        revoked: dict = {}
         try:
             payload = (self.user_sessions.load_session(token)
                        if token else None)
-            if payload is not None and payload.get("user_id"):
-                payload["revoked"] = True
-                self.user_sessions.save_session(token, payload)
-                self.log.info("users logout ok revoked=1",
-                              extra={"requestId": request_id})
-            else:
-                self.log.info("users logout ok revoked=0",
-                              extra={"requestId": request_id})
         except Exception:
-            # Idempotente: un store caído aquí no debe convertir un
-            # logout en 500 con el token en el log.
+            payload = None
+        user_id = (payload.get("user_id")
+                   if isinstance(payload, dict) else None)
+        if user_id and installation_id and self.connections is not None:
+            try:
+                result = _users.clean_installation_connections(
+                    installation_id, services=self.providers,
+                    connections=self.connections, tokens=self.tokens)
+            except Exception:
+                # Idempotente: un store caído aquí no debe convertir un
+                # logout en 500 con el token en el log.
+                result = None
+            if result is not None:
+                cleaned["connections"] = result["cleaned"]["connections"]
+                cleaned["tokens"] = result["cleaned"]["tokens"]
+                revoked = result["revoked"]
+        if user_id:
+            try:
+                if not payload.get("revoked"):
+                    payload["revoked"] = True
+                    self.user_sessions.save_session(token, payload)
+                    cleaned["sessions"] = 1
+            except Exception:
+                pass
+            self.log.info("users logout ok user_id=%s cleaned=%s",
+                          user_id, cleaned,
+                          extra={"requestId": request_id})
+        else:
             self.log.info("users logout ok revoked=0",
                           extra={"requestId": request_id})
-        return 200, {}
+        return 200, {"cleaned": cleaned, "revoked": revoked}
 
     def me_user(self, token: str) -> tuple[int, dict]:
         """GET /users/me. 200 {user_id, username} sin secretos."""
@@ -656,11 +704,17 @@ class _Handler(BaseHTTPRequestHandler):
                 request_id=request_id)
         if path == "/users/logout":
             # Fase 2: requiere X-User-Session; 200 idempotente.
+            # [D] 2026-10-26: con bearer de instalación vigente, limpia
+            # además todas las connections de la instalación llamante.
             token = self.headers.get("X-User-Session", "")
             if not token:
                 raise AppError(ErrorCode.AUTHENTICATION,
                                "user session required")
-            return app.logout_user(token, request_id=request_id)
+            return app.logout_user(
+                token,
+                installation_id=app.installation_id_for_adoption(
+                    self.headers),
+                request_id=request_id)
         if path == "/users/erase":
             # Fase 5a: borrado de CUENTA en cascada (distinto de
             # /privacy/erase por instalación). Auth doble Managed.

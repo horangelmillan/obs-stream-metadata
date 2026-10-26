@@ -68,5 +68,6 @@ Estados: pendiente / en-progreso / bloqueada / hecha / deuda / investigación / 
 | T-082 | hecha | 10 | [Managed-users-v1] Fase 4 — selfcheck f4/f5 | checks `f4-*`/`f5-*` en `src/metadata_selfcheck.cpp` [C]; OK [D: mensaje `0f015a3`] | plan Task 4 |
 | T-083 | hecha | 10 | [Managed-users-v1] Fase 5 — `POST /users/erase` en cascada + ajustes suites | cascada usuarios→instalaciones→sesiones→conexiones→tokens no compartidos, solo conteos, separado de F-C2 [C]; suites 299→337 OK [D] | spec §§5–6; plan Task 5 |
 | T-084 | pendiente | 10 | [Managed-users-v1] Fase 6 — E2E multi-PC + backup/rollback | acta E2E (adopción sin reset + aislamiento + Apply en ambas) + `pg_dump` previo y rollback verificado; sin ello no hay deploy | spec §8; plan Task 6 (pasos listos) |
+| T-085 | hecha | 10 | [Managed] Logout limpia + login no hereda ajeno (purga de links de otro dueño al entrar; NULL se adopta; mismo usuario conserva; logout borra todo lo Managed de la instalación) | 8 tests nuevos + suite 345 OK + E2E operador pendiente | decisión usuario 2026-10-26 en chat |
 
 Regla: cada PR referencia su T-### y actualiza esta tabla + STATE.
