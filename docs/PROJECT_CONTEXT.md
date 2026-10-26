@@ -150,7 +150,42 @@ señal del emisor vía API local; auto-prepare tras End con cooldown)
 condicionales, indicador de señal); build OK, selfcheck 338/0,
 diff-check y scan limpios; T-078 sigue en investigación sin cambio
 de estado [C contra BACKLOG]. Pendientes [P]: E2E operador,
-capturas visuales, instalador con relay+fix.
+capturas visuales, instalador con relay+fix. Plan consolidado v2
+(2026-10-26) [P, PLAN NO IMPLEMENTADO; detalle en VALIDATION.md]:
+arranque E1/E2/E3 sin timers + Go-live auto (señal proxy
+relay+forward; audiencia: check global en Avanzado defecto OFF) +
+semáforo sin texto (rojo/ruedita/triángulo) + contador ~mm:ss +
+auto-End (solo LIVE auto-iniciado; flanco+antirrebote 60s+gracia
+5min+confirmación Graph fresca; VOD siempre) + auto-prepare tras End
+(create nuevo + borra anterior UNPUBLISHED, fallback reutilizar);
+T-078 sigue en investigación sin cambio de estado. Validación
+"dos directos seguidos" (2026-10-26) [VALIDACIÓN/PLAN, NO
+implementado; detalle en VALIDATION.md]: pre-create al apagarse NO
++ auto-End NO + cola diferida NO + verify/refire independientes SÍ
++ Apply blinda carrera SÍ + presupuestos de un solo uso + ~30 textos
+con jerga a reescribir + textos propuestos en inglés + principio
+"el usuario jamás espera ni decide nada técnico"; T-078 sigue en
+investigación sin cambio de estado [C contra BACKLOG]. Ajuste v3
+(2026-10-26) [P, PLAN NO IMPLEMENTADO; detalle en VALIDATION.md]:
+evento primario runOnOnline/runOnOffline + poll 3 s + confirmación
+30 s; adaptativo 3→2→1 2-de-3 con histéresis (pre-crear ~6 s,
+terminar 30 s; Phi-accrual descartado); check audiencia global OFF
+plaintext con texto F-093 (solo ese aviso); contador ~mm:ss
+informativo; semáforo sin texto; auto-End solo LIVE auto-iniciado +
+pre-creación al detectarse la caída + cola 1 disparo con guarda ID.
+Pendientes [P]: redacción UX, implementación, E2E operador real,
+métricas F-099, audiencia F-093. Fases v3 completadas (2026-10-26) [D delegada,
+ no re-ejecutada aquí + C parcial; detalle en VALIDATION.md]: lógica
+ (E1/E2/E3, QFileSystemWatcher + respaldo 3 s, adaptativo con
+ histéresis, pre-create ~6 s, auto-End con cerrojos, cola 1 disparo)
+ + avisos runOnOnline/runOnOffline (`tools/mediamtx.yml:44-45` [C,
+ leído en esta sesión]) + vista (semáforo sin texto, contador ~mm:ss,
+ check audiencia OFF, ~40 textos en lenguaje de persona); build OK,
+ selfcheck 344/0 [D delegada; coherente con 344 `CHECK(` en fuente,
+ conteo estático [C] sin ejecutar], diff-check y scan limpios; sin
+ commit. T-078 sigue en investigación sin cambio de estado [C contra
+ BACKLOG]. Pendientes [P]: E2E dos directos reales, capturas
+ visuales, instalador con relay+fix.
 NEXT REQUIRED TECHNICAL TASK: NONE.
 
 ## 14. Known Findings / Limitations

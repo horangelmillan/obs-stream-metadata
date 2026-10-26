@@ -68,7 +68,19 @@ Estados: pendiente / en-progreso / bloqueada / hecha / deuda / investigación / 
   tras End con cooldown) + vista (línea Facebook listo, Avanzado
   colapsado, botones condicionales, indicador señal); build OK,
   selfcheck 338/0, diff/scan limpios; pendientes E2E operador +
-  capturas visuales + instalador con relay+fix [P]; sigue en
+  capturas visuales + instalador con relay+fix [P]; plan consolidado
+  v2 2026-10-26 [P, PLAN NO IMPLEMENTADO: arranque E1/E2/E3 sin
+  timers + Go-live auto + semáforo + contador cooldown + auto-End +
+  auto-prepare; detalle en VALIDATION.md]; validación dos-directos
+  2026-10-26 [VALIDACIÓN/PLAN, NO implementado: pre-create NO +
+  auto-End NO + cola diferida NO + verify/refire SÍ + Apply blinda
+  SÍ + presupuestos 1 uso + ~30 textos + principio no-técnico;
+  detalle en VALIDATION.md]; ajuste v3 2026-10-26 [P, PLAN NO
+  IMPLEMENTADO: evento primario runOnOnline/runOnOffline + poll 3 s
+  + confirmación 30 s + adaptativo 3→2→1 2-de-3 + check audiencia
+  global OFF plaintext F-093 + contador ~mm:ss + semáforo sin texto
+  + auto-End solo LIVE auto-iniciado + pre-creación + cola 1 disparo;
+  detalle en VALIDATION.md]; sigue en
   investigación | `docs/MEDIAMTX-RELAY-FLOW.md`; F-092–F-095; VALIDATION T-078; F-096–F-099; T-077 intacta en investigación |
 | T-079 | hecha | 10 | [Managed-users-v1] Fase 1 — modelo `users` + migración 003 | `backend/users.py` + `backend/migrations/003_users.sql` + `test_users_model` en `0f015a3`; suites 299→337 OK [D: mensaje + plan] | `docs/superpowers/specs/2026-10-26-managed-user-accounts-design.md` §3; `docs/superpowers/plans/2026-10-26-managed-user-accounts.md` Task 1 |
 | T-080 | hecha | 10 | [Managed-users-v1] Fase 2 — endpoints users + auth doble | `POST /users/signup|login|logout` + `GET /users/me` + 401 `managed auth required` en connect/metadata [C: código `0f015a3`]; suites OK [D] | spec §4; plan Task 2 |
