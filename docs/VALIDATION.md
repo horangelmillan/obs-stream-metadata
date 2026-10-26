@@ -8,7 +8,38 @@
 > en este checkout hay 344 invocaciones `CHECK(` en
 > `src/metadata_selfcheck.cpp` (conteo estático [C], sin ejecutar aquí).
 > Últimos resultados documentados [D]: build OK + selfcheck 367/0
-> (fix trío, delegado de la sesión implementadora).
+> (fix trío, delegado de la sesión implementadora) + Go live
+> automático (autogo-* 13/13 en verde, delegado de la sesión
+> implementadora, detalle abajo).
+
+## Go live automático (2026-10-26 — IMPLEMENTADO SIN COMMIT; T-078 sin cambio de estado)
+
+```text
+FUENTE [D delegada de la sesión implementadora, no re-ejecutada
+  aquí; comunicada en la tarea que autoriza, 2026-10-26]:
+  disparo por eventos señal+verify; Verified→auto;
+  AudienceUnverified→check global o Sí único, resto bloquea;
+  un intento por ID, anti-doble, cooldown, relectura confirma.
+  Cierra la brecha documentada: el plan lo exigía desde v2 y hubo
+  un apaño manual intermedio, ya sustituido por este automático.
+  Validación — build OK, selfcheck con autogo-* 13/13 en verde,
+  diff-check y scan limpios.
+BASE [C, esta subtarea documental]: rama
+  `feat/facebook-status-port-t077-t078` (HEAD `07b41b1`);
+  `src/metadata*.cpp/.h` modificados sin commit en el checkout
+  (trabajo de la sesión implementadora); invocaciones `autogo-*`
+  presentes en `src/metadata_selfcheck.cpp` (constatado [C], sin
+  ejecutar); aquí solo edición de docs (`docs/VALIDATION.md`,
+  `docs/STATE.md`, `docs/PROJECT_CONTEXT.md`) + `git diff --check`;
+  sin commit/push, sin secretos, sin `staging/`/`dev.env`. No
+  reescribe historia: las entradas anteriores quedan intactas abajo.
+ESTADO [C contra BACKLOG]: T-078 SIGUE en investigación, sin cambio
+  de estado en esta subtarea (canónico BACKLOG; esta entrada no
+  cambia estados).
+PENDIENTES [P]: E2E operador + instalador con el cambio.
+FINAL: Go live automático documentado; E2E de aceptación
+  pendiente.
+```
 
 ## Cambio "sin Meta al abrir" (2026-10-26 — IMPLEMENTADO SIN COMMIT; T-078 sin cambio de estado)
 

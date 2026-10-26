@@ -264,6 +264,18 @@ private slots:
 	// fbQuietStatus_ del create): status silencioso -> runFbVerification
 	// sin pisar el mensaje de Apply; audiencia honesta, jamas inflada.
 	void fbChainSilentVerify(const QString &liveId);
+	// Go live automatico (plan v2/v3): se arma con (senal del emisor
+	// + ForwardOk) Y (Apply con verify OK via fbChainSilentVerify),
+	// solo por eventos (sin timers de espera; el diferido de cooldown
+	// con timer unico ya existe y se reutiliza). Gates intactos:
+	// login, conectado, mismo ID, UNPUBLISHED+titulo/desc (via
+	// fbVerify_), sin LIVE previo, cooldown canRefire, sin secretos
+	// en logs. Verified -> envio directo; AudienceUnverified solo por
+	// privacy-unverified -> envio si hidden o Si UNA vez (modal
+	// existente); resto (privacy explicita, mismatch, otro ID/estado)
+	// bloqueo duro intacto, jamas auto-publica.
+	void tryFbAutoGoLive();
+	void fbSendAutoGoLive(const QString &liveId);
 	// Punto 5: un solo create tras End confirmado (con canRefire).
 	void fbEndAutoPrepare(const QString &endedId);
 	// Cambio B: la relectura encadenada tras go_live informa lo
@@ -492,6 +504,17 @@ private:
 	// Cambio B: go_live aceptado con relectura encadenada pendiente.
 	// La relectura informa lo observado y consume este flag.
 	bool fbGoLiveConfirm_ = false;
+	// Go live automatico (plan v2/v3): UN SOLO intento auto por ID.
+	// fbGoLiveInFlight_ se arma al enviar el go_live auto y se
+	// consume en su reply (exito o error); fbGoLiveAutoTriedId_
+	// guarda el ID ya intentado (no reintentar el mismo ID);
+	// fbAutoAudienceAskedId_ guarda el ID con aviso de audiencia ya
+	// pedido UNA vez; fbAutoGoDeferCount_ cuenta los diferidos por
+	// RateLimited/5xx (mensaje + contador, sin reintento en bucle).
+	bool fbGoLiveInFlight_ = false;
+	QString fbGoLiveAutoTriedId_;
+	QString fbAutoAudienceAskedId_;
+	int fbAutoGoDeferCount_ = 0;
 	// Fase A auto-preparacion (un solo intento por arranque, sin loops,
 	// sin modales: todo por labels). fbAutoActive_=ciclo en curso;
 	// prev*=anterior persistido/probado; didCreate/didDelete=presupuesto

@@ -2263,6 +2263,80 @@ int main(int argc, char **argv)
 		      "usess-idle-clamp");
 	}
 
+	// Go live automatico (plan v2/v3): decision pura del disparo.
+	// Verified + proxy + mismo ID + no-LIVE + sin vuelo + sin intento
+	// + cooldown + authed -> Go; AudienceUnverified solo por
+	// privacy-unverified -> Go si hidden, Ask si no; resto -> No
+	// (privacy explicita, mismatch, otro ID/estado, sin proxy, LIVE,
+	// en vuelo, ya intentado, cooldown, sin sesion).
+	{
+		using meta::FbAutoGo;
+		using meta::FbVerify;
+		auto dec = [&](FbVerify o, const QString &r, bool proxy,
+			       bool same, bool live, bool flight,
+			       bool tried, bool cool, bool auth,
+			       bool hidden) {
+			return meta::fbAutoGoDecision(o, r, proxy, same,
+						      live, flight, tried,
+						      cool, auth, hidden);
+		};
+		CHECK(dec(FbVerify::Verified,
+			  QStringLiteral("verified"), true, true, false,
+			  false, false, true, true, false) == FbAutoGo::Go,
+		      "autogo-verified-go");
+		CHECK(dec(FbVerify::AudienceUnverified,
+			  QStringLiteral("privacy-unverified"), true, true,
+			  false, false, false, true, true, true) ==
+			      FbAutoGo::Go,
+		      "autogo-aud-hidden-go");
+		CHECK(dec(FbVerify::AudienceUnverified,
+			  QStringLiteral("privacy-unverified"), true, true,
+			  false, false, false, true, true, false) ==
+			      FbAutoGo::Ask,
+		      "autogo-aud-ask-once");
+		CHECK(dec(FbVerify::AudienceUnverified,
+			  QStringLiteral("privacy-not-public"), true, true,
+			  false, false, false, true, true, true) ==
+			      FbAutoGo::No,
+		      "autogo-explicit-blocked");
+		CHECK(dec(FbVerify::Blocked,
+			  QStringLiteral("mismatch"), true, true, false,
+			  false, false, true, true, true) == FbAutoGo::No,
+		      "autogo-mismatch-blocked");
+		CHECK(dec(FbVerify::Blocked,
+			  QStringLiteral("not-verified"), true, true, false,
+			  false, false, true, true, false) == FbAutoGo::No,
+		      "autogo-unverified-blocked");
+		CHECK(dec(FbVerify::Verified,
+			  QStringLiteral("verified"), false, true, false,
+			  false, false, true, true, false) == FbAutoGo::No,
+		      "autogo-no-proxy");
+		CHECK(dec(FbVerify::Verified,
+			  QStringLiteral("verified"), true, false, false,
+			  false, false, true, true, false) == FbAutoGo::No,
+		      "autogo-other-id");
+		CHECK(dec(FbVerify::Verified,
+			  QStringLiteral("verified"), true, true, true,
+			  false, false, true, true, false) == FbAutoGo::No,
+		      "autogo-already-live");
+		CHECK(dec(FbVerify::Verified,
+			  QStringLiteral("verified"), true, true, false,
+			  true, false, true, true, false) == FbAutoGo::No,
+		      "autogo-inflight");
+		CHECK(dec(FbVerify::Verified,
+			  QStringLiteral("verified"), true, true, false,
+			  false, true, true, true, false) == FbAutoGo::No,
+		      "autogo-once-per-id");
+		CHECK(dec(FbVerify::Verified,
+			  QStringLiteral("verified"), true, true, false,
+			  false, false, false, true, false) == FbAutoGo::No,
+		      "autogo-cooldown");
+		CHECK(dec(FbVerify::Verified,
+			  QStringLiteral("verified"), true, true, false,
+			  false, false, true, false, false) == FbAutoGo::No,
+		      "autogo-no-auth");
+	}
+
 	std::printf("SELFCHECK OK\n");
 	return 0;
 }

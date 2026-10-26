@@ -204,7 +204,7 @@ métricas F-099, audiencia F-093. Fases v3 completadas (2026-10-26) [D delegada,
    en persona + obs_log con códigos, usess-* 34); [C: 7
    `def test_*` + 28 ocurrencias `usess` (28 vs 34 sin
    conciliar [P])]. Pendientes [P]: deploy backend para efecto
-   real, instalador, E2E operador. Cambio "sin Meta al abrir" (2026-10-26) [D delegada]: auto-prepare crea/valida sin re-fijar; destino solo ante intención real; mensaje honesto; "Comprobar estado"; amarillo = fallo de lectura en Meta; build OK, selfcheck PASS 0 FAIL; T-078 en investigación. Pendientes [P]: E2E, instalador. Detalle en VALIDATION.md.
+   real, instalador, E2E operador. Cambio "sin Meta al abrir" (2026-10-26) [D delegada]: auto-prepare crea/valida sin re-fijar; destino solo ante intención real; mensaje honesto; "Comprobar estado"; amarillo = fallo de lectura en Meta; build OK, selfcheck PASS 0 FAIL; T-078 en investigación. Pendientes [P]: E2E, instalador. Go live automático (2026-10-26) [D delegada de la sesión implementadora, no re-ejecutada aquí]: disparo por eventos señal+verify; Verified→auto; AudienceUnverified→check global o Sí único, resto bloquea; un intento por ID, anti-doble, cooldown, relectura confirma; cierra la brecha del plan v2 (apaño manual intermedio sustituido); build OK, selfcheck autogo-* 13/13 en verde, diff-check y scan limpios; T-078 sigue en investigación sin cambio de estado. Pendientes [P]: E2E operador, instalador. Detalle en VALIDATION.md.
 NEXT REQUIRED TECHNICAL TASK: NONE.
 
 ## 14. Known Findings / Limitations
