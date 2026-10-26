@@ -2326,6 +2326,20 @@ nube), consultar al subagente persistente:
     variable (presencia/ausencia, jamás valores); el contenido con
     secretos jamás se cita en informes, logs o prompts. `staging/`
     sigue excluida de inspección de contenido salvo `status`.
+    Excepción G4 2026-10-26 [D] (autorización del usuario en chat:
+    documentar el desbloqueo para que no vuelva a bloquear + URL
+    canónica confirmada): actualizar SOLO bases de URL en
+    `.env`/`dev.env` está permitido únicamente con autorización
+    explícita del usuario por tarea, con procedimiento obligatorio:
+    (1) verificar antes de tocar que ambos archivos están ignorados
+    (`git check-ignore -v .env dev.env` debe listarlos); (2)
+    mostrar/imprimir solo líneas con URL, jamás valores de secretos;
+    (3) reemplazar solo la base conservando rutas; (4) re-verificar el
+    ignorado después; (5) si algún archivo no está ignorado, PARAR y
+    pedir instrucciones. Regla dura del usuario (única regla de
+    bloqueo duro): "NO SUBIR SECRETOS A GIT". Las protecciones de
+    lectura de secretos se mantienen porque son las que la hacen
+    cumplir.
 11. Evidencia documental frente a verificación operativa: `GET /health`,
     `/ready` o `/version` no demuestran por sí solos a qué URL apunta un
     job de Cloud Scheduler. Afirmar el destino operativo del job exige

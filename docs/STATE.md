@@ -51,12 +51,15 @@
   Run [D: subagente GCP 2026-10-24].
 - **Cloud Run (estado operativo; detalle en DEPLOYMENT.md):**
   documentado rev `00036-cjj` con `PROVIDERS=youtube,kick,twitch,
-  facebook` y URL nueva
-  `https://obs-stream-metadata-service-mdurv2xfsa-ul.a.run.app`
-  [D: `.opencode/agents/gcp-stream-metadata.md`, verificado 2026-10-24
-  por lectura]. Drift conocido: `DEPLOYMENT.md`, `tools/deploy.ps1` y el
-  job de purga aún referencian la URL anterior
-  `...-364043334054.us-east5.run.app`; no asumir que sigue válida [D].
+  facebook`. URL canónica 2026-10-26 [D, confirmada por el usuario en
+  chat; coincide con `FB_URL_APP` en `.env` y con `PUBLIC_URL` en
+  Cloud Run, evidenciado por backend-integrations ese día sin citar
+  valores]:
+  `https://obs-stream-metadata-service-364043334054.us-east5.run.app`.
+  La hash
+  `https://obs-stream-metadata-service-mdurv2xfsa-ul.a.run.app` queda
+  como alterna no canónica [D histórico 2026-10-24]. `tools/deploy.ps1:58`
+  construye la canónica: NO necesita cambio [C, leído en esta sesión].
   Sin re-verificación en vivo en esta sesión [P].
 - **Discrepancias residuales conocidas [P, requieren confirmación]:**
   1. `ARCHITECTURE-BACKEND.md` §18 fila Twitch Managed ("pendiente",
