@@ -58,16 +58,30 @@ obs-studio/
 obs-build/
 
 # Secrets — nunca commitear (ver docs/SECURITY.md)
+# Único bloqueo duro del harness (desbloqueo total 2026-10-26 [D]):
+# NO SUBIR CREDENCIALES A GIT. Patrones con extensión para no colisionar
+# con código legítimo (p. ej. backend/token_crypto.py, ADR-*-secrets-*.md).
 .env
 .env.*
 dev.env
+staging/
 *.key
 *.pem
 *.p12
 *token*.json
+*token*.txt
+*token*.yaml
+*token*.yml
+*token*.key
 *secret*.json
+*secret*.txt
+*secret*.yaml
+*secret*.yml
+*secret*.key
 credentials.json
-client_secret*.json
+credentials.yaml
+credentials.yml
+client_secret*
 
 # OS
 .DS_Store
