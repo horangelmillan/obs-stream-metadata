@@ -2340,6 +2340,17 @@ nube), consultar al subagente persistente:
     bloqueo duro): "NO SUBIR SECRETOS A GIT". Las protecciones de
     lectura de secretos se mantienen porque son las que la hacen
     cumplir.
+    Excepción G5 2026-10-26 [D] (autorización total explícita del
+    usuario en chat: los agentes apartan/devuelven `dev.env` ellos
+    mismos y el harness deja de bloquear; ÚNICA regla dura:
+    "NO SUBIR SECRETOS A GIT"): apartar/devolver `.env`/`dev.env`
+    IGNORADOS por los agentes con autorización explícita por tarea
+    (rename ciego con `Rename-Item`, SIN leer contenido jamás,
+    verificando ignorado con `git check-ignore -v .env dev.env`
+    antes y después, restauración obligatoria al terminar; si no
+    está ignorado, PARAR). Las denegaciones de LECTURA de secretos
+    se mantienen porque son las que impiden que un secreto llegue a
+    un commit/log.
 11. Evidencia documental frente a verificación operativa: `GET /health`,
     `/ready` o `/version` no demuestran por sí solos a qué URL apunta un
     job de Cloud Scheduler. Afirmar el destino operativo del job exige
