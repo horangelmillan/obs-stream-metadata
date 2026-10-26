@@ -106,6 +106,23 @@
   por `backend-integrations` (incl. entrada `node_modules` en
   `.gitignore` y comprobación `browser: ask` con `opencode debug
   agents`).
+- **Cuentas Managed v1 Fases 1–5 cerradas (2026-10-26) [D/C]:** commit
+  `0f015a3` (`feat(managed-users-v1): users PBKDF2 + 003 + endpoints +
+  auth doble + gate plugin + erase (Fases 1-5)`, en el historial de este
+  checkout [C: listado en `git log --oneline`]) implementa: modelo
+  `users` PBKDF2-SHA256 600k + migración `003_users.sql` (Fase 1),
+  endpoints `POST /users/signup|login|logout` + `GET /users/me` + auth
+  doble Managed con 401 normalizado (Fase 2), gate login en el plugin
+  con sesión solo-memoria (Fase 3), selfcheck f4/f5 (Fase 4) y
+  `POST /users/erase` en cascada separado de F-C2 (Fase 5). Evidencia
+  [D, no re-ejecutada aquí]: suites 299→337 OK + selfcheck f4/f5 OK +
+  secret-scan limpio (mensaje de `0f015a3` + plan
+  `docs/superpowers/plans/2026-10-26-managed-user-accounts.md`).
+  Canónico en BACKLOG T-079–T-084; acta en VALIDATION.md.
+  `docs/PRIVACY.md` actualizado con el inventario Managed v1
+  (descriptivo; el código manda). Pendiente [P]: Fase 6 E2E multi-PC +
+  backup/rollback (T-084, operador), PG en vivo y despliegue (gates
+  vigentes, sin afirmar).
 - **Rama base:** `master` (ADR-004; CI anclado a `master`).
 - **Repo remoto:** `horangelmillan/obs-stream-metadata` (público,
   GitHub-flow con PRs).

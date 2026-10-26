@@ -12,10 +12,12 @@ permission:
     "docs/VALIDATION.md": allow
     "docs/TOOLS.md": allow
     "docs/WORKFLOW.md": allow
+    "docs/PRIVACY.md": allow
     "docs/FINDINGS.md": allow
     "docs/BACKLOG.md": allow
     "docs/MEDIAMTX-RELAY-FLOW.md": allow
     "docs/superpowers/specs/*.md": allow
+    "docs/superpowers/plans/*.md": allow
     ".gitignore": allow
     ".opencode/agents/*.md": allow
     ".agents/skills/project-harness-governance/SKILL.md": allow
@@ -105,10 +107,12 @@ Solo estos archivos, y solo cuando la tarea lo autorice:
 - `docs/VALIDATION.md`
 - `docs/TOOLS.md`
 - `docs/WORKFLOW.md`
+- `docs/PRIVACY.md` (excepción puntual 2026-10-26 [D], autorización del usuario: actualizar inventario Managed v1; descriptivo, el código manda)
 - `docs/FINDINGS.md` (añadir hallazgos F-###, nunca reescribir historia)
 - `docs/BACKLOG.md` (estado canónico: solo edición autorizada por tarea, nunca cambiar estados sin evidencia)
 - `docs/MEDIAMTX-RELAY-FLOW.md` (excepción puntual 2026-10-26 [D], autorización del usuario a la guía: `harness-steward` dueño del doc guía MediaMTX; precedente Fase 1: `docs/BACKLOG.md` y `.gitignore`)
 - `docs/superpowers/specs/*.md` (excepción puntual 2026-10-26 [D], autorización del usuario al spec: `harness-steward` transcribe el diseño "Cuentas de usuario Managed" aprobado en chat al destino `docs/superpowers/specs/2026-10-26-managed-user-accounts-design.md`; precedentes: `docs/BACKLOG.md`, `.gitignore` y `docs/MEDIAMTX-RELAY-FLOW.md`; solo specs autorizados por tarea, sin código ni producto)
+- `docs/superpowers/plans/*.md` (excepción puntual 2026-10-26 [D], autorización del usuario para el plan de Cuentas Managed v1: redacción del plan `docs/superpowers/plans/2026-10-26-managed-user-accounts.md`; precedente `docs/superpowers/specs/*.md`; solo planes autorizados por tarea, sin código ni producto)
 - `.gitignore` (solo entradas de ignorado; sin tocar reglas de secretos sin ADR)
 - `.opencode/agents/` (definiciones de agentes locales)
 - `.agents/skills/project-harness-governance/SKILL.md`

@@ -620,3 +620,26 @@ ESTADO ACTUAL [P]: discrepancia entre esta observación histórica (URL
   pendiente de re-verificación en vivo. Ver bloque canónico en
   `docs/DEPLOYMENT.md` (T-076/DRIFT).
 ```
+
+## Cuentas Managed v1 Fases 1–5 (T-079–T-083, 2026-10-26, commit `0f015a3`)
+
+```text
+ORIGEN [D, no re-ejecutado en esta sesión documental]: mensaje del
+  commit `0f015a3` ("feat(managed-users-v1): users PBKDF2 + 003 +
+  endpoints + auth doble + gate plugin + erase (Fases 1-5)") + plan
+  `docs/superpowers/plans/2026-10-26-managed-user-accounts.md`
+  (Tasks 1–5 cerradas con evidencia).
+SUITES BACKEND: 299→337 tests OK (`python -m unittest discover
+  -s backend/tests`, incluye `test_users_model`, `test_users_endpoints`,
+  `test_users_dualauth`, `test_users_erase` + ajustes facebook/http/kick/
+  metadata_youtube/pg/twitch).
+SELFCHECK PLUGIN: f4 (gate login Managed, cabecera `X-User-Session`,
+  formas prohibidas, sin recuperación en v1) + f5 (erase separado de
+  F-C2, dual Managed, mensajes solo-conteos) OK
+  [C: checks `f4-*`/`f5-*` presentes en `src/metadata_selfcheck.cpp`].
+SECRET-SCAN: limpio, sin valores en el informe [D: plan Tasks 2/5/7].
+ALCANCE: Fases 1–5 cerradas con evidencia; Fase 6 (E2E multi-PC +
+  backup/rollback, T-084) pendiente del operador. PG en vivo y E2E real
+  quedan para el paso siguiente, no se afirman aquí [P].
+FINAL: Fases 1–5 PASS documental; Fase 6 PENDING.
+```
