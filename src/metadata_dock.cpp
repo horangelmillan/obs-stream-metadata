@@ -472,7 +472,7 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 	fbVerifyLabel_->setWordWrap(true);
 	fbDetailLayout->addWidget(fbVerifyLabel_);
 	fbStatusButton_ =
-		new QPushButton(tr("Comprobar"), fbDetail_);
+		new QPushButton(tr("Comprobar estado"), fbDetail_);
 	connect(fbStatusButton_, &QPushButton::clicked, this,
 		&MetadataDock::onFbStatus);
 	fbAdoptButton_ =
@@ -1593,9 +1593,11 @@ void MetadataDock::updateFbHappyPath()
 				ready = tr("Revisa el título y pulsa Aplicar.");
 			} else {
 				// Error 3 (conexión): el único botón es Comprobar
-				// (Avanzado). Sin motivos crudos en el resumen.
+				// estado (Avanzado; lectura Graph del vídeo en
+				// Meta, no la señal del emisor). Sin motivos
+				// crudos en el resumen.
 				ready = tr("Se cortó la conexión — abre Avanzado y "
-				   "pulsa Comprobar.");
+				   "pulsa Comprobar estado.");
 			}
 			rBorder = QStringLiteral("#ffc107");
 			rBg = QStringLiteral("rgba(255, 193, 7, 30)");
@@ -2671,6 +2673,8 @@ void MetadataDock::fbRefireOrDefer(const QString &liveId,
 	// disparo diferido con guarda de ID (sin reintentos en bucle).
 	if (liveId.trimmed().isEmpty() || ingest.isEmpty() || !relay_)
 		return;
+	// Un re-fijado directo consume cualquier pendiente anterior.
+	fbForwardPending_ = false;
 	const qint64 now = QDateTime::currentMSecsSinceEpoch();
 	if (relay::canRefire(relay_->lastForwardOkMs(), now)) {
 		relay_->refireFromIngest(ingest);
@@ -2688,6 +2692,36 @@ void MetadataDock::fbRefireOrDefer(const QString &liveId,
 	generalMsg_->setText(
 		tr("Espero un poco tras tu último reenvío aceptado y sigo "
 		   "solo — no tienes que hacer nada."));
+}
+
+// El auto-prepare valida/crea el video pero NO re-fija el destino:
+// deja el forward pendiente con estado honesto (sin countdown, sin
+// triangulo: no hay espera, no hay nada que contar). Solo la intencion
+// real dispara el refire (Apply con FB, senal del emisor, Go live),
+// que usa fbRefireOrDefer con su cola diferida y cooldown con causa.
+void MetadataDock::fbNoteForwardPending()
+{
+	if (!fbForwardPending_ || !generalMsg_)
+		return;
+	generalMsg_->setText(generalMsg_->text() +
+			     tr(" Se dirigirá solo cuando emitas, apliques "
+				"o salgas al aire."));
+}
+
+void MetadataDock::fbFirePendingForward()
+{
+	if (!fbForwardPending_)
+		return;
+	const QString liveId = currentFbLiveId().trimmed();
+	const QString ingest = fbIngest_;
+	if (liveId.isEmpty() || ingest.isEmpty() || !relay_)
+		return;
+	if (!platformUsable(meta::Platform::Facebook))
+		return;
+	if (!relay::stateIsRunning(relayState_))
+		return;
+	fbForwardPending_ = false;
+	fbRefireOrDefer(liveId, ingest);
 }
 
 // --- managed wiring (T-048; Independent handlers untouched) --------------
@@ -5230,7 +5264,7 @@ void MetadataDock::noteFbUpdated(const QString &liveId,
 	fbVerify_ = {meta::FbVerify::Blocked,
 		     QStringLiteral("write-accepted")};
 	setFbVerifyLabel(
-		tr("Guardado — pulsa Comprobar antes de salir al aire."));
+		tr("Guardado — pulsa Comprobar estado antes de salir al aire."));
 }
 
 // Cambio B: la relectura encadenada tras go_live manda. Solo el estado
@@ -5250,7 +5284,7 @@ void MetadataDock::reportFbGoLiveObserved(const QString &status)
 	} else {
 		generalMsg_->setText(
 			tr("No pude confirmar que saliste al aire — abre Avanzado "
-			   "y pulsa Comprobar."));
+			   "y pulsa Comprobar estado."));
 	}
 }
 
@@ -5282,11 +5316,11 @@ void MetadataDock::runFbVerification(const QString &id,
 				setFbVerifyLabel(tr("No pude confirmar quién podrá verlo"));
 		} else if (fbVerify_.reason ==
 			   QStringLiteral("status-missing")) {
-			setFbVerifyLabel(tr("Falta el estado — pulsa Comprobar"));
+			setFbVerifyLabel(tr("Falta el estado — pulsa Comprobar estado"));
 		} else if (fbVerify_.reason ==
 			   QStringLiteral("status-not-unpublished")) {
 			setFbVerifyLabel(
-				tr("El vídeo aún no está para salir — pulsa Comprobar"));
+				tr("El vídeo aún no está para salir — pulsa Comprobar estado"));
 		} else {
 			setFbVerifyLabel(
 				tr("El título no coincide — revísalo y pulsa Aplicar"));
@@ -5334,8 +5368,9 @@ void MetadataDock::setFbIngest(const QString &url)
 void MetadataDock::clearFbIngest()
 {
 	// Olvido directo (oculta sin refresh global: los llamantes ya
-	// están en transición de estado).
+	// están en transición de estado). Sin ingesta no hay pendiente.
 	fbIngest_.clear();
+	fbForwardPending_ = false;
 	if (fbIngestEdit_) {
 		fbIngestEdit_->clear();
 		fbIngestEdit_->setEchoMode(QLineEdit::Password);
@@ -5462,7 +5497,7 @@ void MetadataDock::onFbGoLive()
 			motive = tr("no es el vídeo comprobado");
 		generalMsg_->setText(
 			tr("Aún no está comprobado — abre Avanzado y pulsa "
-			   "Comprobar."));
+			   "Comprobar estado."));
 		setFbVerifyLabel(tr("Pendiente: %1").arg(motive));
 		return;
 	}
@@ -5499,12 +5534,17 @@ void MetadataDock::onFbGoLive()
 			tr("El título no coincide — revísalo y pulsa Aplicar"));
 		return;
 	} else {
-		// Error 3 (conexión): el único botón es Comprobar (Avanzado).
+		// Error 3 (conexión): el único botón es Comprobar estado
+		// (Avanzado; lectura Graph, no Comprobar señal).
 		generalMsg_->setText(
-			tr("Se cortó la conexión — abre Avanzado y pulsa Comprobar."));
-		setFbVerifyLabel(tr("Pendiente: pulsa Comprobar"));
+			tr("Se cortó la conexión — abre Avanzado y pulsa Comprobar estado."));
+		setFbVerifyLabel(tr("Pendiente: pulsa Comprobar estado"));
 		return;
 	}
+	// Go live es intencion real: dispara el forward pendiente del
+	// auto-prepare (mismo ID verificado; con cooldown, cola diferida
+	// honesta). Solo tras los gates de verificacion.
+	fbFirePendingForward();
 	if (isManaged()) {
 		if (!managedAccount(meta::Platform::Facebook).connected) {
 			generalMsg_->setText(meta::userMessage(
@@ -6104,8 +6144,18 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 							 "secure_stream_url"))
 						.toString();
 				setFbIngest(ingest);
-				if (!ingest.isEmpty() && relay_)
-					fbRefireOrDefer(!id.isEmpty() ? id : liveId, ingest);
+				// Sin transmision no hay handshake: el auto-prepare
+				// (arranque/tras-End/pre-create) valida/crea pero NO
+				// re-fija; el forward queda pendiente hasta intencion
+				// real (Apply con FB, senal del emisor, Go live).
+				if (meta::fbAutoCreateDefersForward(
+						    fbAutoActive_, fbEndAutoPending_,
+						    fbSigPrecreated_)) {
+					fbForwardPending_ = !ingest.isEmpty();
+				} else if (!ingest.isEmpty() && relay_) {
+					fbRefireOrDefer(!id.isEmpty() ? id : liveId,
+								ingest);
+				}
 			}
 			// go_live Managed: NO pintar res.status ni LIVE optimista;
 			// estado desconocido/pendiente hasta la lectura encadenada
@@ -6228,6 +6278,9 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 					if (relay_)
 						relay_->clearForward();
 					fbCancelRefire();
+					// El video termino: su pendiente muere aqui;
+					// el create tras End abrira uno nuevo.
+					fbForwardPending_ = false;
 					clearFbGoLiveSession();
 				}
 				fbQuietStatus_ = true;
@@ -6392,10 +6445,12 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 					tr("Facebook live ended — next video "
 					   "prepared (%1).")
 						.arg(id));
+				fbNoteForwardPending();
 				return;
 			}
 			if (op == QStringLiteral("create") && fbAutoActive_) {
 				fbAutoHandleCreated(id);
+				fbNoteForwardPending();
 				return;
 			}
 			// Fase A (Managed): DELETE automatico del huerfano:
@@ -6441,6 +6496,7 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 			} else
 				generalMsg_->setText(
 					tr("Facebook %1 OK.").arg(op));
+			fbNoteForwardPending();
 		});
 }
 
@@ -6904,9 +6960,11 @@ void MetadataDock::startManagedFacebookApply()
 							      p));
 					      // Fase A punto 3 (Managed): tras Apply OK, verificacion silenciosa
 					      // (patron fbQuietStatus_): status silencioso -> runFbVerification,
-					      // sin pisar el mensaje de Apply.
+					      // sin pisar el mensaje de Apply. Apply con FB es
+					      // intencion real: dispara el forward pendiente.
 					      if (managedAccount(meta::Platform::Facebook).connected)
 					          fbChainSilentVerify(liveId);
+					      fbFirePendingForward();
 					      obs_log(LOG_INFO,
 						      "apply %s: ok (managed)",
 						      meta::platformName(p));
@@ -7958,8 +8016,17 @@ void MetadataDock::onReply(QNetworkReply *reply)
 			o.value(QStringLiteral("secure_stream_url"))
 				.toString();
 		setFbIngest(ingest);
-		if (!ingest.isEmpty() && relay_)
+		// Sin transmision no hay handshake: el auto-prepare
+		// (arranque/tras-End/pre-create) valida/crea pero NO
+		// re-fija; el forward queda pendiente hasta intencion
+		// real (Apply con FB, senal del emisor, Go live).
+		if (meta::fbAutoCreateDefersForward(
+				    fbAutoActive_, fbEndAutoPending_,
+				    fbSigPrecreated_)) {
+			fbForwardPending_ = !ingest.isEmpty();
+		} else if (!ingest.isEmpty() && relay_) {
 			fbRefireOrDefer(nid, ingest);
+		}
 		// Estado real vía lectura Meta: si la respuesta trae status
 		// se usa; si no, NO se supone UNPUBLISHED: lectura
 		// encadenada (una vez, sin polling) que deja el indicador
@@ -7990,6 +8057,7 @@ void MetadataDock::onReply(QNetworkReply *reply)
 				tr("Facebook live ended — next video "
 				   "prepared (%1).")
 					.arg(nid));
+			fbNoteForwardPending();
 			obs_log(LOG_INFO,
 				"facebook end auto-prepare done");
 			return;
@@ -7998,10 +8066,12 @@ void MetadataDock::onReply(QNetworkReply *reply)
 		// limpieza del huerfano (solo ese, nunca LIVE/VOD/ajeno).
 		if (fbAutoActive_) {
 			fbAutoHandleCreated(nid);
+			fbNoteForwardPending();
 			obs_log(LOG_INFO,
 				"facebook auto-prepare created");
 			return;
 		}
+		fbNoteForwardPending();
 		obs_log(LOG_INFO, "facebook live video created");
 		return;
 	}
@@ -8093,6 +8163,9 @@ void MetadataDock::onReply(QNetworkReply *reply)
 				if (relay_)
 					relay_->clearForward();
 					fbCancelRefire();
+					// El video termino: su pendiente muere aqui;
+					// el create tras End abrira uno nuevo.
+					fbForwardPending_ = false;
 					clearFbGoLiveSession();
 				fbQuietStatus_ = true;
 				startFbStatusIndependent(liveId);
@@ -8240,10 +8313,12 @@ void MetadataDock::onReply(QNetworkReply *reply)
 			// Fase A punto 3: tras UpFb OK, verificacion
 			// silenciosa (patron fbQuietStatus_ del create):
 			// status silencioso -> runFbVerification, sin pisar
-			// el mensaje de Apply.
+			// el mensaje de Apply. Apply con FB es intencion real:
+			// dispara el forward pendiente del auto-prepare.
 			if (!refId.isEmpty() &&
 			    (fb_.connected || isManaged()))
 				fbChainSilentVerify(refId);
+			fbFirePendingForward();
 		}
 		finishPlatform(p, oc == meta::Outcome::Success,
 			       !spec.isEmpty()
@@ -8282,10 +8357,14 @@ void MetadataDock::onReply(QNetworkReply *reply)
 		// con este resultado (adaptativo 2 s/1 s, 3 fallos,
 		// votacion 2-de-3, 30 s + 5 min + confirmacion Graph).
 		fbSignalNoteResult(relay::signalHasEmitter(relaySignal_));
-		if (relay::signalHasEmitter(relaySignal_))
+		if (relay::signalHasEmitter(relaySignal_)) {
 			generalMsg_->setText(
 				tr("Relay signal: live emitter detected."));
-		else
+			// Senal del emisor = intencion real: dispara el
+			// forward pendiente del auto-prepare (un disparo;
+			// con cooldown, cola diferida honesta).
+			fbFirePendingForward();
+		} else
 			generalMsg_->setText(
 				tr("Relay signal: no emitter — point your "
 				   "encoder at rtmp://127.0.0.1:1935/live."));

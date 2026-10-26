@@ -122,6 +122,11 @@ bool fbPrevIsReusablePreview(const QString &prevStatus);
 // distinto del nuevo y ambos no vacios. Jamas borra LIVE/VOD/ajeno.
 bool fbAutoShouldDeletePrev(const QString &prevStatus,
 			   const QString &prevId, const QString &newId);
+// El auto-prepare (arranque/tras-End/pre-create por corte) valida/crea el
+// video pero NO re-fija el destino: el forward queda pendiente hasta
+// intencion real (Apply con FB, senal del emisor, Go live). Puro.
+bool fbAutoCreateDefersForward(bool autoActive, bool endAutoPending,
+			       bool sigPrecreated);
 // T-077 (Fase A): campos de la lectura Status Independent, SIN privacy
 // de entrada (paridad con lab/facebook liveStatus: el primer intento
 // ya no pide privacy; FbStatusRetry queda como relectura unica de
