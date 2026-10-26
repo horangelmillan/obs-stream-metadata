@@ -9,6 +9,35 @@
 > `#define`; conteo estático [C], sin ejecutar aquí). Últimos resultados documentados [D]: backend 250 OK
 > (T-076) + SELFCHECK OK (T-073).
 
+## Deploy rev-managed-users-v1 + smoke prod Managed v1 (2026-10-26, autorización [D usuario: cerrar el loop deploy+verificación])
+
+```text
+FUENTE:    reporte release-tooling + dictamen gcp en vivo 2026-10-26 [D]
+             (no re-ejecutados en esta sesión documental; aquí solo
+             edición de docs + `git diff --check`).
+DEPLOY:    tag `rev-managed-users-v1` → revisión Cloud Run
+             `obs-stream-metadata-service-00039-7jl` al 100% [D];
+             `/health` ok, `/version` env=production, `/ready` true [D].
+MIGRACIÓN: 003 confirmada en prod: `schema_migrations` = 001/002/003
+             [D: consulta MCP Neon read-only del orquestador a rama
+             `production` del proyecto `obs-stream-metadata`].
+RED SEG.:  snapshot manual `snap-fancy-lab-a5r16mex` de rama
+             production, 2026-10-26T02:11:27Z [D]; pg_dump del operador
+             queda opcional.
+SMOKE:     prod con usuario sintético desechable [D:
+             backend-integrations, curl.exe]: signup 201 → login 200 →
+             me 200 → status sin sesión 401 → logout 200 → me 401 →
+             erase 200 (users:1, installations:1, sessions:3) → me 401;
+             limpieza confirmada, repo intacto.
+HUÉRFANAS: quedan 3 instalaciones huérfanas vacías (solo bootstrap)
+             de la depuración, sin datos [D]; las purga el job diario o
+             purga operativa [P].
+PENDIENTE: operador humano (navegador/cuentas reales): OAuth real por
+             plataforma + Apply de título real + E2E dos PCs (T-084
+             sigue pendiente, BACKLOG canónico) [P].
+FINAL: loop deploy+verificación cerrado salvo E2E operador (T-084).
+```
+
 ## T-078 E2E relay MediaMTX local → LiveVideo propio (2026-10-26, autorizado 2026-10-26)
 
 ```text
