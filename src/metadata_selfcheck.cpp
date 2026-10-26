@@ -1493,6 +1493,88 @@ int main(int argc, char **argv)
 		      meta::managedPanelVisible(true, true),
 	      "startup-panel-with-session");
 
+	// T-077 Fase A (port lab->plugin): Status SIN privacy de entrada,
+	// persistent opt-in/off, mapeo persistent-key-not-allowed y
+	// audiencia-no-verificada por lectura (F-092/F-093). Sin red.
+	CHECK(meta::facebookStatusFields() ==
+		      QStringLiteral("id,title,description,status"),
+	      "fbstatus-fields-no-privacy");
+	CHECK(!meta::facebookStatusFields().contains(
+		      QStringLiteral("privacy")),
+	      "fbstatus-fields-never-privacy");
+	{
+		// persistent OFF por defecto: el body no lleva el campo.
+		const QJsonObject off = meta::facebookCreatePayload(
+			QStringLiteral("T"), QStringLiteral("D"), false);
+		CHECK(off.value(QStringLiteral("title")).toString() ==
+			      QStringLiteral("T") &&
+			      off.value(QStringLiteral("description"))
+				      .toString() ==
+				      QStringLiteral("D") &&
+			      off.value(QStringLiteral("status"))
+				      .toString() ==
+				      QStringLiteral("UNPUBLISHED") &&
+			      off.value(QStringLiteral("privacy"))
+				      .toObject()
+				      .value(QStringLiteral("value"))
+				      .toString() ==
+				      QStringLiteral("EVERYONE") &&
+			      !off.contains(QStringLiteral(
+				      "persistent_stream_key_status")),
+		      "fbcreate-persistent-off");
+		// Opt-in explicito: ENABLE, sin tocar titulo/desc.
+		const QJsonObject on = meta::facebookCreatePayload(
+			QStringLiteral("T"), QStringLiteral(""), true);
+		CHECK(on.value(QStringLiteral(
+				       "persistent_stream_key_status"))
+				      .toString() ==
+			      QStringLiteral("ENABLE"),
+		      "fbcreate-persistent-opt-in");
+		CHECK(!on.contains(QStringLiteral("description")),
+		      "fbcreate-empty-desc-omitted");
+	}
+	{
+		// Mapeo facebook:persistent-key-not-allowed por mensaje
+		// Meta (espejo del backend): case-insensitive, resto no.
+		CHECK(meta::facebookIsPersistentKeyError(
+			      QStringLiteral(
+				      "No permission to use persistent stream key param")),
+		      "fbpersistent-msg-match");
+		CHECK(meta::facebookIsPersistentKeyError(
+			      QStringLiteral(
+				      "PERSISTENT STREAM KEY issue")),
+		      "fbpersistent-msg-case");
+		CHECK(!meta::facebookIsPersistentKeyError(
+			      QStringLiteral("Session expired")) &&
+			      !meta::facebookIsPersistentKeyError(
+				      QStringLiteral("")),
+		      "fbpersistent-msg-other");
+		const QString pm =
+			meta::fbPersistentNotAllowedMessage();
+		CHECK(!pm.isEmpty() &&
+			      pm.contains(QStringLiteral("persistent")) &&
+			      pm.contains(QStringLiteral("off")),
+		      "fbpersistent-msg-honest");
+		CHECK(!pm.contains(QStringLiteral("secure_stream_url")) &&
+			      !pm.contains(QStringLiteral("Bearer")) &&
+			      !pm.contains(QStringLiteral("token")),
+		      "fbpersistent-msg-safe");
+	}
+	{
+		// Audiencia-no-verificada: un 200 de Status SIN privacy
+		// jamas verifica audiencia (F-093). La aceptacion del
+		// create/update tampoco promete audiencia publica.
+		const meta::FbVerifyResult r =
+			meta::facebookVerifyPrepared(
+				QStringLiteral("T"), QStringLiteral("D"),
+				QStringLiteral("T"), QStringLiteral("D"),
+				QStringLiteral("UNPUBLISHED"), QString());
+		CHECK(r.outcome == meta::FbVerify::AudienceUnverified &&
+			      r.reason ==
+				      QStringLiteral("privacy-unverified"),
+		      "fbstatus-acceptance-no-audience");
+	}
+
 	std::printf("SELFCHECK OK\n");
 	return 0;
 }

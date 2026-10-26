@@ -100,6 +100,27 @@ Outcome classifyStatus(int code);
 // T-071 FB-2: POST /{live-video-id} solo title/description (D1).
 // Jamas channel_description/stream_title/snippet (D2, AGENTS §47).
 QString facebookPayload(const QString &title, const QString &desc);
+// T-077 (Fase A): cuerpo de create puro y testeable. title 1-254 +
+// desc opcional + status UNPUBLISHED + privacy EVERYONE; solo con
+// opt-in explicito anade persistent_stream_key_status=ENABLE.
+// F-092: ni con ENABLE la URL es unica/reutilizable entre LiveVideos
+// (cada objeto trae su propia ingesta): jamas prometer persistencia.
+QJsonObject facebookCreatePayload(const QString &title,
+				 const QString &desc, bool persistentOptIn);
+// T-077 (Fase A): campos de la lectura Status Independent, SIN privacy
+// de entrada (paridad con lab/facebook liveStatus: el primer intento
+// ya no pide privacy; FbStatusRetry queda como relectura unica de
+// compat ante error). La audiencia de un 200 asi leido NUNCA es
+// verificada (F-093): solo runFbVerification con EVERYONE verifica.
+QString facebookStatusFields();
+// T-077 (Fase A): detecta el rechazo de clave persistente en el
+// mensaje Meta ("persistent stream key", espejo de backend
+// adapters/facebook.py classify). Puro, sin red/logs.
+bool facebookIsPersistentKeyError(const QString &metaMessage);
+// Mensaje honesto ante persistent-key-not-allowed: la cuenta podria
+// no permitir clave persistente; reintentar con la opcion off. Sin
+// secretos, sin URLs, sin prometer persistencia (F-092).
+QString fbPersistentNotAllowedMessage();
 // T-071 FB-2: clasificacion §28 + tabla brief §5 (190/1363120/1363144/10).
 // T-073 FB-4 (F-080): subcode 33 (GraphMethodException objeto web/ID
 // desconocido) es NotFound, no BadRequest de titulo.

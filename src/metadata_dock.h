@@ -59,6 +59,13 @@ public:
 		QString display; // "Connected as" label (non-secret)
 	};
 
+	// T-077 (Fase A): opt-in de clave persistente en create (ambos
+	// modos, defecto OFF). Lo fija la vista (checkbox futuro ux-ui);
+	// la logica solo lo lee al construir el body. F-092: ni con
+	// ENABLE la URL es unica: jamas prometer persistencia.
+	void setFbPersistent(bool on) { fbPersistent_ = on; }
+	bool fbPersistent() const { return fbPersistent_; }
+
 private slots:
 	void onApply();
 	void onConnectTwitch();
@@ -321,6 +328,10 @@ private:
 	// ID en curso de la lectura de estado (reintento fallback sin
 	// privacy sobre el MISMO ID; una sola relectura, sin polling).
 	QString fbStatusId_;
+	// T-077 (Fase A): opt-in de clave persistente (defecto OFF).
+	// Solo se envia con activacion explicita via setFbPersistent
+	// (checkbox de la vista, ux-ui); F-092 sin promesa de URL unica.
+	bool fbPersistent_ = false;
 	// Cambio A (Independent): valores ENVIADOS en el update en curso
 	// (titulo/desc vigentes al enviar + MISMO liveId). Se fijan al
 	// enviar y se consumen en el reply de exito; leer los widgets en
@@ -391,6 +402,10 @@ private:
 	QPushButton *fbStatusButton_ = nullptr;
 	QPushButton *fbAdoptButton_ = nullptr;
 	QPushButton *fbCreateButton_ = nullptr;
+	// T-078 Fase B (vista): opt-in de clave persistente (defecto OFF).
+	// Solo vista: el checkbox fija fbPersistent_ via setFbPersistent();
+	// la logica solo lo lee al construir el body. Texto honesto F-092.
+	QCheckBox *fbPersistentCheck_ = nullptr;
 	QPushButton *fbGoLiveButton_ = nullptr;
 	QPushButton *fbEndButton_ = nullptr;
 	QPushButton *fbDeleteButton_ = nullptr;

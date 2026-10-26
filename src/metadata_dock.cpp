@@ -479,27 +479,56 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 		new QPushButton(tr("Create live video (dock)"), fbDetail_);
 	fbCreateButton_->setToolTip(
 		tr("POST /me/live_videos: creates a preview object owned "
-		   "by the dock (F-075). No RTMP/keys touched."));
+		   "by the dock (F-075). No RTMP/keys touched. Persistent "
+		   "key is a separate opt-in below; each video carries "
+		   "its own ingest."));
 	connect(fbCreateButton_, &QPushButton::clicked, this,
 		&MetadataDock::onFbCreate);
+	// T-078 Fase B (vista): opt-in de clave persistente, defecto OFF,
+	// cableado a setFbPersistent(). Texto honesto F-092: ni con ENABLE
+	// la URL es unica (cada LiveVideo trae su propia ingesta).
+	fbPersistentCheck_ = new QCheckBox(
+		tr("Request persistent stream key (optional, off by "
+		   "default)"),
+		fbDetail_);
+	fbPersistentCheck_->setChecked(false);
+	fbPersistentCheck_->setToolTip(
+		tr("Requests ENABLE for this live video only. Each live "
+		   "video carries its own ingest; the URL is not "
+		   "guaranteed unique or reusable. If the account "
+		   "rejects it, retry with this off."));
+	fbPersistentCheck_->setAccessibleName(
+		tr("Request persistent stream key for the created video"));
+	connect(fbPersistentCheck_, &QCheckBox::toggled, this,
+		[this](bool on) { setFbPersistent(on); });
+	setFbPersistent(false);
 	fbGoLiveButton_ = new QPushButton(tr("Go live (ON)"), fbDetail_);
 	fbGoLiveButton_->setToolTip(
 		tr("Publishes the existing/dock-created video (LIVE_NOW). "
-		   "Requires explicit confirmation."));
+		   "Requires explicit confirmation. If Meta rate-limits "
+		   "quick re-handshakes, wait ~3 min (observed) before "
+		   "retrying."));
 	connect(fbGoLiveButton_, &QPushButton::clicked, this,
 		&MetadataDock::onFbGoLive);
 	fbEndButton_ = new QPushButton(tr("End live (OFF)"), fbDetail_);
+	fbEndButton_->setToolTip(
+		tr("Ends the live. Meta keeps the VOD unless you delete "
+		   "the video explicitly. If Meta rate-limits quick "
+		   "re-handshakes, wait ~3 min (observed) before "
+		   "retrying."));
 	connect(fbEndButton_, &QPushButton::clicked, this,
 		&MetadataDock::onFbEndLive);
 	fbDeleteButton_ =
 		new QPushButton(tr("Delete live video"), fbDetail_);
 	fbDeleteButton_->setToolTip(
-		tr("DELETEs the dock object (cleanup F-075)."));
+		tr("DELETEs the dock object (cleanup F-075). This also "
+		   "removes its VOD."));
 	connect(fbDeleteButton_, &QPushButton::clicked, this,
 		&MetadataDock::onFbDelete);
 	fbDetailLayout->addWidget(fbStatusButton_);
 	fbDetailLayout->addWidget(fbAdoptButton_);
 	fbDetailLayout->addWidget(fbCreateButton_);
+	fbDetailLayout->addWidget(fbPersistentCheck_);
 	fbDetailLayout->addWidget(fbGoLiveButton_);
 	fbDetailLayout->addWidget(fbEndButton_);
 	fbDetailLayout->addWidget(fbDeleteButton_);
@@ -929,6 +958,10 @@ void MetadataDock::refreshContentVisibility()
 		fbAdoptButton_->setVisible(fb);
 	if (fbCreateButton_)
 		fbCreateButton_->setVisible(fb);
+	// T-078 Fase B (vista): el opt-in vive junto al create (misma
+	// visibilidad: solo con sesion).
+	if (fbPersistentCheck_)
+		fbPersistentCheck_->setVisible(fb);
 	if (fbGoLiveButton_)
 		fbGoLiveButton_->setVisible(fb);
 	if (fbEndButton_)
@@ -3880,7 +3913,9 @@ void MetadataDock::onFbEndLive()
 	}
 	QMessageBox::StandardButton ok = QMessageBox::question(
 		this, tr("End Facebook live"),
-		tr("End the live video %1 (VOD)?").arg(liveId),
+		tr("End the live video %1? Meta keeps the VOD unless "
+		   "you delete the video explicitly.")
+			.arg(liveId),
 		QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
 	if (ok != QMessageBox::Yes)
 		return;
@@ -3999,8 +4034,15 @@ void MetadataDock::startFbStatusIndependent(const QString &liveId) {
 	QUrl url(QString::fromLatin1(kFbGraph) + QStringLiteral("/") +
 		 liveId);
 	QUrlQuery q;
+	// T-077 (Fase A): primer intento SIN privacy (paridad con
+	// lab/facebook liveStatus). Meta suele responder 400 si se pide
+	// privacy ilegible (F-093); sin pedirla el 200 trae valores
+	// reales con audiencia NO verificada por lectura (ver
+	// runFbVerification: "" nunca es Verified). FbStatusRetry queda
+	// como relectura unica de compat ante error (mismo ID,
+	// mismos campos, sin polling).
 	q.addQueryItem(QStringLiteral("fields"),
-		       QStringLiteral("id,title,description,status,privacy"));
+		       meta::facebookStatusFields());
 	url.setQuery(q);
 	setFbState(QString());
 	generalMsg_->setText(tr("Checking Facebook status…"));
@@ -4027,16 +4069,11 @@ void MetadataDock::startFbCreateIndependent()
 		token = fbPageTokens_.value(target, token);
 	QUrl url(QString::fromLatin1(kFbGraph) + QStringLiteral("/") +
 		 target + QStringLiteral("/live_videos"));
-	QJsonObject body;
-	body[QStringLiteral("title")] = title;
-	const QString desc = descEdit_->toPlainText();
-	if (!desc.isEmpty())
-		body[QStringLiteral("description")] = desc;
-	QJsonObject privacy;
-	privacy[QStringLiteral("value")] = QStringLiteral("EVERYONE");
-	body[QStringLiteral("privacy")] = privacy;
-	// Preview propiedad del dock: jamas LIVE_NOW en create/verify.
-	body[QStringLiteral("status")] = QStringLiteral("UNPUBLISHED");
+	// T-077 (Fase A): body puro testeado; persistent solo con opt-in
+	// explicito (defecto OFF). F-092: ni con ENABLE la URL es unica
+	// (cada LiveVideo trae su propia ingesta): sin promesa en UI.
+	const QJsonObject body = meta::facebookCreatePayload(
+		title, descEdit_->toPlainText(), fbPersistent_);
 	generalMsg_->setText(tr("Creating Facebook live video…"));
 	sendJson(url, QStringLiteral("POST"),
 		 QString::fromUtf8(
@@ -4093,6 +4130,12 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 		body[QStringLiteral("title")] = titleEdit_->text();
 		body[QStringLiteral("description")] =
 			descEdit_->toPlainText();
+		// T-077 (Fase A): persistent solo con opt-in explicito
+		// (defecto OFF). El backend ya acepta persistent:true
+		// (facebook.py create_live_video). F-092: sin promesa de
+		// URL unica en UI ni comentarios.
+		if (fbPersistent_)
+			body[QStringLiteral("persistent")] = true;
 		// Nuevo create: limpia la verificacion previa y guarda el
 		// expected (exactamente lo enviado) para verificar despues.
 		clearFbVerify();
@@ -4119,8 +4162,42 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 						: meta::classifyStatus(
 							  rep.http == 0 ? -1
 									: rep.http);
-				generalMsg_->setText(meta::userMessage(
-					oc, meta::Platform::Facebook));
+				// T-077 (Fase A): el backend no reenvia el
+				// detail interno (solo logs; el body publico
+				// trae code generico). Si se pidio clave
+				// persistente y el proveedor rechazo el
+				// create (502 provider_rejected), el motivo
+				// probable es facebook:
+				// persistent-key-not-allowed: mensaje honesto
+				// y condicional (reintentar con la opcion
+				// off), sin afirmar el motivo como unico.
+				if (op == QStringLiteral("create") &&
+				    fbPersistent_ && rep.http == 502)
+					generalMsg_->setText(
+						meta::
+							fbPersistentNotAllowedMessage());
+				else if (oc == meta::Outcome::RateLimited &&
+					 (op == QStringLiteral("go_live") ||
+					  op == QStringLiteral("end")))
+					// F-097 (vista honesta, sin cambiar
+					// logica): Meta limita re-handshakes
+					// seguidos (~3 min observado); sin
+					// prometer recuperacion ni latencia.
+					generalMsg_->setText(
+						meta::userMessage(
+							oc,
+							meta::Platform::
+								Facebook) +
+						tr(" Meta may limit quick "
+						   "re-handshakes (~3 min "
+						   "observed); wait before "
+						   "retrying."));
+				else
+					generalMsg_->setText(
+						meta::userMessage(
+							oc,
+							meta::Platform::
+								Facebook));
 				return;
 			}
 			const QJsonObject res =
@@ -4367,8 +4444,14 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 				if (op == QStringLiteral("go_live"))
 					// Sin LIVE optimista: pendiente hasta leer el
 					// mismo ID una vez (confirma o bloquea).
+					// F-097: sin reintento agresivo tras
+					// go_live (cooldown ~3min de Meta ante
+					// re-handshakes; la vista redacta el
+					// aviso, aqui solo constancia).
 					setFbState(QString());
 				else
+					// F-098: End -> LIVE_STOPPED genera VOD
+					// salvo borrado explicito.
 					setFbState(QStringLiteral("VOD"));
 				fbQuietStatus_ = true;
 				QJsonObject sbody;
@@ -4516,6 +4599,12 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 				generalMsg_->setText(
 					tr("Facebook go-live request accepted — "
 					   "confirming status…"));
+			else if (op == QStringLiteral("end"))
+				// F-098 (vista honesta): End deja VOD salvo
+				// borrado explicito.
+				generalMsg_->setText(
+					tr("Facebook end OK (VOD kept unless "
+					   "you delete the video)."));
 			else
 				generalMsg_->setText(
 					tr("Facebook %1 OK.").arg(op));
@@ -5612,14 +5701,21 @@ void MetadataDock::onReply(QNetworkReply *reply)
 		// valores reales; el error de lectura nunca marca Verified.
 		// Meta puede responder error en cuerpo con HTTP 200: el
 		// objeto "error" no vacio tambien es fallo (fallback unico).
+		// T-077 (Fase A): el primer intento YA va sin privacy
+		// (F-093: Meta no la devuelve legible; pedirla daba 400).
+		// Un 200 aqui trae valores reales con audiencia NO
+		// verificada por lectura ("" nunca es Verified); el
+		// mensaje honesto lo dice en vez de sugerir audiencia
+		// publica. Aceptacion 200 != garantia de audiencia.
 		const QJsonObject fbBody = replyJson(reply);
 		const QJsonObject fbErr =
 			fbBody.value(QStringLiteral("error")).toObject();
 		if (netFail || http != 200 || !fbErr.isEmpty()) {
-			// Fallback minimo ante fallo por `privacy` (mismo
-			// criterio que backend get_live_status): UNA sola
-			// relectura del MISMO ID sin `privacy`. Sin polling
-			// extra; el fallo del retry si es definitivo.
+			// Fallback unico de compat (mismo criterio que
+			// backend get_live_status): UNA sola relectura
+			// del MISMO ID con los mismos campos sin
+			// `privacy` (transitorio). Sin polling extra;
+			// el fallo del retry si es definitivo.
 			QString retryId = fbStatusId_;
 			if (retryId.isEmpty())
 				retryId = currentFbLiveId();
@@ -5633,8 +5729,7 @@ void MetadataDock::onReply(QNetworkReply *reply)
 				QUrlQuery rq;
 				rq.addQueryItem(
 					QStringLiteral("fields"),
-					QStringLiteral(
-						"id,title,description,status"));
+					meta::facebookStatusFields());
 				rurl.setQuery(rq);
 				sendGet(rurl, Op::FbStatusRetry,
 					fb_.access);
@@ -5677,6 +5772,9 @@ void MetadataDock::onReply(QNetworkReply *reply)
 		QString rid = o.value(QStringLiteral("id")).toString();
 		if (rid.isEmpty())
 			rid = currentFbLiveId();
+		// Sin privacy pedida no hay privacy devuelta: audiencia no
+		// verificada por lectura (F-093). runFbVerification lo
+		// etiqueta; el mensaje general lo dice en vez de callar.
 		runFbVerification(rid,
 				  o.value(QStringLiteral("title")).toString(),
 				  o.value(QStringLiteral("description"))
@@ -5690,17 +5788,21 @@ void MetadataDock::onReply(QNetworkReply *reply)
 			reportFbGoLiveObserved(st);
 		else if (!fbQuietStatus_)
 			generalMsg_->setText(
-				tr("Facebook status: %1").arg(st));
+				tr("Facebook status: %1 — audience not "
+				   "verified (privacy not requested; "
+				   "values kept).")
+					.arg(st.isEmpty() ? tr("unknown")
+							 : st));
 		fbQuietStatus_ = false;
 		obs_log(LOG_INFO, "facebook status checked");
 		return;
 	}
 
 	case Op::FbStatusRetry: {
-		// Relectura sin `privacy` (un solo intento): exito con
-		// valores reales pero audiencia no verificable (privacy ""
-		// fijado, sin reutilizar previo); el fallo es general.
-		// Nunca marca Verified (Go live sigue bloqueado).
+		// Relectura unica de compat (mismos campos sin `privacy`):
+		// exito con valores reales pero audiencia no verificable
+		// (privacy "" fijado, sin reutilizar previo); el fallo es
+		// general. Nunca marca Verified (Go live sigue bloqueado).
 		// HTTP 200 con "error" no vacio tambien es fallo general
 		// (read-failed, nunca audiencia no verificada).
 		const QJsonObject fbBody = replyJson(reply);
@@ -5778,6 +5880,17 @@ void MetadataDock::onReply(QNetworkReply *reply)
 							    .value(QStringLiteral(
 								    "error"))
 							    .toObject();
+			// T-077 (Fase A): rechazo de clave persistente
+			// (solo posible con opt-in): el mensaje Meta
+			// manda; mensaje honesto sin prometer nada (F-092).
+			if (meta::facebookIsPersistentKeyError(
+				    err.value(QStringLiteral("message"))
+					    .toString())) {
+				generalMsg_->setText(
+					meta::
+						fbPersistentNotAllowedMessage());
+				return;
+			}
 			int code = err.value(QStringLiteral("code"))
 					   .toInt(0);
 			const int sub = err.value(QStringLiteral(
@@ -5863,12 +5976,24 @@ void MetadataDock::onReply(QNetworkReply *reply)
 				code = 33;
 			const QString spec =
 				meta::fbEligibilityMessage(code);
-			generalMsg_->setText(
-				!spec.isEmpty()
-					? spec
-					: meta::userMessage(
-						  meta::classifyFb(http, code),
-						  P::Facebook));
+			// F-097 (vista honesta, sin cambiar logica): ante
+			// rate-limit en re-handshakes (go_live/end), aviso
+			// de cooldown ~3 min observado; sin prometer
+			// recuperacion, latencia ni CPU.
+			const meta::Outcome fbOc =
+				meta::classifyFb(http, code);
+			QString fbMsg = !spec.isEmpty()
+						? spec
+						: meta::userMessage(
+							  fbOc,
+							  P::Facebook);
+			if (fbOc == meta::Outcome::RateLimited &&
+			    op != Op::FbDelete)
+				fbMsg += tr(" Meta may limit quick "
+					    "re-handshakes (~3 min "
+					    "observed); wait before "
+					    "retrying.");
+			generalMsg_->setText(fbMsg);
 			obs_log(LOG_WARNING, "%s http %d", label, http);
 			return;
 		}
@@ -5879,11 +6004,18 @@ void MetadataDock::onReply(QNetworkReply *reply)
 				// lectura, sin polling). La relectura informa
 				// lo observado (reportFbGoLiveObserved); aqui
 				// no se afirma publicado sin LIVE leido.
+				// F-097: sin reintento agresivo (cooldown
+				// ~3min de Meta ante re-handshakes seguidos;
+				// constancia para la vista, sin loop aqui).
 				setFbState(QStringLiteral("LIVE"));
 				fbGoLiveConfirm_ = true;
 				fbQuietStatus_ = true;
 				startFbStatusIndependent(liveId);
 			} else if (op == Op::FbEnd && !liveId.isEmpty()) {
+				// F-098: End -> LIVE_STOPPED genera VOD salvo
+				// borrado explicito; el indicador queda en
+				// VOD hasta la lectura encadenada (que
+				// confirma el estado real sin inventarlo).
 				setFbState(QStringLiteral("VOD"));
 				fbQuietStatus_ = true;
 				startFbStatusIndependent(liveId);
@@ -5926,8 +6058,13 @@ void MetadataDock::onReply(QNetworkReply *reply)
 				generalMsg_->setText(
 					tr("Facebook go-live accepted."));
 		} else {
+			// F-098: End genera VOD salvo borrado explicito
+			// (el objeto retirado de senal conserva su VOD).
+			// Vista honesta (Fase B): sin prometer borrado.
 			setFbState(QStringLiteral("VOD"));
-			generalMsg_->setText(tr("Facebook live ended."));
+			generalMsg_->setText(
+				tr("Facebook live ended (VOD kept unless "
+				   "you delete the video)."));
 		}
 		obs_log(LOG_INFO, "%s ok", label);
 		return;

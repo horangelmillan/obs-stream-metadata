@@ -133,6 +133,53 @@ QString facebookPayload(const QString &title, const QString &desc)
 		QJsonDocument(o).toJson(QJsonDocument::Compact));
 }
 
+// T-077 (Fase A): cuerpo de create puro (ver facebookCreatePayload
+// en metadata.h). F-092 citado alli: sin promesa de persistencia.
+QJsonObject facebookCreatePayload(const QString &title,
+				  const QString &desc,
+				  bool persistentOptIn)
+{
+	QJsonObject o;
+	o[QStringLiteral("title")] = title;
+	if (!desc.isEmpty())
+		o[QStringLiteral("description")] = desc;
+	// Preview propiedad del dock: jamas LIVE_NOW en create/verify.
+	o[QStringLiteral("status")] = QStringLiteral("UNPUBLISHED");
+	QJsonObject privacy;
+	privacy[QStringLiteral("value")] = QStringLiteral("EVERYONE");
+	o[QStringLiteral("privacy")] = privacy;
+	// Opt-in explicito (defecto OFF): solo entonces se envia.
+	if (persistentOptIn)
+		o[QStringLiteral("persistent_stream_key_status")] =
+			QStringLiteral("ENABLE");
+	return o;
+}
+
+// T-077 (Fase A): primer intento Status SIN privacy (paridad lab).
+QString facebookStatusFields()
+{
+	return QStringLiteral("id,title,description,status");
+}
+
+// T-077 (Fase A): espejo del criterio del backend (adapters/
+// facebook.py): el mensaje Meta manda sobre el HTTP 200.
+bool facebookIsPersistentKeyError(const QString &metaMessage)
+{
+	return metaMessage.contains(
+		QStringLiteral("persistent stream key"),
+		Qt::CaseInsensitive);
+}
+
+// T-077 (Fase A): rechazo de clave persistente (F-092: ni con ENABLE
+// la URL es unica; cada LiveVideo trae su propia ingesta).
+QString fbPersistentNotAllowedMessage()
+{
+	return QStringLiteral(
+		"Facebook: this account does not allow a persistent key "
+		"for this live video. Retry with the persistent-key "
+		"option off (each live video carries its own ingest).");
+}
+
 // T-071 FB-2: taxonomia §28 + tabla brief §5. metaCode = Graph `code`
 // (190, 1363120/1363144 elegibilidad, 10, 613/4/17 rate). httpStatus =
 // HTTP real. Los codigos Meta mandan sobre el HTTP 200.
@@ -145,6 +192,11 @@ Outcome classifyFb(int httpStatus, int metaCode)
 	if (metaCode == 190)
 		return Outcome::AuthRequired;
 	if (metaCode == 613 || metaCode == 4 || metaCode == 17)
+		// F-097 (T-078 lab): Meta limita re-handshakes RTMPS
+		// seguidos (cooldown observado ~3min entre emisiones).
+		// Clasificacion sin reintento agresivo: el dock jamas
+		// reencola go_live/end solo (sin scheduleBackoff ahi);
+		// la redaccion del cooldown la pone la vista (ux-ui).
 		return Outcome::RateLimited;
 	if (metaCode == 33)
 		return Outcome::NotFound;
@@ -186,6 +238,9 @@ FbLiveState fbLiveState(const QString &status)
 		return FbLiveState::Preview;
 	if (s == QStringLiteral("VOD") ||
 	    s == QStringLiteral("LIVE_STOPPED") ||
+	    // F-098 (T-078 lab): al retirar la senal el objeto genera
+	    // VOD automaticamente (End -> LIVE_STOPPED + VOD salvo
+	    // borrado explicito). Ambos estados son "terminado".
 	    s == QStringLiteral("COMPLETE"))
 		return FbLiveState::Ended;
 	return FbLiveState::Unknown;
