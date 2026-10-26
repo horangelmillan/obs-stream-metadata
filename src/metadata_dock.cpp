@@ -6,6 +6,8 @@ secrets in memory + DPAPI-encrypted store, never plaintext/printed/logged.
 
 #include "metadata_dock.h"
 
+#include "relay_manager.h"
+
 #include <obs-frontend-api.h>
 #include <obs-module.h>
 #include <plugin-support.h>
@@ -559,6 +561,54 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 	fbIngestShowButton_->setVisible(false);
 	fbIngestCopyButton_->setVisible(false);
 
+	// T-078 Fase 4 (vista): seccion relay local MediaMTX (ADR-016)
+	// dentro de la tarjeta Facebook. Solo vista: URL fija copiable,
+	// Iniciar/Detener, indicador por estados y mensajes honestos del
+	// gestor tal cual (sin reescribir logica, sin prometer
+	// persistencia/latencia/CPU/recovery). Visible solo con sesion
+	// FB (refreshContentVisibility); jamas pisa fbState_/fbVerify_.
+	relaySectionLabel_ = new QLabel(tr("Local relay (MediaMTX)"),
+					fbDetail_);
+	relayFixedEdit_ = new QLineEdit(fbDetail_);
+	relayFixedEdit_->setReadOnly(true);
+	relayFixedEdit_->setText(relay::fixedDestination());
+	relayFixedEdit_->setToolTip(
+		tr("Fixed operator destination: point Aitum/OBS here once, "
+		   "by hand. The plugin never changes it."));
+	relayFixedEdit_->setAccessibleName(
+		tr("Fixed relay destination"));
+	relayFixedCopy_ =
+		new QPushButton(tr("Copy relay destination"), fbDetail_);
+	relayFixedCopy_->setToolTip(
+		tr("Copy the fixed destination to the clipboard"));
+	connect(relayFixedCopy_, &QPushButton::clicked, this,
+		&MetadataDock::onRelayFixedCopy);
+	relayStateLabel_ = new QLabel(fbDetail_);
+	relayStateLabel_->setWordWrap(true);
+	relayStateLabel_->setAccessibleName(tr("Relay status"));
+	relayToggleButton_ =
+		new QPushButton(tr("Start relay"), fbDetail_);
+	relayToggleButton_->setToolTip(
+		tr("Start or stop the local relay process. The forward "
+		   "to the current live video is re-pointed automatically "
+		   "on create; stopping never touches OBS/Aitum."));
+	connect(relayToggleButton_, &QPushButton::clicked, this,
+		&MetadataDock::onRelayToggle);
+	relayMsgLabel_ = new QLabel(fbDetail_);
+	relayMsgLabel_->setWordWrap(true);
+	relayMsgLabel_->setAccessibleName(tr("Relay message"));
+	relayVodLabel_ =
+		new QLabel(relay::vodNoticeMessage(), fbDetail_);
+	relayVodLabel_->setWordWrap(true);
+	fbDetailLayout->addWidget(relaySectionLabel_);
+	fbDetailLayout->addWidget(relayFixedEdit_);
+	fbDetailLayout->addWidget(relayFixedCopy_);
+	fbDetailLayout->addWidget(relayStateLabel_);
+	fbDetailLayout->addWidget(relayToggleButton_);
+	fbDetailLayout->addWidget(relayMsgLabel_);
+	fbDetailLayout->addWidget(relayVodLabel_);
+	updateRelayUi();
+
 	// Twitch device-flow prompt lives inside the Twitch card detail
 	// (same show/hide call sites as before).
 	devicePrompt_ = new QLabel(twDetail_);
@@ -693,6 +743,15 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 	connect(net_, &QNetworkAccessManager::finished, this,
 		&MetadataDock::onReply);
 
+	// T-078 Fase 3 (cableado): gestor async del relay local (ADR-016).
+	// QProcess + Control API con senales, sin bloquear la UI; el
+	// indicador viaja por estados (la vista redacta despues).
+	relay_ = new RelayManager(this);
+	connect(relay_, &RelayManager::stateChanged, this,
+		&MetadataDock::onRelayStateChanged);
+	connect(relay_, &RelayManager::operatorMessage, this,
+		&MetadataDock::onRelayOperatorMessage);
+
 	// T-032: encrypted account store (module config dir). Missing dir
 	// or DPAPI failure -> memory-only fallback, never plaintext.
 	const QString sp = storePath();
@@ -716,7 +775,10 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 
 MetadataDock::~MetadataDock()
 {
-	// PoC ingestión: memoria de sesión, se olvida al cerrar.
+	// T-078 Fase 3: parada limpia al cerrar (sin huérfanos). La
+	// memoria de sesión se olvida sin persistir ni loguear.
+	if (relay_)
+		relay_->stop();
 	fbIngest_.clear();
 	delete store_;
 	store_ = nullptr;
@@ -979,6 +1041,25 @@ void MetadataDock::refreshContentVisibility()
 		fbIngestShowButton_->setVisible(showIngest);
 	if (fbIngestCopyButton_)
 		fbIngestCopyButton_->setVisible(showIngest);
+	// T-078 Fase 4 (vista): seccion relay solo con sesion FB (el
+	// forward apunta a la ingesta del LiveVideo vigente). El mensaje
+	// del gestor vive en su propia etiqueta (jamas pisa
+	// fbState_/fbVerify_/generalMsg_ ni resultados por plataforma).
+	if (relaySectionLabel_)
+		relaySectionLabel_->setVisible(fb);
+	if (relayFixedEdit_)
+		relayFixedEdit_->setVisible(fb);
+	if (relayFixedCopy_)
+		relayFixedCopy_->setVisible(fb);
+	if (relayStateLabel_)
+		relayStateLabel_->setVisible(fb);
+	if (relayToggleButton_)
+		relayToggleButton_->setVisible(fb);
+	if (relayVodLabel_)
+		relayVodLabel_->setVisible(fb);
+	if (relayMsgLabel_)
+		relayMsgLabel_->setVisible(
+			fb && !relayMsgLabel_->text().isEmpty());
 	// T-073 FB-4 (F-086): Connect solo sin sesion, Disconnect solo con
 	// sesion, en las cuatro tarjetas y en ambos modos (usable == connected
 	// en el modo activo). Evita flujos con conflicto (p. ej. Disconnect
@@ -1104,6 +1185,10 @@ void MetadataDock::cancelPendingForModeSwitch()
 	// PoC ingestión: el valor pertenece al contexto anterior; al
 	// cambiar de modo se olvida (sesión, sin persistencia).
 	clearFbIngest();
+	// T-078 Fase 3: el forward apunta a la ingesta del contexto
+	// anterior; parada limpia del relay en el cambio de modo.
+	if (relay_)
+		relay_->stop();
 	// La verificacion tambien pertenece al contexto anterior.
 	clearFbVerify();
 	if (managedPollTimer_)
@@ -1146,6 +1231,130 @@ void MetadataDock::cancelPendingForModeSwitch()
 		break;
 	default:
 		break;
+	}
+}
+
+// --- relay local MediaMTX (T-078 Fase 3, ADR-016) --------------------------
+// Indicador por estados (la vista redacta despues): aqui solo se guarda
+// el estado, se registra su nombre en el log y se reemite. Los mensajes
+// honestos del gestor (relay.h) se muestran tal cual, sin textos nuevos.
+// La ingesta jamas se persiste ni se loguea; Update/Apply no tocan el
+// forward (solo metadatos).
+
+// --- relay local MediaMTX (T-078 Fase 3, ADR-016) --------------------------
+// Fase 3 guarda el estado y lo reemite; Fase 4 (vista) pinta el
+// indicador y muestra los mensajes honestos del gestor tal cual en
+// la seccion relay (jamas fbState_/fbVerify_/generalMsg_). Sin
+// prometer persistencia, latencia, CPU ni recovery.
+
+void MetadataDock::onRelayStateChanged(relay::State s)
+{
+	relayState_ = s;
+	obs_log(LOG_INFO, "relay indicator: %s", relay::stateName(s));
+	updateRelayUi();
+	emit relayStateChanged(s);
+}
+
+void MetadataDock::onRelayOperatorMessage(const QString &msg)
+{
+	// Mensaje honesto de relay.h (sin secretos ni ingestas por
+	// construccion): solo a la etiqueta propia del relay. No pisa
+	// verify/audiencia (fbVerify_) ni estado del LiveVideo
+	// (fbState_) ni el aviso general ni resultados por plataforma.
+	if (relayMsgLabel_) {
+		relayMsgLabel_->setText(msg);
+		refreshContentVisibility();
+	}
+}
+
+void MetadataDock::onRelayToggle()
+{
+	if (!relay_)
+		return;
+	// Solo vista: arranca o para el proceso hijo (API existente del
+	// gestor). El re-fijado del forward lo hace Fase 3 al crear el
+	// LiveVideo; aqui no se toca ingesta ni forward directamente.
+	if (relay::stateIsRunning(relayState_))
+		relay_->stop();
+	else
+		relay_->ensureStarted();
+}
+
+void MetadataDock::onRelayFixedCopy()
+{
+	if (QClipboard *cb = QApplication::clipboard())
+		cb->setText(relay::fixedDestination());
+	// Confirmacion generica: el destino fijo es publico (no secreto),
+	// pero no se repite su valor en el aviso general.
+	if (relayMsgLabel_) {
+		relayMsgLabel_->setText(
+			tr("Relay destination copied — paste it once in "
+			   "Aitum/OBS and keep it."));
+		refreshContentVisibility();
+	}
+}
+
+void MetadataDock::updateRelayUi()
+{
+	if (relayFixedEdit_ &&
+	    relayFixedEdit_->text() != relay::fixedDestination())
+		relayFixedEdit_->setText(relay::fixedDestination());
+	// Indicador por estados (vista redacta el texto corto; el detalle
+	// honesto queda en relayMsgLabel_ via operatorMessage).
+	QString label;
+	QString bg;
+	QString border;
+	switch (relayState_) {
+	case relay::State::Starting:
+		label = tr("Relay: starting…");
+		bg = QStringLiteral("rgba(255, 193, 7, 30)");
+		border = QStringLiteral("#ffc107");
+		break;
+	case relay::State::Running:
+		label = tr("Relay: running (forward not set)");
+		bg = QStringLiteral("rgba(45, 158, 68, 30)");
+		border = QStringLiteral("#2da44e");
+		break;
+	case relay::State::ForwardOk:
+		label = tr("Relay: running — forward OK");
+		bg = QStringLiteral("rgba(24, 119, 242, 30)");
+		border = QStringLiteral("#1877F2");
+		break;
+	case relay::State::ForwardFailed:
+		label = tr("Relay: forward failed — see message");
+		bg = QStringLiteral("rgba(229, 72, 77, 30)");
+		border = QStringLiteral("#e5484d");
+		break;
+	case relay::State::BinaryMissing:
+		label = tr("Relay: binary missing — reinstall");
+		bg = QStringLiteral("rgba(229, 72, 77, 30)");
+		border = QStringLiteral("#e5484d");
+		break;
+	case relay::State::PortBusy:
+		label = tr("Relay: port busy — free 1935/9997");
+		bg = QStringLiteral("rgba(229, 72, 77, 30)");
+		border = QStringLiteral("#e5484d");
+		break;
+	case relay::State::Stopped:
+	default:
+		label = tr("Relay: stopped");
+		bg = QStringLiteral("transparent");
+		border = QStringLiteral("#5a5a5a");
+		break;
+	}
+	if (relayStateLabel_) {
+		relayStateLabel_->setText(label);
+		relayStateLabel_->setStyleSheet(
+			QStringLiteral("QLabel { border: 1px solid %1; "
+				       "border-radius: 6px; padding: 6px; "
+				       "background: %2; }")
+				.arg(border, bg));
+	}
+	if (relayToggleButton_) {
+		relayToggleButton_->setText(
+			relay::stateIsRunning(relayState_)
+				? tr("Stop relay")
+				: tr("Start relay"));
 	}
 }
 
@@ -1942,6 +2151,10 @@ void MetadataDock::onUserLogout()
 		if (broadcastCombo_)
 			broadcastCombo_->clear();
 		clearFbIngest();
+		// T-078 Fase 3: sin usuario no hay LiveVideo vigente que
+		// reenviar; parada limpia del relay.
+		if (relay_)
+			relay_->stop();
 		saveStore(); // drop snapshots; Independent records kept
 		refreshManagedLoginUi();
 		refreshContentVisibility();
@@ -1966,6 +2179,10 @@ void MetadataDock::onDisconnectManaged(meta::Platform p)
 	if (p == meta::Platform::Facebook) {
 		clearFbIngest();
 		clearFbVerify();
+		// T-078 Fase 3: parada limpia del relay (el forward moria
+		// con esa ingesta; sin tocar Aitum/OBS).
+		if (relay_)
+			relay_->stop();
 	}
 	setStatus(p, tr("Not connected"));
 	setResult(p, true, tr("disconnected"));
@@ -2037,6 +2254,9 @@ void MetadataDock::onEraseManagedData()
 				// PoC ingestión: borrado total Managed también
 				// olvida la URL de sesión.
 				clearFbIngest();
+				// T-078 Fase 3: parada limpia del relay.
+				if (relay_)
+					relay_->stop();
 				// La fila installation ya no existe en el
 				// backend: el secreto local queda huérfano y
 				// debe caer (próximo connect = bootstrap
@@ -2141,6 +2361,10 @@ void MetadataDock::onEraseAccount()
 				broadcastCombo_->clear();
 				// PoC ingestión: olvida la URL de sesión.
 				clearFbIngest();
+				// T-078 Fase 3: sin cuenta no hay LiveVideo
+				// vigente; parada limpia del relay.
+				if (relay_)
+					relay_->stop();
 				// Las filas installation ya no existen en el
 				// backend: el secreto local queda huérfano y
 				// debe caer (próximo connect = bootstrap
@@ -2942,6 +3166,10 @@ void MetadataDock::wipeLocal(meta::Platform p)
 		// PoC ingestión: el secure_stream_url SÍ se olvida siempre
 		// (solo sesión, jamás persistido).
 		clearFbIngest();
+		// T-078 Fase 3: el forward apuntaba a esa ingesta; parada
+		// limpia del relay al desconectar (sin tocar Aitum/OBS).
+		if (relay_)
+			relay_->stop();
 		// La verificacion es de sesion: muere con la conexion.
 		clearFbVerify();
 		fbTargetCombo_->clear();
@@ -4332,11 +4560,18 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 			// PoC ingestión: solo en create (el backend la
 			// reenvía únicamente ahí). Un create nuevo sin URL
 			// limpia el valor anterior. Jamas en logs.
-			if (op == QStringLiteral("create"))
-				setFbIngest(
+			// T-078 Fase 3: con ingesta en memoria se re-fija el
+			// forward en caliente (PATCH :9997, sin reinicio);
+			// respeta cooldown F-097 sin reintentos.
+			if (op == QStringLiteral("create")) {
+				const QString ingest =
 					res.value(QStringLiteral(
 							 "secure_stream_url"))
-						.toString());
+						.toString();
+				setFbIngest(ingest);
+				if (!ingest.isEmpty() && relay_)
+					relay_->refireFromIngest(ingest);
+			}
 			// go_live Managed: NO pintar res.status ni LIVE optimista;
 			// estado desconocido/pendiente hasta la lectura encadenada
 			// del mismo ID (ella confirma o deja bloqueado).
@@ -4449,10 +4684,15 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 					// re-handshakes; la vista redacta el
 					// aviso, aqui solo constancia).
 					setFbState(QString());
-				else
+				else {
 					// F-098: End -> LIVE_STOPPED genera VOD
 					// salvo borrado explicito.
 					setFbState(QStringLiteral("VOD"));
+					// T-078 Fase 3: la senal se retira;
+					// limpieza del forward ([]) sin cooldown.
+					if (relay_)
+						relay_->clearForward();
+				}
 				fbQuietStatus_ = true;
 				QJsonObject sbody;
 				sbody[QStringLiteral("op")] =
@@ -4588,6 +4828,10 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 				// PoC ingestión: el objeto murió, la URL
 				// muere con él (aunque falte el id).
 				clearFbIngest();
+				// T-078 Fase 3: sin LiveVideo no hay forward;
+				// limpieza ([]) sin cooldown.
+				if (relay_)
+					relay_->clearForward();
 				// El objeto ya no existe: su verificacion tampoco.
 				clearFbVerify();
 				setFbState(QString());
@@ -5924,9 +6168,15 @@ void MetadataDock::onReply(QNetworkReply *reply)
 		fbVerifyId_ = nid;
 		// PoC ingestión: valor completo del create, oculto por
 		// defecto (Password). Jamas en logs.
-		setFbIngest(
+		// T-078 Fase 3: con ingesta en memoria se re-fija el
+		// forward en caliente (PATCH :9997, sin reinicio);
+		// respeta cooldown F-097 sin reintentos.
+		const QString ingest =
 			o.value(QStringLiteral("secure_stream_url"))
-				.toString());
+				.toString();
+		setFbIngest(ingest);
+		if (!ingest.isEmpty() && relay_)
+			relay_->refireFromIngest(ingest);
 		// Estado real vía lectura Meta: si la respuesta trae status
 		// se usa; si no, NO se supone UNPUBLISHED: lectura
 		// encadenada (una vez, sin polling) que deja el indicador
@@ -6017,6 +6267,10 @@ void MetadataDock::onReply(QNetworkReply *reply)
 				// VOD hasta la lectura encadenada (que
 				// confirma el estado real sin inventarlo).
 				setFbState(QStringLiteral("VOD"));
+				// T-078 Fase 3: la senal se retira; limpieza
+				// del forward ([]) sin cooldown.
+				if (relay_)
+					relay_->clearForward();
 				fbQuietStatus_ = true;
 				startFbStatusIndependent(liveId);
 			}
@@ -6041,6 +6295,10 @@ void MetadataDock::onReply(QNetworkReply *reply)
 			}
 			// PoC ingestión: el objeto murió, la URL muere con él.
 			clearFbIngest();
+			// T-078 Fase 3: sin LiveVideo no hay forward;
+			// limpieza ([]) sin cooldown.
+			if (relay_)
+				relay_->clearForward();
 			// El objeto ya no existe: su verificacion tampoco.
 			clearFbVerify();
 			setFbState(QString());

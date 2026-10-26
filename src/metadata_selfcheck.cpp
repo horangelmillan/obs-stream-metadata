@@ -4,6 +4,7 @@
 // No network. Test-only fake values, never real credentials.
 // Usage: metadata-selfcheck.exe -> exit 0.
 #include "metadata.h"
+#include "relay.h"
 #include "secure_store.h"
 
 #include <QCoreApplication>
@@ -1573,6 +1574,197 @@ int main(int argc, char **argv)
 			      r.reason ==
 				      QStringLiteral("privacy-unverified"),
 		      "fbstatus-acceptance-no-audience");
+	}
+
+	// T-078 Fase 2 (logica): relay local MediaMTX (ADR-016). Puro,
+	// sin red: formato forward F-096, cooldown F-097, VOD F-098,
+	// binario ausente, puertos ocupados. Valores falsos, jamas
+	// secretos ni ingestas reales.
+	CHECK(relay::fixedDestination() ==
+		      QStringLiteral("rtmp://127.0.0.1:1935/live"),
+	      "relay-fixed-dest");
+	CHECK(relay::rtmpPort() == 1935 && relay::controlPort() == 9997,
+	      "relay-ports");
+	CHECK(relay::pathName() == QStringLiteral("live") &&
+		      relay::controlPatchPath() ==
+			      QStringLiteral(
+				      "/v3/config/paths/patch/live") &&
+		      relay::controlBase() ==
+			      QStringLiteral("http://127.0.0.1:9997"),
+	      "relay-control-api");
+	CHECK(relay::binaryCandidates().size() == 2 &&
+		      relay::binaryCandidates().contains(
+			      QStringLiteral("mediamtx.exe")) &&
+		      relay::binaryCandidates().contains(
+			      QStringLiteral("mediamtx")),
+	      "relay-binary-names");
+	{
+		// F-096: base + '#' + clave, jamas URL integra.
+		const QString dest = relay::forwardDestFromIngest(
+			QStringLiteral(
+				"rtmps://live-api-s.example.com:443/rtmp/FAKEKEY9z"));
+		CHECK(dest ==
+			      QStringLiteral(
+				      "rtmps://live-api-s.example.com:443/rtmp#FAKEKEY9z"),
+		      "relay-fwd-format");
+		CHECK(dest !=
+			      QStringLiteral(
+				      "rtmps://live-api-s.example.com:443/rtmp/FAKEKEY9z"),
+		      "relay-fwd-never-integra");
+		CHECK(relay::forwardDestLooksValid(dest),
+		      "relay-fwd-valid");
+		const QString withQuery = relay::forwardDestFromIngest(
+			QStringLiteral(
+				"rtmps://h.example.com:443/rtmp/KEY9z?tok=1"));
+		CHECK(withQuery ==
+			      QStringLiteral(
+				      "rtmps://h.example.com:443/rtmp#KEY9z?tok=1"),
+		      "relay-fwd-query");
+		CHECK(relay::forwardDestFromIngest(QString()).isEmpty() &&
+			      relay::forwardDestFromIngest(
+				      QStringLiteral("not-a-url"))
+				      .isEmpty() &&
+			      relay::forwardDestFromIngest(
+				      QStringLiteral("rtmps://h.only/"))
+				      .isEmpty(),
+		      "relay-fwd-reject");
+		CHECK(!relay::forwardDestLooksValid(
+			      QStringLiteral(
+				      "rtmps://h.example.com:443/rtmp/KEY9z")) &&
+			      !relay::forwardDestLooksValid(QString()),
+		      "relay-fwd-invalid");
+		const QString body =
+			relay::forwardPatchBody(dest);
+		CHECK(body.contains(QStringLiteral("\"forward\"")) &&
+			      body.contains(dest),
+		      "relay-fwd-body");
+		const QString clear = relay::forwardPatchBody(QString());
+		CHECK(clear.contains(QStringLiteral("\"forward\"")) &&
+			      clear.contains(QStringLiteral("[]")),
+		      "relay-fwd-clear");
+	}
+	{
+		// F-097: cooldown ~3 min, sin reintentos agresivos.
+		CHECK(relay::cooldownMs() == 180000LL,
+		      "relay-cooldown-ms");
+		CHECK(relay::canRefire(0, 1000000LL),
+		      "relay-cooldown-never");
+		CHECK(!relay::canRefire(1000000LL, 1000000LL),
+		      "relay-cooldown-blocks");
+		CHECK(relay::canRefire(1000000LL - 180000LL,
+				       1000000LL),
+		      "relay-cooldown-elapsed");
+		CHECK(relay::cooldownRemainingMs(1000000LL,
+						 1000000LL) == 180000LL &&
+			      relay::cooldownRemainingMs(
+				      1000000LL - 180000LL, 1000000LL) == 0,
+		      "relay-cooldown-remaining");
+	}
+	{
+		// Mensajes honestos: no vacios, sin secretos/URLs sensibles,
+		// con destino fijo del operador donde aplica.
+		const QString msgs[] = {
+			relay::vodNoticeMessage(),
+			relay::binaryMissingMessage(),
+			relay::portBusyMessage(1935),
+			relay::portBusyMessage(9997),
+			relay::operatorFixedMessage(),
+			relay::cooldownMessage(180000LL),
+			relay::forwardErrorMessage(500),
+			relay::forwardErrorMessage(429),
+		};
+		for (const QString &m : msgs) {
+			if (m.isEmpty() ||
+			    m.contains(
+				    QStringLiteral("secure_stream_url")) ||
+			    m.contains(QStringLiteral("Bearer")) ||
+			    m.contains(QStringLiteral("token")) ||
+			    m.contains(QStringLiteral("secret")) ||
+			    m.contains(QStringLiteral("client_id"))) {
+				std::printf("FAIL relay-msg-safe\n");
+				return 1;
+			}
+		}
+		std::printf("PASS relay-msg-safe\n");
+		CHECK(relay::binaryMissingMessage().contains(
+			      QStringLiteral("mediamtx")),
+		      "relay-msg-binary");
+		CHECK(relay::portBusyMessage(1935).contains(
+			      QStringLiteral("1935")) &&
+			      relay::portBusyMessage(9997).contains(
+				      QStringLiteral("9997")),
+		      "relay-msg-ports");
+		CHECK(relay::operatorFixedMessage().contains(
+			      QStringLiteral("127.0.0.1:1935/live")),
+		      "relay-msg-fixed");
+		CHECK(relay::vodNoticeMessage().contains(
+			      QStringLiteral("VOD")),
+		      "relay-msg-vod");
+		CHECK(relay::cooldownMessage(180000LL).contains(
+			      QStringLiteral("3 min")),
+		      "relay-msg-cooldown");
+		// T-078 Fase 3 (cableado): startErrorMessage honesto (sin
+		// secretos/URLs sensibles) + estados del indicador puros.
+		CHECK(!relay::startErrorMessage().isEmpty() &&
+			      !relay::startErrorMessage().contains(
+				      QStringLiteral("secure_stream_url")) &&
+			      !relay::startErrorMessage().contains(
+				      QStringLiteral("Bearer")) &&
+			      !relay::startErrorMessage().contains(
+				      QStringLiteral("token")) &&
+			      !relay::startErrorMessage().contains(
+				      QStringLiteral("secret")),
+		      "relay-msg-starterr-safe");
+		CHECK(relay::startErrorMessage().contains(
+			      QStringLiteral("127.0.0.1:1935/live")),
+		      "relay-msg-starterr-fixed");
+		// Nombres de estado: no vacios, distintos, sin secretos.
+		const char *names[] = {
+			relay::stateName(relay::State::Stopped),
+			relay::stateName(relay::State::Starting),
+			relay::stateName(relay::State::Running),
+			relay::stateName(relay::State::ForwardOk),
+			relay::stateName(relay::State::ForwardFailed),
+			relay::stateName(relay::State::BinaryMissing),
+			relay::stateName(relay::State::PortBusy),
+		};
+		{
+			bool distinct = true;
+			for (int i = 0; i < 7 && distinct; ++i) {
+				if (!names[i] || !names[i][0])
+					distinct = false;
+				for (int j = i + 1;
+				     j < 7 && distinct; ++j) {
+					if (QString::fromLatin1(names[i]) ==
+					    QString::fromLatin1(names[j]))
+						distinct = false;
+				}
+			}
+			CHECK(distinct, "relay-state-names");
+		}
+		// Proceso propio en pie: Starting/Running/Forward*.
+		CHECK(relay::stateIsRunning(relay::State::Starting) &&
+			      relay::stateIsRunning(relay::State::Running) &&
+			      relay::stateIsRunning(relay::State::ForwardOk) &&
+			      relay::stateIsRunning(
+				      relay::State::ForwardFailed) &&
+			      !relay::stateIsRunning(
+				      relay::State::Stopped) &&
+			      !relay::stateIsRunning(
+				      relay::State::BinaryMissing) &&
+			      !relay::stateIsRunning(relay::State::PortBusy),
+		      "relay-state-running");
+		// Error que exige accion: BinaryMissing/PortBusy/Failed.
+		CHECK(relay::stateIsError(
+			      relay::State::BinaryMissing) &&
+			      relay::stateIsError(relay::State::PortBusy) &&
+			      relay::stateIsError(
+				      relay::State::ForwardFailed) &&
+			      !relay::stateIsError(relay::State::Stopped) &&
+			      !relay::stateIsError(relay::State::Starting) &&
+			      !relay::stateIsError(relay::State::Running) &&
+			      !relay::stateIsError(relay::State::ForwardOk),
+		      "relay-state-error");
 	}
 
 	std::printf("SELFCHECK OK\n");
