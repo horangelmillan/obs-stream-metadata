@@ -9,6 +9,32 @@
 > `#define`; conteo estático [C], sin ejecutar aquí). Últimos resultados documentados [D]: backend 250 OK
 > (T-076) + SELFCHECK OK (T-073).
 
+## Port lab→plugin Fase D (2026-10-26, sin commit; T-077/T-078 sin cambio de estado)
+
+```text
+FUENTE [D, delegada de la sesión implementadora; no re-ejecutada en
+  esta sesión documental]: backend `334 passed / 11 skipped`
+  (skips PG-sin-servidor por diseño) + selfcheck `287/0 DLL OK` +
+  `git diff --check` limpio + secret-scan limpio + 5 ficheros `src/`
+  modificados sin commit (`src/metadata.cpp`, `src/metadata.h`,
+  `src/metadata_dock.cpp`, `src/metadata_dock.h`,
+  `src/metadata_selfcheck.cpp`) [C: `git status --porcelain` en esta
+  sesión lista exactamente esos 5 modificados; sin commit/push].
+ALCANCE PORTADO [D]: Status sin privacy en ambos modos + fallback;
+  persistent opt-OFF en ambos modos + mapeo
+  `persistent-key-not-allowed`; mensajes F-097 (cooldown ~3 min) y
+  F-098 (auto-VOD) en el dock.
+NO PORTADO [D]: formato lab base+clave (`#`), relay/scripts lab
+  (MediaMTX, forward, re-fijado en caliente) — quedan en
+  `docs/MEDIAMTX-RELAY-FLOW.md` + `lab/**`, fuera del plugin.
+ESTADOS [C contra BACKLOG]: T-077 y T-078 siguen en investigación,
+  sin cambio de estado en esta tarea (canónico BACKLOG; esta entrada
+  no cambia estados).
+PENDIENTE [P]: E2E del operador del port + resolución del conflicto
+  de alcance AGENTS.md §§23/51 antes de implementar producto.
+FINAL: Fase D documentada; E2E + alcance pendientes.
+```
+
 ## E2E operador single-PC Managed (2026-10-26, autorización [D usuario: confirmó en prod los 3 puntos con "OK OK OK"])
 
 ```text

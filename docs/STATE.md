@@ -94,6 +94,7 @@
   §§23/51 antes de implementar producto. BACKLOG canónico: T-077 sigue
   en investigación, sin cambio de estado. Detalle en VALIDATION.md.
 - **Relay local MediaMTX [D E2E lab 2026-10-26, T-078 en investigación]:** propuesta validada en lab (`docs/MEDIAMTX-RELAY-FLOW.md` como guía; T-078): MediaMTX v1.21.3 local con forward RTMPS en caliente (PATCH sin reinicio, formato base+`#`+clave) → 2 emisiones LIVE+DIRECTO con movimiento sin tocar Aitum entre ellas; responde a F-092 (sin URL única de ingesta) con URL fija local + re-fijado del forward. Nuevo punto de partida arquitectónico pendiente de port al plugin y de resolución del conflicto de alcance §§23/51. Pendientes [P]: métricas latencia/CPU/recovery (F-099), audiencia en producción (sigue "Solo yo" pese a EVERYONE 200, como F-093), rate-limit a re-handshakes (~3 min, F-097). Detalle en VALIDATION.md T-078 y F-096–F-099. BACKLOG canónico: T-078 sigue en investigación (aceptación parcialmente cubierta), T-077 intacta.
+- **Port lab→plugin Fase D (2026-10-26) [D delegada + C parcial]:** Status sin privacy en ambos modos + fallback, persistent opt-OFF en ambos modos + mapeo `persistent-key-not-allowed`, mensajes F-097 (cooldown ~3 min) y F-098 (auto-VOD) en el dock; NO portado el formato lab base+clave (`#`) ni relay/scripts lab (quedan en `docs/MEDIAMTX-RELAY-FLOW.md` + `lab/**`). Evidencia delegada [D, no re-ejecutada aquí]: backend 334 passed/11 skipped + selfcheck 287/0 DLL OK + diff-check limpio + secret-scan limpio. [C en esta sesión: `git status --porcelain` lista 5 ficheros `src/` modificados sin commit (`metadata.cpp/.h`, `metadata_dock.cpp/.h`, `metadata_selfcheck.cpp`); sin commit/push]. T-077/T-078 siguen en investigación sin cambio de estado (canónico BACKLOG). Pendientes [P]: E2E operador del port + resolución del conflicto de alcance §§23/51. Detalle en VALIDATION.md.
 - **Reforma harness en curso [C, 2026-10-25, Fase 1 documental]:** apertura
   mínima-privilegio + validación por stack + reparto steward/BACKLOG y
   ejecutor lab (F-088). Cambios solo documentales/permisos, sin código:
@@ -144,7 +145,13 @@
 - **Restricción vigente:** `poc/` es evidencia histórica + regresión
   (no tocar salvo corrección justificada); el producto vive en `src/`
   + `backend/`.
-- **Última actualización:** 2026-10-26 — E2E operador single-PC
+- **Última actualización:** 2026-10-26 — Port lab→plugin Fase D
+  documentado (status sin privacy + fallback, persistent opt-OFF +
+  mapeo, mensajes F-097/F-098; sin formato base#clave ni relay; T-077/
+  T-078 sin cambio de estado; E2E operador + alcance §§23/51
+  pendientes [P]); 5 ficheros `src/` modificados sin commit [C];
+  sin commit/push en esta tarea documental.
+  Anterior (2026-10-26): E2E operador single-PC
   Managed PASS (sesión persistente → directo al panel + logout a
   entrar en gris neutro + desconexión total de las 4 plataformas;
   "OK OK OK" en prod [D]; T-084 multi-PC + OAuth real con Apply

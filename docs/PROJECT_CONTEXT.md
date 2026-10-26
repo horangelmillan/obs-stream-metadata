@@ -116,9 +116,12 @@ STALE/SUPERSEDED: T-042, dupe-T-058.
 OPTIONAL/meta: T-002 (en-progreso, informe; no bloquea).
 FUTURE: T-059 (licencias/comercial), T-066 (firma).
 PENDING REAL: ninguno funcional.
-PENDING OPERADOR [P, intención comunicada por el usuario 2026-10-24]:
+PENDING OPERADOR [P, intención comunicada por el usuario 2026-10-26]:
 pruebas de Facebook con usuarios reales y streams reales durante octubre
-de 2026. Sin afirmar Live/App Review/requisitos (sin evidencia);
+de 2026 (incl. E2E del port lab→plugin Fase D + resolución del conflicto
+de alcance AGENTS.md §§23/51 antes de implementar producto [P]; T-077/T-078
+siguen en investigación, BACKLOG canónico; detalle en VALIDATION.md
+Fase D y STATE). Sin afirmar Live/App Review/requisitos (sin evidencia);
 separado del despliegue del backend en Cloud Run; requiere confirmación
 y alcance explícito antes de ejecutar nada.
 NEXT REQUIRED TECHNICAL TASK: NONE.
