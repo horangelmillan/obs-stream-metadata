@@ -80,3 +80,6 @@ logs/
 
 # lab
 node_modules/
+# lab throwaway MediaMTX (binarios/zip reproducibles vía fetch.py + checksum)
+lab/mediamtx-lab/bin/
+lab/mediamtx-lab/downloads/
