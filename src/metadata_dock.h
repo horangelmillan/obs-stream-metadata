@@ -251,6 +251,23 @@ private slots:
 	// fbAutoActive_ se fija DENTRO, post-GET fresco (en
 	// fbAutoHandleRead/fbAutoCreateFresh), jamas desde snapshot.
 	void fbAutoStartFromConnected(meta::Platform p);
+	// Diseno 2026-10-26 [D]: al abrir SOLO se valida (una lectura de
+	// estado si hay ID persistido + relay en silencio, local sin
+	// handshake). Jamas create/refire/countdown/triangulo propio.
+	// Llamadores: constructor, finishManagedConnected y rama
+	// "connected" de silentRevalidateManaged.
+	void fbValidateAtStartup(meta::Platform p);
+	// Diseno 2026-10-26 [D]: creacion bajo demanda ante la primera
+	// intencion real (Apply con FB, senal con emisor sin video, Salir
+	// al aire sin video). hasVideo = hay ID vigente; titleValid =
+	// titulo 1-254 en widgets (meta::fbCreateTitleValid); create =
+	// crea con ese titulo/desc o pide "escribe el título y pulsa
+	// Aplicar" (sin untitulado, sin espera). Sin red aqui: la red la
+	// hacen los caminos create existentes.
+	bool fbHasVideoForIntent() const;
+	bool fbTitleValidForCreate(QString &titleOut,
+				  QString &descOut) const;
+	void fbCreateForIntent();
 	void fbAutoCreateFresh(const QString &prevStatus,
 			       const QString &prevTitle,
 			       const QString &prevDesc);
@@ -582,6 +599,23 @@ private:
 	// vigente sin re-fijar; sin countdown ni triangulo: no hay espera,
 	// no hay nada que contar). Lo dispara solo la intencion real.
 	bool fbForwardPending_ = false;
+	// Diseno 2026-10-26 [D]: Apply FB con create bajo demanda en vuelo
+	// (la entrada vuelve a la cola; el reply del create la completa) y
+	// Salir-al-aire manual sin video (crea primero y sigue el flujo
+	// tras verificar). Un solo uso; se consumen en sus replies.
+	bool fbApplyCreatePending_ = false;
+	bool fbGoLivePendingAfterCreate_ = false;
+	// Diseno 2026-10-26 [D]: create bajo demanda en vuelo (POST enviado,
+	// reply pendiente). Evita duplicados ante la escucha cada 3 s o
+	// doble pulsacion: los ganchos se suman al pendiente en vez de
+	// crear otro. Se baja en todos los replies del create.
+	bool fbIntentCreateInFlight_ = false;
+	// Diseno 2026-10-26 [D]: la escucha (respaldo cada 3 s) sirve UN
+	// solo intento por episodio sin video (evita reintentar un fallo
+	// persistente sin parar). Se rearma al aparecer un video
+	// (setFbLiveId), al desconectar y al cambiar de modo. Apply/
+	// GoLive/Crear manuales reintentan a mano, sin esta guarda.
+	bool fbSignalNoVideoServed_ = false;
 	meta::FbVerifyResult fbVerify_ = {meta::FbVerify::Blocked,
 					  QStringLiteral("not-verified")};
 	QTcpServer *callbackServer_ = nullptr;

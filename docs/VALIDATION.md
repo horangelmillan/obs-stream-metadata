@@ -12,6 +12,37 @@
 > automático (autogo-* 13/13 en verde, delegado de la sesión
 > implementadora, detalle abajo).
 
+## Cambio "crear solo ante intención" (2026-10-26 — IMPLEMENTADO SIN COMMIT; T-078 sin cambio de estado)
+
+```text
+FUENTE [D delegada de la sesión implementadora, no re-ejecutada
+  aquí; comunicada en la tarea que autoriza, 2026-10-26]:
+  al abrir SOLO se valida (relay local + una lectura si hay ID);
+  jamás create/refire/countdown/triángulo propio; creación solo
+  ante primera intención en cualquier orden (Aplicar con título
+  válido / señal con título válido / Salir al aire); sin título
+  válido no hay creación ni espera; countdown solo tras acción
+  del usuario. Traza del build viejo documentada [D]: create+
+  refire al abrir → cooldown ~2:59 sin hacer nada.
+  Validación — build OK, selfcheck 409/0, diff-check y scan
+  limpios.
+BASE [C, esta subtarea documental]: rama
+  `feat/facebook-status-port-t077-t078` (HEAD `540dc95`);
+  `src/metadata.cpp/.h`, `src/metadata_dock.cpp/.h` y
+  `src/metadata_selfcheck.cpp` modificados sin commit en el
+  checkout (trabajo de la sesión implementadora); aquí solo
+  edición de docs (`docs/VALIDATION.md`, `docs/STATE.md`,
+  `docs/PROJECT_CONTEXT.md`) + `git diff --check`;
+  sin commit/push, sin secretos, sin `staging/`/`dev.env`. No
+  reescribe historia: las entradas anteriores quedan intactas abajo.
+ESTADO [C contra BACKLOG]: T-078 SIGUE en investigación, sin cambio
+  de estado en esta subtarea (canónico BACKLOG; esta entrada no
+  cambia estados).
+PENDIENTES [P]: E2E operador + instalador con el cambio.
+FINAL: cambio "crear solo ante intención" documentado; E2E de
+  aceptación pendiente.
+```
+
 ## Go live automático (2026-10-26 — IMPLEMENTADO SIN COMMIT; T-078 sin cambio de estado)
 
 ```text
