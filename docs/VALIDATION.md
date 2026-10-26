@@ -10,6 +10,42 @@
 > Últimos resultados documentados [D]: build OK + selfcheck 367/0
 > (fix trío, delegado de la sesión implementadora).
 
+## Sesión Managed larga — 15 días deslizantes + tope 30 días (2026-10-26 — IMPLEMENTADO SIN COMMIT; sin cambio de estados)
+
+```text
+FUENTE [D delegada de la sesión implementadora, no re-ejecutada
+  aquí; comunicada en la tarea que autoriza, 2026-10-26]:
+  Backend — sesión Managed 15 días deslizantes con actividad +
+  tope absoluto 30 días desde el login (sustituye TTL fijo 30 min):
+  7 tests nuevos en `backend/tests/test_users_session_sliding.py`,
+  suite 341 passed/11 skipped verde. Diagnóstico: las sesiones
+  viven en PG, el deploy no mató nada; la causa del cierre
+  prematuro era el TTL fijo de 30 min.
+  Plugin — margen de renovación 5 min, `loginAt` persistido en
+  DPAPI, motivo del re-login visible en lenguaje de persona en el
+  dock + `obs_log` con códigos (idle/cap/mismatch/revoked/unknown),
+  selfchecks `usess-*` 34.
+  Sin commit en la sesión implementadora.
+BASE [C, esta subtarea documental]: solo edición de docs
+  (`docs/VALIDATION.md`, `docs/STATE.md`, `docs/PROJECT_CONTEXT.md`)
+  + `git diff --check`; sin commit/push, sin secretos, sin
+  `staging/`/`dev.env`. No reescribe historia: las entradas
+  anteriores quedan intactas abajo. [C: `git status --porcelain`
+  inicial lista `backend/` + `src/` modificados y
+  `backend/tests/test_users_session_sliding.py` sin seguimiento;
+  `git diff --check` limpio salvo avisos LF→CRLF].
+CONTEO PARCIAL [C, estático sin ejecutar]: 7 `def test_*` en
+  `backend/tests/test_users_session_sliding.py`; 28 ocurrencias de
+  `usess` en `src/metadata_selfcheck.cpp` (frente a 34 selfchecks
+  `usess-*` delegados [D]; causa de la diferencia no conciliada
+  aquí [P]).
+ESTADO [C contra BACKLOG]: SIN CAMBIO DE ESTADOS en esta subtarea
+  (canónico BACKLOG; esta entrada no cambia estados).
+PENDIENTES [P]: deploy del backend para efecto real + instalador
+  con el plugin actualizado + E2E operador.
+FINAL: sesión larga documentada; efecto real pendiente de deploy.
+```
+
 ## Fix trío señal/listo/contador (2026-10-26 — IMPLEMENTADO SIN COMMIT; T-078 sin cambio de estado)
 
 ```text

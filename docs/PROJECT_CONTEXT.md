@@ -196,7 +196,15 @@ métricas F-099, audiencia F-093. Fases v3 completadas (2026-10-26) [D delegada,
   lastOk<=0 + log diagnóstico con conteos; build OK, selfcheck 367/0,
   diff-check y scan limpios; T-078 sigue en investigación sin cambio
   de estado; pendientes [P]: E2E operador, instalador. Detalle en
-  VALIDATION.md.
+   VALIDATION.md. Sesión Managed larga (2026-10-26) [D delegada +
+   C parcial, sin cambio de estados; detalle en VALIDATION.md]:
+   backend 15 días deslizantes + tope 30 días (7 tests nuevos,
+   suite 341/11 verde; diagnóstico: sesiones en PG, causa TTL
+   30 min fijos) + plugin (margen 5 min, loginAt DPAPI, motivo
+   en persona + obs_log con códigos, usess-* 34); [C: 7
+   `def test_*` + 28 ocurrencias `usess` (28 vs 34 sin
+   conciliar [P])]. Pendientes [P]: deploy backend para efecto
+   real, instalador, E2E operador.
 NEXT REQUIRED TECHNICAL TASK: NONE.
 
 ## 14. Known Findings / Limitations
