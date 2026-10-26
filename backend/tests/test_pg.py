@@ -85,7 +85,7 @@ def fresh_db(test):
     pool = PgPool(url, max_size=3)
     test.addCleanup(pool.close)
     applied = run_migrations(pool, MIGRATIONS)
-    test.assertEqual(applied, ["001", "002"])
+    test.assertEqual(applied, ["001", "002", "003"])
     test.assertEqual(run_migrations(pool, MIGRATIONS), [])
     return url, pool
 
@@ -133,12 +133,14 @@ class DatabaseUrlTest(unittest.TestCase):
 class MigrationsTest(unittest.TestCase):
     def test_discover_ordered(self):
         found = discover_migrations(MIGRATIONS)
-        self.assertEqual([version for version, _ in found], ["001", "002"])
+        self.assertEqual([version for version, _ in found],
+                         ["001", "002", "003"])
 
     def test_schema_created_from_scratch(self):
         _, pool = fresh_db(self)
         with pool as conn:
-            self.assertEqual(applied_versions(conn), {"001", "002"})
+            self.assertEqual(applied_versions(conn),
+                             {"001", "002", "003"})
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT tablename FROM pg_tables "

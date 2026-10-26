@@ -11,7 +11,7 @@ from backend.oauth import ConnectService
 from backend.stores import (InMemoryConnectionStore, InMemoryOAuthTransactionStore,
                             InMemoryTokenStore)
 from backend.tests.test_adapters import FakeSecrets
-from backend.tests.test_http import _get, _post
+from backend.tests.test_http import _dual_headers, _get, _post
 
 
 def make_service(transport, clock=None):
@@ -256,7 +256,9 @@ class HttpMetadataTest(unittest.TestCase):
 
     def _connected_token(self):
         tok, _ = self._session()
-        h = {"Authorization": "Bearer " + tok}
+        # Fase 3: las rutas Managed exigen doble sesión (instalación +
+        # usuario); el signup+login adopta la instalación llamante.
+        h = _dual_headers(self.base, tok)
         s, _, body = _post(self.base, "/connect/youtube", {}, headers=h)
         self.assertEqual(s, 200)
         # El state viaja en la authorization URL (superficie pública).

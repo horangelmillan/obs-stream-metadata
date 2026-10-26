@@ -18,6 +18,7 @@ class ErrorCode(str, Enum):
     PROVIDER_REJECTED = "provider_rejected"      # 502: el proveedor rechazó (400/403/404/409 origen)
     PROVIDER_RATE_LIMITED = "provider_rate_limited"  # 429: sin reintento agresivo
     RATE_LIMITED = "rate_limited"                    # 429: backend propio
+    USER_EXISTS = "user_exists"                        # 409: signup duplicado (Fase 2)
     PROVIDER_UNAVAILABLE = "provider_unavailable"    # 502: 5xx origen / red
     INTERNAL = "internal_error"                  # 500: fallo propio, sin detalle
 
@@ -30,6 +31,7 @@ _HTTP_STATUS: dict[ErrorCode, int] = {
     ErrorCode.PROVIDER_REJECTED: 502,
     ErrorCode.PROVIDER_RATE_LIMITED: 429,
     ErrorCode.RATE_LIMITED: 429,
+    ErrorCode.USER_EXISTS: 409,
     ErrorCode.PROVIDER_UNAVAILABLE: 502,
     ErrorCode.INTERNAL: 500,
 }
@@ -43,6 +45,7 @@ _SAFE_MESSAGE: dict[ErrorCode, str] = {
     ErrorCode.PROVIDER_REJECTED: "The provider rejected the request.",
     ErrorCode.PROVIDER_RATE_LIMITED: "Provider rate limit reached. Retry later.",
     ErrorCode.RATE_LIMITED: "Rate limit reached. Retry later.",
+    ErrorCode.USER_EXISTS: "Username already taken.",
     ErrorCode.PROVIDER_UNAVAILABLE: "Provider temporarily unavailable.",
     ErrorCode.INTERNAL: "Internal error.",
 }

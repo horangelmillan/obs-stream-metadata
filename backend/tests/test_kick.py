@@ -362,7 +362,10 @@ class HttpMetadataKickTest(unittest.TestCase):
                             "timestamp": ts, "nonce": nonce,
                             "signature": sig})
         tok = _json.loads(body)["session_token"]
-        h = {"Authorization": "Bearer " + tok}
+        # Fase 3: las rutas Managed exigen doble sesión (instalación +
+        # usuario); el signup+login adopta la instalación llamante.
+        from backend.tests.test_http import _dual_headers
+        h = _dual_headers(self.base, tok)
         s, _, body = _post(self.base, "/connect/kick", {}, headers=h)
         self.assertEqual(s, 200)
         query = _up.urlparse(_json.loads(body)["authorization_url"]).query

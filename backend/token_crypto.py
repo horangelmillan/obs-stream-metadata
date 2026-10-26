@@ -125,3 +125,19 @@ class EncryptedTokenStore(TokenStore):
 
     def delete(self, account: Account) -> None:
         self._inner.delete(account)
+
+    def set_owner(self, provider: str, provider_user_id: str,
+                  owner_user_id: str) -> bool:
+        """Adopción Fase 1 (spec §3): el dueño es metadato no sensible;
+        delega al inner (dueño del SQL)."""
+        delegate = getattr(self._inner, "set_owner", None)
+        if delegate is None:
+            return False
+        return delegate(provider, provider_user_id, owner_user_id)
+
+    def owner_of(self, provider: str,
+                 provider_user_id: str) -> str | None:
+        delegate = getattr(self._inner, "owner_of", None)
+        if delegate is None:
+            return None
+        return delegate(provider, provider_user_id)

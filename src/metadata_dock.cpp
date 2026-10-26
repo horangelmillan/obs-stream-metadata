@@ -301,6 +301,38 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 	managedNote_->setVisible(false);
 	top->addWidget(managedNote_);
 
+	// Fase 4: cuenta de usuario Managed (v1: username+password, sin
+	// email). Solo memoria (jamás Store/DPAPI); visible solo en
+	// Managed (refreshModeUi). Sin login, las acciones Managed no
+	// hacen red: piden login con el mensaje exacto de
+	// meta::managedLoginRequiredMessage().
+	userNameEdit_ = new QLineEdit(this);
+	userNameEdit_->setPlaceholderText(tr("Managed username"));
+	userPassEdit_ = new QLineEdit(this);
+	userPassEdit_->setPlaceholderText(tr("Managed password"));
+	userPassEdit_->setEchoMode(QLineEdit::Password);
+	userLoginBtn_ = new QPushButton(tr("Log in (Managed)"), this);
+	connect(userLoginBtn_, &QPushButton::clicked, this,
+		&MetadataDock::onUserLogin);
+	userSignupBtn_ = new QPushButton(tr("Sign up (Managed)"), this);
+	connect(userSignupBtn_, &QPushButton::clicked, this,
+		&MetadataDock::onUserSignup);
+	userLogoutBtn_ = new QPushButton(tr("Log out (Managed)"), this);
+	connect(userLogoutBtn_, &QPushButton::clicked, this,
+		&MetadataDock::onUserLogout);
+	userStatus_ = new QLabel(tr("Not logged in"), this);
+	userStatus_->setWordWrap(true);
+	userNotice_ =
+		new QLabel(meta::userNoRecoveryNotice(), this);
+	userNotice_->setWordWrap(true);
+	top->addWidget(userNameEdit_);
+	top->addWidget(userPassEdit_);
+	top->addWidget(userLoginBtn_);
+	top->addWidget(userSignupBtn_);
+	top->addWidget(userLogoutBtn_);
+	top->addWidget(userStatus_);
+	top->addWidget(userNotice_);
+
 	QLabel *titleLabel = new QLabel(tr("Title"), this);
 	titleEdit_ = new QLineEdit(this);
 	titleLabel->setBuddy(titleEdit_);
@@ -493,6 +525,21 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 		&MetadataDock::onEraseManagedData);
 	top->addWidget(eraseButton_);
 
+	// Fase 5b: borrado de CUENTA Managed (/users/erase en cascada).
+	// Activo: exige login (gate Fase 4, sin red sin sesión), usa auth
+	// doble (apiPostUser) y limpia sesión/snapshots locales tras el 200.
+	// Operación distinta de POST /privacy/erase (F-C2, por instalación).
+	eraseAccountButton_ =
+		new QPushButton(tr("Borrar cuenta (Managed)"), this);
+	eraseAccountButton_->setToolTip(
+		tr("Deletes your Managed user account with ALL its "
+		   "installations from the backend (/users/erase). Distinct "
+		   "from data erasure (F-C2). Independent accounts are "
+		   "untouched."));
+	connect(eraseAccountButton_, &QPushButton::clicked, this,
+		&MetadataDock::onEraseAccount);
+	top->addWidget(eraseAccountButton_);
+
 	// Per-platform results live inside their card detail: no global
 	// RESULTS section. setStatus()/setResult() call sites unchanged.
 	twResult_ = new QLabel(QStringLiteral("Twitch —"), twDetail_);
@@ -603,6 +650,26 @@ void MetadataDock::refreshModeUi()
 	managedNote_->setVisible(managed);
 	if (eraseButton_)
 		eraseButton_->setVisible(managed);
+	if (eraseAccountButton_)
+		eraseAccountButton_->setVisible(managed);
+	// Fase 4: formulario de cuenta (solo Managed; Independent no lo
+	// ve ni lo necesita, ADR-008/012).
+	const bool showLogin = managed;
+	if (userNameEdit_)
+		userNameEdit_->setVisible(showLogin);
+	if (userPassEdit_)
+		userPassEdit_->setVisible(showLogin);
+	if (userLoginBtn_)
+		userLoginBtn_->setVisible(showLogin);
+	if (userSignupBtn_)
+		userSignupBtn_->setVisible(showLogin);
+	if (userLogoutBtn_)
+		userLogoutBtn_->setVisible(showLogin);
+	if (userStatus_)
+		userStatus_->setVisible(showLogin);
+	if (userNotice_)
+		userNotice_->setVisible(showLogin);
+	refreshManagedLoginUi();
 	repaintModeStatuses();
 	updateAllCardStyles();
 	refreshContentVisibility();
@@ -832,6 +899,7 @@ void MetadataDock::updateCardStyle(meta::Platform p)
 	const bool failed =
 		st.startsWith(tr("Error")) ||
 		st == tr("Needs reconnection.") ||
+		st == meta::managedLoginRequiredMessage() ||
 		rs.contains(QStringLiteral(" ✗ "));
 	const char *brand = "#8a8a8a";
 	const char *tint = "transparent";
@@ -1013,12 +1081,16 @@ void MetadataDock::initManaged()
 	connect(managedPollTimer_, &QTimer::timeout, this,
 		&MetadataDock::onManagedPollTimeout);
 	silentRevalidateManaged();
+	refreshManagedLoginUi(); // formulario al frente (login o gate)
 }
 
-// T-075: silent startup revalidation. No browser, no polling loop:
-// one ensureSession + one status per platform with a snapshot. Keeps
-// Connected on success, marks Needs reconnection otherwise. Never
-// wipes snapshots here; Connect/Apply decide.
+// T-075: silent startup revalidation (no browser, single pass). Fase 4:
+// la sesión de usuario vive solo en memoria: al reiniciar OBS se
+// revalida vía GET /users/me ([P] fijado: revalidar silencioso y si
+// 401 pedir login). Sin login: pedir login, CERO red. Con login: me()
+// y luego una ensureSession + un status por plataforma con snapshot.
+// Nunca borra snapshots aquí salvo 401 (noteManagedAuthFailure);
+// Connect/Apply deciden.
 void MetadataDock::silentRevalidateManaged()
 {
 	if (!isManaged() || !managedAuth_)
@@ -1030,58 +1102,108 @@ void MetadataDock::silentRevalidateManaged()
 		if (managedAccount(p).connected)
 			any = true;
 	}
-	if (!any)
+	if (!any) {
+		refreshManagedLoginUi();
 		return;
+	}
+	if (!managedAuth_->hasUserSession()) {
+		obs_log(LOG_INFO,
+			"managed silent revalidate skipped: login required");
+		for (meta::Platform p :
+		     {meta::Platform::Twitch, meta::Platform::YouTube,
+		      meta::Platform::Kick, meta::Platform::Facebook}) {
+			if (managedAccount(p).connected)
+				setStatus(p,
+					  meta::managedLoginRequiredMessage());
+		}
+		refreshManagedLoginUi();
+		return;
+	}
 	obs_log(LOG_INFO, "managed silent revalidate started");
-	managedAuth_->ensureSession([this](backend_auth::Result r) {
+	managedAuth_->me([this](backend_auth::Result r,
+			       const backend_auth::Client::UserInfo &) {
 		if (!isManaged())
 			return;
 		if (r != backend_auth::Result::Ok) {
 			obs_log(LOG_WARNING,
-				"managed silent revalidate session failed");
+				"managed silent revalidate user failed");
+			for (meta::Platform p :
+			     {meta::Platform::Twitch,
+			      meta::Platform::YouTube, meta::Platform::Kick,
+			      meta::Platform::Facebook}) {
+				if (managedAccount(p).connected)
+					noteManagedAuthFailure(p);
+				else
+					setStatus(
+						p,
+						meta::managedLoginRequiredMessage());
+			}
+			refreshManagedLoginUi();
 			return;
 		}
-		for (meta::Platform p :
-		     {meta::Platform::Twitch, meta::Platform::YouTube,
-		      meta::Platform::Kick, meta::Platform::Facebook}) {
-			if (!managedAccount(p).connected)
-				continue;
-			managedAuth_->apiGet(
-				QStringLiteral("/connect/%1/status")
-					.arg(providerSlug(p)),
-				[this, p](const backend_auth::Client::ApiReply &rep) {
-					if (!isManaged())
-						return;
-					if (rep.result !=
-					    backend_auth::Result::Ok) {
-						obs_log(LOG_WARNING,
-							"managed silent revalidate status failed: %s",
-							meta::platformName(p));
-						return;
-					}
-					if (rep.body.value(QStringLiteral("status"))
-						    .toString() !=
-					    QStringLiteral("connected")) {
-						setStatus(p,
-							tr("Needs reconnection."));
-						return;
-					}
-					const QJsonObject acc =
-						rep.body.value(QStringLiteral(
+		refreshManagedLoginUi();
+		managedAuth_->ensureSession([this](backend_auth::Result r) {
+			if (!isManaged())
+				return;
+			if (r != backend_auth::Result::Ok) {
+				obs_log(LOG_WARNING,
+					"managed silent revalidate session failed");
+				return;
+			}
+			for (meta::Platform p :
+			     {meta::Platform::Twitch,
+			      meta::Platform::YouTube, meta::Platform::Kick,
+			      meta::Platform::Facebook}) {
+				if (!managedAccount(p).connected)
+					continue;
+				managedAuth_->apiGetUser(
+					QStringLiteral("/connect/%1/status")
+						.arg(providerSlug(p)),
+					[this, p](const backend_auth::Client::
+							  ApiReply &rep) {
+						if (!isManaged())
+							return;
+						if (rep.result !=
+						    backend_auth::Result::Ok) {
+							obs_log(LOG_WARNING,
+								"managed silent revalidate status failed: %s",
+								meta::platformName(
+									p));
+							if (rep.result ==
+							    backend_auth::
+								    Result::
+									    Unauthorized)
+								noteManagedAuthFailure(
+									p);
+							return;
+						}
+						if (rep.body.value(QStringLiteral(
+									"status"))
+							    .toString() !=
+						    QStringLiteral("connected")) {
+							setStatus(
+								p,
+								tr("Needs reconnection."));
+							return;
+						}
+						const QJsonObject acc =
+							rep.body.value(QStringLiteral(
 								"account"))
-							.toObject();
-					ManagedConn &m = managedAccount(p);
-					m.userId = acc.value(QStringLiteral("id"))
-							   .toString();
-					m.display =
-						acc.value(QStringLiteral(
-								"displayName"))
-							.toString();
-					setStatus(p, tr("Connected as %1")
-								     .arg(m.display));
-					saveStore();
-				});
-		}
+								.toObject();
+						ManagedConn &m =
+							managedAccount(p);
+						m.userId = acc.value(QStringLiteral("id"))
+								   .toString();
+						m.display =
+							acc.value(QStringLiteral(
+									"displayName"))
+								.toString();
+						setStatus(p, tr("Connected as %1")
+									     .arg(m.display));
+						saveStore();
+					});
+			}
+		});
 	});
 }
 
@@ -1130,6 +1252,10 @@ void MetadataDock::onConnectManaged(meta::Platform p)
 			  tr("Managed is not available for this platform."));
 		return;
 	}
+	// Fase 4: gate login previo (spec §5): sin user-session, mensaje
+	// exacto y CERO red (sin fallback a Independent).
+	if (!requireManagedLogin(p))
+		return;
 	startConnectBusy(p);
 	managedAuth_->ensureSession([this, p](backend_auth::Result r) {
 		if (!isManaged())
@@ -1155,7 +1281,7 @@ void MetadataDock::onConnectManaged(meta::Platform p)
 		// T-051 reconstruction: if the backend still holds this
 		// installation's connection (e.g. after OBS restart), reuse it
 		// without a new browser flow. Anything else falls through.
-		managedAuth_->apiGet(QStringLiteral("/connect/%1/status").arg(
+		managedAuth_->apiGetUser(QStringLiteral("/connect/%1/status").arg(
 					     providerSlug(p)),
 				     [this, p](const backend_auth::Client::ApiReply &rep) {
 					     if (!isManaged())
@@ -1187,7 +1313,11 @@ void MetadataDock::onConnectManaged(meta::Platform p)
 
 void MetadataDock::startManagedBrowserFlow(meta::Platform p)
 {
-	managedAuth_->apiPost(QStringLiteral("/connect/%1").arg(
+	// El poll posterior también gatea; esto cubre carreras
+	// (logout entre el status y el connect).
+	if (!requireManagedLogin(p))
+		return;
+	managedAuth_->apiPostUser(QStringLiteral("/connect/%1").arg(
 					      providerSlug(p)),
 			      QJsonObject(),
 			      [this, p](const backend_auth::Client::ApiReply &rep) {
@@ -1228,21 +1358,28 @@ void MetadataDock::onManagedPollTimeout()
 		return;
 	}
 	const meta::Platform p = managedPollFor_;
+	// Fase 4: logout durante el poll detiene sin red y pide login.
+	if (!requireManagedLogin(p)) {
+		if (managedPollTimer_)
+			managedPollTimer_->stop();
+		refreshManagedLoginUi();
+		return;
+	}
 	if (--managedPollsLeft_ < 0) {
 		managedPollTimer_->stop();
 		finishManagedError(p, tr("Timed out waiting for authorization."));
 		return;
 	}
-	managedAuth_->apiGet(QStringLiteral("/connect/%1/status").arg(
+	managedAuth_->apiGetUser(QStringLiteral("/connect/%1/status").arg(
 					     providerSlug(p)),
 			     [this, p](const backend_auth::Client::ApiReply &rep) {
 				     if (rep.result != backend_auth::Result::Ok) {
 					     if (rep.result == backend_auth::Result::
 								    Unauthorized) {
 						     managedPollTimer_->stop();
-						     finishManagedError(
-							     p, tr("Session expired. "
-								   "Press Connect again."));
+						     // Auth doble normalizada:
+						     // re-login, no solo Connect.
+						     noteManagedAuthFailure(p);
 					     }
 					     // Other transient failures: keep
 					     // polling until timeout (no loops
@@ -1316,7 +1453,9 @@ QString MetadataDock::managedApiError(meta::Platform p,
 	// safe fields, and only the HTTP code leaves this function.
 	switch (rep.result) {
 	case backend_auth::Result::Unauthorized:
-		return tr("Session expired. Press Connect again.");
+		// Auth doble normalizada (spec §4): sin distinguir
+		// instalación/usuario; la recuperación es re-login.
+		return meta::managedLoginRequiredMessage();
 	case backend_auth::Result::RateLimited:
 		return meta::userMessage(meta::Outcome::RateLimited, p);
 	case backend_auth::Result::ServerError:
@@ -1327,6 +1466,211 @@ QString MetadataDock::managedApiError(meta::Platform p,
 		return meta::userMessage(
 			meta::classifyStatus(rep.http == 0 ? -1 : rep.http), p);
 	}
+}
+
+// --- Fase 4: gate login previo a Managed (spec §5) -----------------------
+// Sin user-session en memoria, TODA acción Managed queda funcionalmente
+// deshabilitada: mensaje exacto reutilizado en las 4 plataformas, cero
+// red y ningún fallback silencioso a Independent.
+
+bool MetadataDock::requireManagedLogin(meta::Platform p)
+{
+	if (!isManaged())
+		return true; // Independent intacto: sin login, sin gate
+	if (managedAuth_ && managedAuth_->hasUserSession())
+		return true;
+	setResult(p, false, meta::managedLoginRequiredMessage());
+	return false;
+}
+
+bool MetadataDock::requireManagedLoginMsg()
+{
+	if (!isManaged())
+		return true;
+	if (managedAuth_ && managedAuth_->hasUserSession())
+		return true;
+	generalMsg_->setText(meta::managedLoginRequiredMessage());
+	return false;
+}
+
+void MetadataDock::noteManagedAuthFailure(meta::Platform p)
+{
+	// 401 Managed normalizado: la conexión local cae (pertenece a la
+	// sesión) y se pide re-login con el mensaje exacto. El snapshot
+	// se borra; Independent intacto (sus records no se tocan).
+	ManagedConn &m = managedAccount(p);
+	m.connected = false;
+	m.userId.clear();
+	m.display.clear();
+	setStatus(p, meta::managedLoginRequiredMessage());
+	setResult(p, false, meta::managedLoginRequiredMessage());
+	saveStore(); // drop the stale snapshot
+	refreshManagedLoginUi();
+}
+
+void MetadataDock::refreshManagedLoginUi()
+{
+	if (!isManaged() || !managedAuth_)
+		return; // Independent: formulario oculto, nada que actualizar
+	const bool logged = managedAuth_->hasUserSession();
+	if (userLoginBtn_)
+		userLoginBtn_->setEnabled(!logged);
+	if (userSignupBtn_)
+		userSignupBtn_->setEnabled(!logged);
+	if (userNameEdit_)
+		userNameEdit_->setEnabled(!logged);
+	if (userPassEdit_)
+		userPassEdit_->setEnabled(!logged);
+	if (userLogoutBtn_)
+		userLogoutBtn_->setEnabled(logged);
+	if (userStatus_) {
+		if (logged) {
+			const QString label = managedAuth_->userLabel();
+			userStatus_->setText(
+				label.isEmpty()
+					? tr("Logged in.")
+					: tr("Logged in as %1").arg(label));
+		} else {
+			userStatus_->setText(
+				meta::managedLoginRequiredMessage());
+		}
+	}
+}
+
+QString MetadataDock::userAuthError(backend_auth::Result r, bool isSignup)
+{
+	switch (r) {
+	case backend_auth::Result::NetworkError:
+		return tr("Could not reach the managed backend (network).");
+	case backend_auth::Result::Unauthorized:
+		return tr("Wrong username or password.");
+	case backend_auth::Result::RateLimited:
+		return tr("Too many attempts. Wait and retry.");
+	case backend_auth::Result::ServerError:
+		return tr("Managed backend error (temporary). Retry shortly.");
+	case backend_auth::Result::StorageError:
+		return tr("Local installation storage failed (DPAPI).");
+	default:
+		break;
+	}
+	// InvalidResponse cubre 400/409/duplicado según el llamador, sin
+	// inventar el motivo exacto (el backend normaliza el login).
+	if (isSignup)
+		return tr("Sign up failed (username may be taken or invalid).");
+	return tr("Login failed.");
+}
+
+void MetadataDock::onUserSignup()
+{
+	if (!isManaged() || !managedAuth_)
+		return; // Independent: sin formulario, sin acción
+	const QString user = field(userNameEdit_);
+	const QString pass = userPassEdit_->text();
+	if (user.isEmpty() || pass.isEmpty()) {
+		userStatus_->setText(
+			tr("Username and password are required."));
+		return;
+	}
+	userSignupBtn_->setEnabled(false);
+	userLoginBtn_->setEnabled(false);
+	userStatus_->setText(tr("Signing up…"));
+	managedAuth_->signup(
+		user, pass,
+		[this, user,
+		 pass](backend_auth::Result r,
+		       const backend_auth::Client::UserInfo &) {
+			if (!isManaged())
+				return; // user switched mode
+			userPassEdit_->clear(); // jamás permanece en el widget
+			if (r != backend_auth::Result::Ok) {
+				userStatus_->setText(
+					userAuthError(r, true));
+				refreshManagedLoginUi();
+				return;
+			}
+			// 201 no abre sesión (backend Fase 2): login
+			// inmediato con las mismas credenciales.
+			userStatus_->setText(tr("Logging in…"));
+			managedAuth_->login(
+				user, pass,
+				[this](backend_auth::Result lr) {
+					userPassEdit_->clear();
+					if (!isManaged())
+						return;
+					if (lr !=
+					    backend_auth::Result::Ok) {
+						userStatus_->setText(
+							userAuthError(
+								lr, false));
+						refreshManagedLoginUi();
+						return;
+					}
+					refreshManagedLoginUi();
+					silentRevalidateManaged();
+				});
+		});
+}
+
+void MetadataDock::onUserLogin()
+{
+	if (!isManaged() || !managedAuth_)
+		return;
+	const QString user = field(userNameEdit_);
+	const QString pass = userPassEdit_->text();
+	if (user.isEmpty() || pass.isEmpty()) {
+		userStatus_->setText(
+			tr("Username and password are required."));
+		return;
+	}
+	userLoginBtn_->setEnabled(false);
+	userSignupBtn_->setEnabled(false);
+	userStatus_->setText(tr("Logging in…"));
+	managedAuth_->login(user, pass,
+			    [this](backend_auth::Result r) {
+				    userPassEdit_->clear();
+				    if (!isManaged())
+					    return;
+				    if (r != backend_auth::Result::Ok) {
+					    userStatus_->setText(
+						    userAuthError(r, false));
+					    refreshManagedLoginUi();
+					    return;
+				    }
+				    refreshManagedLoginUi();
+				    silentRevalidateManaged();
+			    });
+}
+
+void MetadataDock::onUserLogout()
+{
+	if (!isManaged() || !managedAuth_)
+		return;
+	userLogoutBtn_->setEnabled(false);
+	userStatus_->setText(tr("Logging out…"));
+	managedAuth_->logoutUser([this](backend_auth::Result) {
+		if (!isManaged())
+			return;
+		userPassEdit_->clear();
+		// Las conexiones Managed pertenecen al usuario: al salir se
+		// olvidan localmente (el backend revocó la sesión; la
+		// propiedad por usuario invalida el resto en servidor).
+		// Independent intacto por construcción.
+		using P = meta::Platform;
+		for (P p : {P::Twitch, P::YouTube, P::Kick, P::Facebook}) {
+			ManagedConn &m = managedAccount(p);
+			m.connected = false;
+			m.userId.clear();
+			m.display.clear();
+			setStatus(p,
+				  meta::managedLoginRequiredMessage());
+		}
+		if (broadcastCombo_)
+			broadcastCombo_->clear();
+		clearFbIngest();
+		saveStore(); // drop snapshots; Independent records kept
+		refreshManagedLoginUi();
+		refreshContentVisibility();
+	});
 }
 
 void MetadataDock::onDisconnectManaged(meta::Platform p)
@@ -1351,10 +1695,14 @@ void MetadataDock::onDisconnectManaged(meta::Platform p)
 	setStatus(p, tr("Not connected"));
 	setResult(p, true, tr("disconnected"));
 	saveStore(); // drop the snapshot; Independent records untouched
+	// Fase 4: sin login solo hay limpieza local (sin red). Con login,
+	// desconexión remota best-effort con auth doble.
+	if (!managedAuth_ || !managedAuth_->hasUserSession())
+		return;
 	managedAuth_->ensureSession([this, p](backend_auth::Result r) {
 		if (r != backend_auth::Result::Ok)
 			return; // local state already cleared
-		managedAuth_->apiPost(QStringLiteral("/connect/%1/disconnect").arg(
+		managedAuth_->apiPostUser(QStringLiteral("/connect/%1/disconnect").arg(
 						      providerSlug(p)),
 				      QJsonObject(),
 				      [](const backend_auth::Client::ApiReply &) {});
@@ -1370,6 +1718,9 @@ void MetadataDock::onEraseManagedData()
 	using P = meta::Platform;
 	if (!isManaged() || !eraseButton_)
 		return;
+	// Fase 4: borrado total también exige login (acción Managed).
+	if (!requireManagedLoginMsg())
+		return;
 	eraseButton_->setEnabled(false);
 	managedAuth_->ensureSession([this](backend_auth::Result r) {
 		if (r != backend_auth::Result::Ok) {
@@ -1378,7 +1729,7 @@ void MetadataDock::onEraseManagedData()
 				tr("Data erasure failed: backend unreachable."));
 			return;
 		}
-		managedAuth_->apiPost(
+		managedAuth_->apiPostUser(
 			QStringLiteral("/privacy/erase"), QJsonObject(),
 			[this](const backend_auth::Client::ApiReply &rep) {
 				eraseButton_->setEnabled(true);
@@ -1438,6 +1789,152 @@ void MetadataDock::onEraseManagedData()
 	});
 }
 
+// --- Fase 5b: borrado de CUENTA (/users/erase) ---------------------------
+// Distinto de POST /privacy/erase (F-C2, por instalación): este borra el
+// usuario con TODAS sus instalaciones (cascada en servidor, revoke
+// best-effort, idempotente). La respuesta lleva solo conteos por
+// tabla + revocaciones por proveedor (jamás secretos). Tras el 200 se
+// olvidan la sesión de usuario en memoria + snapshots Managed +
+// backendInstall huérfano; Independent intacto por construcción.
+void MetadataDock::onEraseAccount()
+{
+	using P = meta::Platform;
+	if (!isManaged() || !eraseAccountButton_)
+		return;
+	// Exige login (acción Managed): sin user-session, mensaje exacto y
+	// CERO red (sin fallback a Independent).
+	if (!requireManagedLoginMsg())
+		return;
+	eraseAccountButton_->setEnabled(false);
+	generalMsg_->setText(tr("Erasing account…"));
+	managedAuth_->ensureSession([this](backend_auth::Result r) {
+		if (!isManaged()) {
+			eraseAccountButton_->setEnabled(true);
+			return; // user switched mode
+		}
+		if (r != backend_auth::Result::Ok) {
+			eraseAccountButton_->setEnabled(true);
+			generalMsg_->setText(
+				tr("Account erasure failed: backend "
+				   "unreachable."));
+			return;
+		}
+		managedAuth_->apiPostUser(
+			QString::fromLatin1(meta::accountErasePath()),
+			QJsonObject(),
+			[this](const backend_auth::Client::ApiReply &rep) {
+				eraseAccountButton_->setEnabled(true);
+				if (!isManaged())
+					return; // user switched mode
+				if (rep.result ==
+				    backend_auth::Result::Unauthorized) {
+					// Auth doble normalizada: la sesión
+					// cayó, re-login (mensaje exacto).
+					generalMsg_->setText(
+						meta::managedLoginRequiredMessage());
+					refreshManagedLoginUi();
+					return;
+				}
+				if (rep.result !=
+				    backend_auth::Result::Ok) {
+					obs_log(LOG_WARNING,
+						"account erase failed: "
+						"result=%d http=%d",
+						static_cast<int>(rep.result),
+						rep.http);
+					generalMsg_->setText(
+						tr("Account erasure failed "
+						   "(retry or Disconnect "
+						   "each account)."));
+					return;
+				}
+				// 200: el servidor ya borró usuario +
+				// instalaciones + sesiones (incluida la
+				// llamante). Olvidar todo lo Managed local.
+				managedAuth_->clearUserSession();
+				using P = meta::Platform;
+				for (P p : {P::Twitch, P::YouTube, P::Kick,
+					    P::Facebook}) {
+					ManagedConn &m = managedAccount(p);
+					m.connected = false;
+					m.userId.clear();
+					m.display.clear();
+					setStatus(p, tr("Not connected"));
+					setResult(p, true,
+						  tr("account erased"));
+				}
+				broadcastCombo_->clear();
+				// PoC ingestión: olvida la URL de sesión.
+				clearFbIngest();
+				// Las filas installation ya no existen en el
+				// backend: el secreto local queda huérfano y
+				// debe caer (próximo connect = bootstrap
+				// nuevo). Independent intacto por
+				// construcción (saveStore preserva sus
+				// records).
+				if (store_) {
+					secure::Data d;
+					store_->load(d);
+					d.backendInstall =
+						secure::Record{};
+					store_->save(d);
+				}
+				saveStore(); // drop snapshots
+				// El bearer en memoria murió con sus
+				// sessions: olvidarlo sin revocar (el
+				// servidor ya lo borró).
+				managedAuth_->revokeSession(
+					[](backend_auth::Result) {});
+				// Solo conteos por tabla/proveedor: el cuerpo
+				// solo trae {erased:{...}, revoked:{p:bool}}.
+				const QJsonObject erased =
+					rep.body
+						.value(QStringLiteral(
+							"erased"))
+						.toObject();
+				const QJsonObject revoked =
+					rep.body
+						.value(QStringLiteral(
+							"revoked"))
+						.toObject();
+				QStringList rev;
+				for (auto it = revoked.begin();
+				     it != revoked.end(); ++it) {
+					if (it.value().toBool())
+						rev << it.key();
+				}
+				QString msg =
+					meta::accountEraseCountsMessage(
+						erased.value(QStringLiteral(
+							       "users"))
+							.toInt(),
+						erased.value(QStringLiteral(
+							       "installations"))
+							.toInt(),
+						erased.value(QStringLiteral(
+							       "sessions"))
+							.toInt(),
+						erased.value(QStringLiteral(
+							       "connections"))
+							.toInt(),
+						erased.value(QStringLiteral(
+							       "tokens"))
+							.toInt());
+				if (rev.isEmpty())
+					msg += tr(" Remote revocations: "
+						  "none.");
+				else
+					msg += tr(" Revoked remotely: %1.")
+						       .arg(rev.join(
+							       QStringLiteral(
+								       ", ")));
+				generalMsg_->setText(msg);
+				refreshManagedLoginUi();
+				refreshContentVisibility();
+			});
+	});
+}
+
 // --- managed YouTube apply (FASE 2.1-C) ----------------------------------
 // Tokens stay server-side: the plugin sends only the session bearer (via
 // managedAuth_) plus {broadcast_id,title,description}. Item data in the
@@ -1447,8 +1944,11 @@ void MetadataDock::onEraseManagedData()
 void MetadataDock::fetchManagedBroadcasts()
 {
 	using P = meta::Platform;
+	// Fase 4: gate login previo (sin red ni fallback).
+	if (!requireManagedLogin(P::YouTube))
+		return;
 	refreshButton_->setEnabled(false);
-	managedAuth_->apiGet(QStringLiteral("/metadata/youtube/broadcasts"),
+	managedAuth_->apiGetUser(QStringLiteral("/metadata/youtube/broadcasts"),
 			     [this](const backend_auth::Client::ApiReply &rep) {
 				     using P = meta::Platform;
 				     // FASE 2.1-C.1: diagnóstico redactado (enums/códigos;
@@ -1463,6 +1963,11 @@ void MetadataDock::fetchManagedBroadcasts()
 					     return; // user switched mode
 				     if (rep.result !=
 					 backend_auth::Result::Ok) {
+					     if (rep.result ==
+						 backend_auth::Result::
+							 Unauthorized)
+						     noteManagedAuthFailure(
+							     P::YouTube);
 					     const meta::Outcome oc =
 						     rep.result ==
 							     backend_auth::Result::
@@ -1555,6 +2060,9 @@ void MetadataDock::startManagedYouTubeApply()
 {
 	using P = meta::Platform;
 	const P p = P::YouTube;
+	// Fase 4: gate login previo (sin red ni fallback).
+	if (!requireManagedLogin(p))
+		return;
 	if (!managedAccount(p).connected) {
 		finishPlatform(p, false,
 			       meta::userMessage(meta::Outcome::AuthRequired,
@@ -1576,7 +2084,7 @@ void MetadataDock::startManagedYouTubeApply()
 	body[QStringLiteral("broadcast_id")] = broadcastId;
 	body[QStringLiteral("title")] = titleEdit_->text();
 	body[QStringLiteral("description")] = descEdit_->toPlainText();
-	managedAuth_->apiPost(QStringLiteral("/metadata/youtube"), body,
+	managedAuth_->apiPostUser(QStringLiteral("/metadata/youtube"), body,
 			      [this, p](const backend_auth::Client::ApiReply &rep) {
 				      // FASE 2.1-C.1: diagnóstico redactado (enums/códigos;
 				      // nunca cuerpos, tokens ni bearer).
@@ -1613,14 +2121,9 @@ void MetadataDock::startManagedYouTubeApply()
 				      if (autoRetryManagedSession(p, rep.http))
 					      return;
 				      if (oc == meta::Outcome::AuthRequired) {
-					      ManagedConn &m =
-						      managedAccount(p);
-					      m.connected = false;
-					      m.userId.clear();
-					      m.display.clear();
-					      setStatus(p,
-							tr("Needs reconnection."));
-					      saveStore(); // drop the stale snapshot
+					      // Auth doble normalizada:
+					      // re-login (mensaje exacto).
+					      noteManagedAuthFailure(p);
 				      }
 				      finishPlatform(
 					      p, false,
@@ -1638,6 +2141,9 @@ void MetadataDock::startManagedTwitchApply()
 {
 	using P = meta::Platform;
 	const P p = P::Twitch;
+	// Fase 4: gate login previo (sin red ni fallback).
+	if (!requireManagedLogin(p))
+		return;
 	const ManagedConn &m = managedAccount(p);
 	if (!m.connected || m.userId.isEmpty()) {
 		finishPlatform(p, false,
@@ -1650,7 +2156,7 @@ void MetadataDock::startManagedTwitchApply()
 	QJsonObject body;
 	body[QStringLiteral("title")] = titleEdit_->text();
 	body[QStringLiteral("broadcaster_id")] = m.userId;
-	managedAuth_->apiPost(QStringLiteral("/metadata/twitch"), body,
+	managedAuth_->apiPostUser(QStringLiteral("/metadata/twitch"), body,
 			      [this, p](const backend_auth::Client::ApiReply &rep) {
 				      obs_log(LOG_INFO,
 					      "managed apply reply: result=%d "
@@ -1685,14 +2191,9 @@ void MetadataDock::startManagedTwitchApply()
 				      if (autoRetryManagedSession(p, rep.http))
 					      return;
 				      if (oc == meta::Outcome::AuthRequired) {
-					      ManagedConn &mm =
-						      managedAccount(p);
-					      mm.connected = false;
-					      mm.userId.clear();
-					      mm.display.clear();
-					      setStatus(p,
-							tr("Needs reconnection."));
-					      saveStore(); // drop the stale snapshot
+					      // Auth doble normalizada:
+					      // re-login (mensaje exacto).
+					      noteManagedAuthFailure(p);
 				      }
 				      finishPlatform(
 					      p, false,
@@ -2591,6 +3092,10 @@ void MetadataDock::onDisconnectFacebook()
 
 void MetadataDock::onRefreshBroadcasts()
 {
+	// Fase 4: gate login previo en Managed (mensaje exacto, cero
+	// red). En Independent es no-op (sin cambios).
+	if (!requireManagedLogin(meta::Platform::YouTube))
+		return;
 	// FASE 2.1-C: in Managed the list comes from the backend (tokens
 	// server-side); same combo model, plain broadcast IDs as item data.
 	if (isManaged()) {
@@ -2688,6 +3193,10 @@ void MetadataDock::fetchFacebookVideos()
 
 void MetadataDock::onRefreshFacebook()
 {
+	// Fase 4: gate login previo en Managed (mensaje exacto, cero
+	// red). En Independent es no-op (sin cambios).
+	if (!requireManagedLogin(meta::Platform::Facebook))
+		return;
 	// FB-3: en Managed la lista viene del backend (tokens server-side),
 	// mismo combo (vale item listado o ID pegado, F-074/F-075).
 	if (isManaged()) {
@@ -2979,6 +3488,9 @@ void MetadataDock::onFbIngestCopy()
 
 void MetadataDock::onFbStatus()
 {
+	// Fase 4: gate login previo en Managed (no-op en Independent).
+	if (!requireManagedLogin(meta::Platform::Facebook))
+		return;
 	const QString liveId = currentFbLiveId();
 	if (liveId.isEmpty()) {
 		generalMsg_->setText(meta::userMessage(
@@ -3006,6 +3518,9 @@ void MetadataDock::onFbStatus()
 
 void MetadataDock::onFbCreate()
 {
+	// Fase 4: gate login previo en Managed (no-op en Independent).
+	if (!requireManagedLogin(meta::Platform::Facebook))
+		return;
 	if (isManaged()) {
 		if (!managedAccount(meta::Platform::Facebook).connected) {
 			generalMsg_->setText(meta::userMessage(
@@ -3027,6 +3542,10 @@ void MetadataDock::onFbCreate()
 
 void MetadataDock::onFbGoLive()
 {
+	// Fase 4: gate login previo en Managed (no-op en Independent;
+	// antes de cualquier confirmación u operación remota).
+	if (!requireManagedLogin(meta::Platform::Facebook))
+		return;
 	const QString liveId = currentFbLiveId();
 	if (liveId.isEmpty()) {
 		generalMsg_->setText(meta::userMessage(
@@ -3107,6 +3626,10 @@ void MetadataDock::onFbGoLive()
 
 void MetadataDock::onFbEndLive()
 {
+	// Fase 4: gate login previo en Managed (no-op en Independent;
+	// antes de cualquier confirmación u operación remota).
+	if (!requireManagedLogin(meta::Platform::Facebook))
+		return;
 	const QString liveId = currentFbLiveId();
 	if (liveId.isEmpty()) {
 		generalMsg_->setText(meta::userMessage(
@@ -3140,6 +3663,10 @@ void MetadataDock::onFbEndLive()
 
 void MetadataDock::onFbDelete()
 {
+	// Fase 4: gate login previo en Managed (no-op en Independent;
+	// antes de cualquier confirmación u operación remota).
+	if (!requireManagedLogin(meta::Platform::Facebook))
+		return;
 	const QString liveId = currentFbLiveId();
 	if (liveId.isEmpty()) {
 		generalMsg_->setText(meta::userMessage(
@@ -3178,6 +3705,9 @@ void MetadataDock::onFbDelete()
 // pendiente de Apply+Check).
 void MetadataDock::onFbAdopt()
 {
+	// Fase 4: gate login previo en Managed (no-op en Independent).
+	if (!requireManagedLogin(meta::Platform::Facebook))
+		return;
 	if (isManaged()) {
 		if (!managedAccount(meta::Platform::Facebook).connected) {
 			generalMsg_->setText(meta::userMessage(
@@ -3309,6 +3839,10 @@ void MetadataDock::startFbDeleteIndependent(const QString &liveId)
 
 void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 {
+	// Fase 4: gate login previo (status/broadcasts/ciclo de vida:
+	// sin red ni fallback).
+	if (!requireManagedLogin(meta::Platform::Facebook))
+		return;
 	QJsonObject body;
 	body[QStringLiteral("op")] = op;
 	if (!liveId.isEmpty())
@@ -3324,7 +3858,7 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 		fbExpectedDesc_ = descEdit_->toPlainText();
 	}
 	generalMsg_->setText(tr("Facebook %1…").arg(op));
-	managedAuth_->apiPost(
+	managedAuth_->apiPostUser(
 		QStringLiteral("/metadata/facebook"), body,
 		[this, op, liveId](const backend_auth::Client::ApiReply &rep) {
 			obs_log(LOG_INFO,
@@ -3511,7 +4045,7 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 						QStringLiteral("status");
 					sbody[QStringLiteral(
 						"live_video_id")] = cid;
-					managedAuth_->apiPost(
+					managedAuth_->apiPostUser(
 						QStringLiteral(
 							"/metadata/facebook"),
 						sbody,
@@ -3600,7 +4134,7 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 					QStringLiteral("status");
 				sbody[QStringLiteral("live_video_id")] =
 					doneId;
-				managedAuth_->apiPost(
+				managedAuth_->apiPostUser(
 					QStringLiteral("/metadata/facebook"),
 					sbody,
 					[this, doneId, op](
@@ -3753,6 +4287,15 @@ void MetadataDock::onApply()
 	meta::Metadata m{titleEdit_->text(), descEdit_->toPlainText()};
 	meta::Selection s{twCheck_->isChecked(), ytCheck_->isChecked(),
 			  kkCheck_->isChecked(), fbCheck_->isChecked()};
+	// Fase 4: en Managed el Apply exige login ANTES de validar o
+	// encolar (cero red, mensaje exacto). Independent intacto.
+	if (isManaged() && managedAuth_ &&
+	    !managedAuth_->hasUserSession()) {
+		generalMsg_->setText(
+			meta::managedLoginRequiredMessage());
+		refreshManagedLoginUi();
+		return;
+	}
 	const QString err = meta::validate(m, s);
 	if (!err.isEmpty()) {
 		generalMsg_->setText(err);
@@ -3798,16 +4341,25 @@ void MetadataDock::startApplyNext()
 	backoffResume_ = false;
 	// Managed Apply (backend token): YouTube (FASE 2.1-C), Twitch y
 	// Kick (T-068), Facebook (FB-3). Solo Independent usa su cuenta
-	// directa.
+	// directa. Fase 4: además del provider conectado se exige la
+	// user-session en memoria; sin ella, mensaje de login (no el
+	// genérico de reconexión) y cero red.
+	const bool managedLogged = isManaged() && managedAuth_ &&
+				   managedAuth_->hasUserSession();
 	const bool authorized =
 		(isManaged() && (p == P::YouTube || p == P::Twitch ||
 				 p == P::Kick || p == P::Facebook))
-			? managedAccount(p).connected
+			? (managedLogged && managedAccount(p).connected)
 			: account(p).connected;
 	if (!authorized) {
-		finishPlatform(p, false,
-			       meta::userMessage(meta::Outcome::AuthRequired,
-						 p));
+		if (isManaged() && !managedLogged) {
+			finishPlatform(p, false,
+				       meta::managedLoginRequiredMessage());
+		} else {
+			finishPlatform(p, false,
+				       meta::userMessage(meta::Outcome::AuthRequired,
+							 p));
+		}
 		startApplyNext();
 		return;
 	}
@@ -3938,6 +4490,9 @@ void MetadataDock::startManagedKickApply()
 {
 	using P = meta::Platform;
 	const P p = P::Kick;
+	// Fase 4: gate login previo (sin red ni fallback).
+	if (!requireManagedLogin(p))
+		return;
 	const ManagedConn &m = managedAccount(p);
 	if (!m.connected || m.userId.isEmpty()) {
 		finishPlatform(p, false,
@@ -3949,7 +4504,7 @@ void MetadataDock::startManagedKickApply()
 	setResult(p, true, tr("Updating…"));
 	QJsonObject body;
 	body[QStringLiteral("title")] = titleEdit_->text();
-	managedAuth_->apiPost(QStringLiteral("/metadata/kick"), body,
+	managedAuth_->apiPostUser(QStringLiteral("/metadata/kick"), body,
 			      [this, p](const backend_auth::Client::ApiReply &rep) {
 				      obs_log(LOG_INFO,
 					      "managed apply reply: result=%d "
@@ -3984,14 +4539,9 @@ void MetadataDock::startManagedKickApply()
 				      if (autoRetryManagedSession(p, rep.http))
 					      return;
 				      if (oc == meta::Outcome::AuthRequired) {
-					      ManagedConn &mm =
-						      managedAccount(p);
-					      mm.connected = false;
-					      mm.userId.clear();
-					      mm.display.clear();
-					      setStatus(p,
-							tr("Needs reconnection."));
-					      saveStore(); // drop the stale snapshot
+					      // Auth doble normalizada:
+					      // re-login (mensaje exacto).
+					      noteManagedAuthFailure(p);
 				      }
 				      finishPlatform(
 					      p, false,
@@ -4010,8 +4560,11 @@ void MetadataDock::startManagedKickApply()
 void MetadataDock::fetchManagedFacebookVideos()
 {
 	using P = meta::Platform;
+	// Fase 4: gate login previo (sin red ni fallback).
+	if (!requireManagedLogin(P::Facebook))
+		return;
 	fbRefreshButton_->setEnabled(false);
-	managedAuth_->apiGet(QStringLiteral("/metadata/facebook/broadcasts"),
+	managedAuth_->apiGetUser(QStringLiteral("/metadata/facebook/broadcasts"),
 			     [this](const backend_auth::Client::ApiReply &rep) {
 				     using P = meta::Platform;
 				     obs_log(LOG_INFO,
@@ -4024,6 +4577,11 @@ void MetadataDock::fetchManagedFacebookVideos()
 					     return; // user switched mode
 				     if (rep.result !=
 					 backend_auth::Result::Ok) {
+					     if (rep.result ==
+						 backend_auth::Result::
+							 Unauthorized)
+						     noteManagedAuthFailure(
+							     P::Facebook);
 					     const meta::Outcome oc =
 						     rep.result ==
 							     backend_auth::Result::
@@ -4103,6 +4661,9 @@ void MetadataDock::startManagedFacebookApply()
 {
 	using P = meta::Platform;
 	const P p = P::Facebook;
+	// Fase 4: gate login previo (sin red ni fallback).
+	if (!requireManagedLogin(p))
+		return;
 	const ManagedConn &m = managedAccount(p);
 	if (!m.connected || m.userId.isEmpty()) {
 		finishPlatform(p, false,
@@ -4133,7 +4694,7 @@ void MetadataDock::startManagedFacebookApply()
 	body[QStringLiteral("description")] = sentDesc;
 	if (!fbTarget_.isEmpty())
 		body[QStringLiteral("target")] = fbTarget_;
-	managedAuth_->apiPost(QStringLiteral("/metadata/facebook"), body,
+	managedAuth_->apiPostUser(QStringLiteral("/metadata/facebook"), body,
 			      [this, p, liveId, sentTitle, sentDesc](
 				      const backend_auth::Client::ApiReply &rep) {
 				      obs_log(LOG_INFO,
@@ -4196,14 +4757,9 @@ void MetadataDock::startManagedFacebookApply()
 				      if (autoRetryManagedSession(p, rep.http))
 					      return;
 				      if (oc == meta::Outcome::AuthRequired) {
-					      ManagedConn &mm =
-						      managedAccount(p);
-					      mm.connected = false;
-					      mm.userId.clear();
-					      mm.display.clear();
-					      setStatus(p,
-							tr("Needs reconnection."));
-					      saveStore(); // drop the stale snapshot
+					      // Auth doble normalizada:
+					      // re-login (mensaje exacto).
+					      noteManagedAuthFailure(p);
 				      }
 				      finishPlatform(
 					      p, false,

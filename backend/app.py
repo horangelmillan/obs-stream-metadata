@@ -20,7 +20,8 @@ from backend.logging_setup import get_logger
 from backend.oauth import ConnectService
 from backend.stores import (AllowAllRateLimiter, EnvSecretStore, InMemoryConnectionStore,
                             InMemoryInstallationStore, InMemoryOAuthTransactionStore,
-                            InMemorySessionStore, InMemoryTokenStore)
+                            InMemorySessionStore, InMemoryTokenStore,
+                            InMemoryUserStore)
 
 
 def _loopback_base(public_base_url: str) -> str:
@@ -36,6 +37,7 @@ def create_app(secrets=None, sessions=None, limiter=None,
                ready_check=None, settings=None, providers=None,
                installations=None, auth_service=None,
                transactions=None, connections=None, tokens=None,
+               users=None, user_sessions=None,
                  enable_youtube: bool = False,
                  enable_kick: bool = False,
                  enable_twitch: bool = False,
@@ -44,6 +46,7 @@ def create_app(secrets=None, sessions=None, limiter=None,
     secrets = secrets or EnvSecretStore()
     sessions = sessions or InMemorySessionStore()
     installations = installations or InMemoryInstallationStore()
+    users = users or InMemoryUserStore()
     gated: dict[str, object] = {
         "secrets": secrets,
         "sessions": sessions,
@@ -105,6 +108,10 @@ def create_app(secrets=None, sessions=None, limiter=None,
                       provider_redirects=redirects,
                       installations=installations,
                       transactions=transactions,
+                      users=users,
+                      user_sessions=user_sessions,
+                      connections=connections,
+                      tokens=tokens,
                       secrets=secrets)
 
 
@@ -126,7 +133,7 @@ def _production_wiring(settings):
     from backend.db import PgPool, run_migrations
     from backend.pgstores import (PgConnectionStore, PgInstallationStore,
                                   PgOAuthTransactionStore, PgSessionStore,
-                                  PgTokenStore)
+                                  PgTokenStore, PgUserStore)
     from backend.prodstores import (CompositeSecretStore, FileSecretStore,
                                     ProdstoresError, split_secret_dirs)
     from backend.stores import FixedWindowRateLimiter
@@ -194,6 +201,7 @@ def _production_wiring(settings):
         "transactions": PgOAuthTransactionStore(pool),
         "connections": PgConnectionStore(pool),
         "tokens": EncryptedTokenStore(PgTokenStore(pool), cipher),
+        "users": PgUserStore(pool),
         "limiter": FixedWindowRateLimiter(settings.global_limit,
                                           settings.global_window_s),
         "ready_check": _ready_check,
@@ -218,6 +226,7 @@ def main() -> None:
                          transactions=wiring["transactions"],
                          connections=wiring["connections"],
                          tokens=wiring["tokens"],
+                         users=wiring["users"],
                           limiter=wiring["limiter"],
                           ready_check=wiring["ready_check"],
                            enable_youtube="youtube" in wanted,

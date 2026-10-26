@@ -296,6 +296,353 @@ void Client::revokeInstallation(std::function<void(Result)> cb)
 	     [cb](Result r, const QJsonObject &) { cb(r); });
 }
 
+// --- Fase 4: cuenta de usuario Managed (solo memoria) --------------------
+
+bool Client::hasUserSession() const
+{
+	return !userSessionToken_.isEmpty() &&
+	       QDateTime::currentDateTimeUtc().secsTo(userExpiry_) >
+		       kExpiryMarginSecs;
+}
+
+void Client::clearUserSession()
+{
+	userSessionToken_.clear();
+	loggedUsername_.clear();
+	userExpiry_ = QDateTime();
+}
+
+// POST público con bearer de instalación best-effort (adopción sin
+// reset, spec §3): si hay sesión válida se adjunta, si no se sigue sin
+// ella. Nunca X-User-Session (signup/login no tienen sesión todavía).
+// Sin valores en logs: solo códigos.
+void Client::postPublic(const QString &path, const QJsonObject &body,
+			std::function<void(Result, const QJsonObject &)> cb)
+{
+	if (baseUrl_.isEmpty() || !nam_) {
+		cb(Result::InvalidResponse, {});
+		return;
+	}
+	QNetworkRequest req(QUrl(baseUrl_ + path));
+	req.setHeader(QNetworkRequest::ContentTypeHeader,
+		      QVariant(QStringLiteral("application/json")));
+	if (hasValidSession())
+		req.setRawHeader("Authorization",
+				 ("Bearer " + sessionToken_).toLatin1());
+	QNetworkReply *reply = nam_->post(
+		req, QJsonDocument(body).toJson(QJsonDocument::Compact));
+	QTimer *timer = new QTimer(reply);
+	timer->setSingleShot(true);
+	timer->setInterval(kTimeoutMs);
+	connect(timer, &QTimer::timeout, reply, [reply]() { reply->abort(); });
+	connect(reply, &QNetworkReply::finished, this,
+		[this, reply, timer, cb]() {
+			timer->stop();
+			timer->deleteLater();
+			const int http = reply->attribute(
+				QNetworkRequest::HttpStatusCodeAttribute)
+						 .toInt();
+			const QByteArray raw = reply->readAll();
+			const int err = static_cast<int>(reply->error());
+			const QJsonObject o =
+				QJsonDocument::fromJson(raw).object();
+			reply->deleteLater();
+			if (err == static_cast<int>(
+					    QNetworkReply::OperationCanceledError) ||
+			    err == static_cast<int>(
+					    QNetworkReply::TimeoutError) ||
+			    (err != static_cast<int>(QNetworkReply::NoError) &&
+			     http == 0)) {
+				cb(Result::NetworkError, {});
+				return;
+			}
+			if (http == 401) {
+				cb(Result::Unauthorized, o);
+				return;
+			}
+			if (http == 429) {
+				cb(Result::RateLimited, o);
+				return;
+			}
+			if (http == 409) {
+				cb(Result::InvalidResponse, o);
+				return;
+			}
+			if (http < 200 || http >= 300 || o.isEmpty()) {
+				cb(http >= 500 ? Result::ServerError :
+						  Result::InvalidResponse,
+				   o);
+				return;
+			}
+			cb(Result::Ok, o);
+		});
+}
+
+void Client::signup(const QString &username, const QString &password,
+		    std::function<void(Result, const UserInfo &)> cb)
+{
+	const QString user = username.trimmed();
+	if (user.isEmpty() || password.isEmpty()) {
+		cb(Result::InvalidResponse, {});
+		return;
+	}
+	QJsonObject body;
+	body[QStringLiteral("username")] = user;
+	body[QStringLiteral("password")] = password;
+	postPublic(QStringLiteral("/users/signup"), body,
+		   [user, cb](Result r, const QJsonObject &o) {
+			   if (r != Result::Ok) {
+				   cb(r, {});
+				   return;
+			   }
+			   UserInfo info;
+			   info.userId = o.value(QStringLiteral("user_id"))
+						 .toString();
+			   info.username = o.value(QStringLiteral("username"))
+						   .toString();
+			   if (info.userId.isEmpty() || info.username.isEmpty()) {
+				   cb(Result::InvalidResponse, {});
+				   return;
+			   }
+			   cb(Result::Ok, info);
+		   });
+}
+
+void Client::login(const QString &username, const QString &password,
+		   std::function<void(Result)> cb)
+{
+	const QString user = username.trimmed();
+	if (user.isEmpty() || password.isEmpty()) {
+		cb(Result::InvalidResponse);
+		return;
+	}
+	// La adopción necesita el bearer de instalación: asegurar sesión
+	// primero (bootstrap/re-auth lo decide ensureSession).
+	ensureSession([this, user, password, cb](Result r) {
+		if (r != Result::Ok || !hasValidSession()) {
+			cb(r);
+			return;
+		}
+		QJsonObject body;
+		body[QStringLiteral("username")] = user;
+		body[QStringLiteral("password")] = password;
+		postPublic(QStringLiteral("/users/login"), body,
+			   [this, user, cb](Result lr, const QJsonObject &o) {
+				   if (lr != Result::Ok) {
+					   cb(lr);
+					   return;
+				   }
+				   const QString token =
+					   o.value(QStringLiteral("user_session"))
+						   .toString();
+				   const int expiresIn = o.value(QStringLiteral(
+								 "expires_in"))
+								 .toInt();
+				   if (token.isEmpty() || expiresIn <= 0) {
+					   cb(Result::InvalidResponse);
+					   return;
+				   }
+				   userSessionToken_ = token;
+				   loggedUsername_ = user;
+				   userExpiry_ =
+					   QDateTime::currentDateTimeUtc().addSecs(
+						   expiresIn);
+				   cb(Result::Ok);
+			   });
+	});
+}
+
+// GET/POST con X-User-Session (+ bearer best-effort). Sin sesión en
+// memoria: Unauthorized sin red. Un 401 remoto olvida la sesión local.
+void Client::userSend(const QString &verb, const QString &path,
+		      const QJsonObject &body,
+		      std::function<void(const ApiReply &)> cb)
+{
+	if (!hasUserSession()) {
+		cb(ApiReply{Result::Unauthorized, 401, {}});
+		return;
+	}
+	if (baseUrl_.isEmpty() || !nam_) {
+		cb(ApiReply{Result::InvalidResponse, 0, {}});
+		return;
+	}
+	QNetworkRequest req(QUrl(baseUrl_ + path));
+	req.setHeader(QNetworkRequest::ContentTypeHeader,
+		      QVariant(QStringLiteral("application/json")));
+	if (hasValidSession())
+		req.setRawHeader("Authorization",
+				 ("Bearer " + sessionToken_).toLatin1());
+	req.setRawHeader(meta::userSessionHeaderName().toLatin1(),
+			 userSessionToken_.toLatin1());
+	QNetworkReply *reply = (verb == QStringLiteral("POST"))
+				       ? nam_->post(req,
+						    QJsonDocument(body).toJson(
+							    QJsonDocument::Compact))
+				       : nam_->get(req);
+	QTimer *timer = new QTimer(reply);
+	timer->setSingleShot(true);
+	timer->setInterval(kTimeoutMs);
+	connect(timer, &QTimer::timeout, reply,
+		[reply]() { reply->abort(); });
+	timer->start();
+	connect(reply, &QNetworkReply::finished, this,
+		[this, reply, timer, cb]() {
+			timer->stop();
+			timer->deleteLater();
+			const int http = reply->attribute(
+				QNetworkRequest::HttpStatusCodeAttribute)
+						 .toInt();
+			const QByteArray raw = reply->readAll();
+			const QNetworkReply::NetworkError netErr =
+				reply->error();
+			const QJsonObject o =
+				QJsonDocument::fromJson(raw).object();
+			reply->deleteLater();
+			const bool transportFail =
+				netErr == QNetworkReply::TimeoutError ||
+				netErr ==
+					QNetworkReply::OperationCanceledError ||
+				(netErr != QNetworkReply::NoError && http == 0);
+			if (http == 401)
+				clearUserSession();
+			Result res = Result::Ok;
+			if (transportFail) {
+				res = Result::NetworkError;
+			} else if (http == 401) {
+				res = Result::Unauthorized;
+			} else if (http == 429) {
+				res = Result::RateLimited;
+			} else if (http < 200 || http >= 300) {
+				res = (http >= 500) ? Result::ServerError :
+						      Result::InvalidResponse;
+			}
+			cb(ApiReply{res, http, o});
+		});
+}
+
+void Client::logoutUser(std::function<void(Result)> cb)
+{
+	if (!hasUserSession()) {
+		cb(Result::Ok);
+		return;
+	}
+	userSend(QStringLiteral("POST"), QStringLiteral("/users/logout"),
+		 QJsonObject(),
+		 [this, cb](const ApiReply &rep) {
+			 clearUserSession();
+			 cb(rep.result);
+		 });
+}
+
+void Client::me(std::function<void(Result, const UserInfo &)> cb)
+{
+	if (!hasUserSession()) {
+		cb(Result::Unauthorized, {});
+		return;
+	}
+	userSend(QStringLiteral("GET"), QStringLiteral("/users/me"),
+		 QJsonObject(),
+		 [this, cb](const ApiReply &rep) {
+			 if (rep.result != Result::Ok) {
+				 if (rep.result == Result::Unauthorized)
+					 clearUserSession();
+				 cb(rep.result, {});
+				 return;
+			 }
+			 UserInfo info;
+			 info.userId =
+				 rep.body.value(QStringLiteral("user_id")).toString();
+			 info.username = rep.body.value(QStringLiteral("username"))
+						 .toString();
+			 if (info.userId.isEmpty() || info.username.isEmpty()) {
+				 cb(Result::InvalidResponse, {});
+				 return;
+			 }
+			 loggedUsername_ = info.username; // etiqueta canónica
+			 cb(Result::Ok, info);
+		 });
+}
+
+void Client::apiSendUser(const QString &verb, const QString &path,
+			 const QJsonObject &body,
+			 std::function<void(const ApiReply &)> cb)
+{
+	// Gate previo: sin user-session NO hay red (ni fallback a
+	// Independent: el llamador Managed ya decidió el contexto).
+	if (!hasUserSession()) {
+		cb(ApiReply{Result::Unauthorized, 401, {}});
+		return;
+	}
+	ensureSession([this, verb, path, body, cb](Result r) {
+		if (r != Result::Ok || !hasValidSession()) {
+			cb(ApiReply{r, 0, {}});
+			return;
+		}
+		if (baseUrl_.isEmpty() || !nam_) {
+			cb(ApiReply{Result::InvalidResponse, 0, {}});
+			return;
+		}
+		QNetworkRequest req(QUrl(baseUrl_ + path));
+		req.setHeader(QNetworkRequest::ContentTypeHeader,
+			      QVariant(QStringLiteral("application/json")));
+		req.setRawHeader("Authorization",
+				 ("Bearer " + sessionToken_).toLatin1());
+		req.setRawHeader(meta::userSessionHeaderName().toLatin1(),
+				 userSessionToken_.toLatin1());
+		QNetworkReply *reply =
+			(verb == QStringLiteral("POST"))
+				? nam_->post(req,
+					     QJsonDocument(body).toJson(
+						     QJsonDocument::Compact))
+				: nam_->get(req);
+		QTimer *timer = new QTimer(reply);
+		timer->setSingleShot(true);
+		timer->setInterval(kTimeoutMs);
+		connect(timer, &QTimer::timeout, reply,
+			[reply]() { reply->abort(); });
+		timer->start();
+		connect(reply, &QNetworkReply::finished, this,
+			[this, reply, timer, cb]() {
+				timer->stop();
+				timer->deleteLater();
+				const int http = reply->attribute(
+					QNetworkRequest::HttpStatusCodeAttribute)
+							 .toInt();
+				const QByteArray raw = reply->readAll();
+				const QNetworkReply::NetworkError netErr =
+					reply->error();
+				const QJsonObject o =
+					QJsonDocument::fromJson(raw).object();
+				reply->deleteLater();
+				const bool transportFail =
+					netErr == QNetworkReply::TimeoutError ||
+					netErr == QNetworkReply::
+							  OperationCanceledError ||
+					(netErr != QNetworkReply::NoError &&
+					 http == 0);
+				if (http == 401) {
+					// El backend normaliza (auth doble):
+					// olvidar ambas y pedir re-login.
+					sessionToken_.clear();
+					clearUserSession();
+				}
+				Result res = Result::Ok;
+				if (transportFail) {
+					res = Result::NetworkError;
+				} else if (http == 401) {
+					res = Result::Unauthorized;
+				} else if (http == 429) {
+					res = Result::RateLimited;
+				} else if (http < 200 || http >= 300) {
+					res = (http >= 500) ?
+						      Result::ServerError :
+						      Result::InvalidResponse;
+				}
+				cb(ApiReply{res, http, o});
+			});
+	});
+}
+
 void Client::apiSend(const QString &verb, const QString &path,
 		     const QJsonObject &body,
 		     std::function<void(const ApiReply &)> cb)
@@ -381,6 +728,18 @@ void Client::apiPost(const QString &path, const QJsonObject &body,
 		     std::function<void(const ApiReply &)> cb)
 {
 	apiSend(QStringLiteral("POST"), path, body, cb);
+}
+
+void Client::apiGetUser(const QString &path,
+			std::function<void(const ApiReply &)> cb)
+{
+	apiSendUser(QStringLiteral("GET"), path, QJsonObject(), cb);
+}
+
+void Client::apiPostUser(const QString &path, const QJsonObject &body,
+			 std::function<void(const ApiReply &)> cb)
+{
+	apiSendUser(QStringLiteral("POST"), path, body, cb);
 }
 
 } // namespace backend_auth

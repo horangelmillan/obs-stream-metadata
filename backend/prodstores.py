@@ -28,17 +28,20 @@ import threading
 from backend.kernel import Account, Provider
 from backend.ports import (Installation, InstallationStore, SecretStore, SessionStore,
                            TokenPair, TokenStore)
+from backend.users import User, UserExistsError
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS installations (
     id TEXT PRIMARY KEY,
     created_at TEXT NOT NULL DEFAULT '',
     revoked INTEGER NOT NULL DEFAULT 0,
-    secret TEXT NOT NULL
+    secret TEXT NOT NULL,
+    user_id TEXT NULL
 );
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
-    payload_json TEXT NOT NULL
+    payload_json TEXT NOT NULL,
+    user_id TEXT NULL
 );
 CREATE TABLE IF NOT EXISTS transactions (
     id TEXT PRIMARY KEY,
@@ -48,6 +51,7 @@ CREATE TABLE IF NOT EXISTS connections (
     installation_id TEXT NOT NULL,
     provider TEXT NOT NULL,
     entry_json TEXT NOT NULL,
+    user_id TEXT NULL,
     PRIMARY KEY (installation_id, provider)
 );
 CREATE TABLE IF NOT EXISTS tokens (
@@ -57,7 +61,18 @@ CREATE TABLE IF NOT EXISTS tokens (
     refresh_token TEXT NOT NULL,
     expires_in INTEGER NOT NULL DEFAULT 0,
     scope TEXT NOT NULL DEFAULT '',
+    owner_user_id TEXT NULL,
     PRIMARY KEY (provider, provider_user_id)
+);
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    created_at BIGINT NOT NULL DEFAULT 0,
+    updated_at BIGINT NOT NULL DEFAULT 0,
+    totp_secret TEXT NULL,
+    oauth_provider TEXT NULL,
+    oauth_subject TEXT NULL
 );
 """
 
@@ -97,8 +112,29 @@ def _connect(path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(path, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(SCHEMA)
+    _ensure_user_columns(conn)
     conn.commit()
     return conn
+
+
+# Fase 1 (spec §3, migración 003): ficheros SQLite pre-existentes (creados
+# con el SCHEMA anterior) ganan las columnas de propiedad sin perder filas.
+_USER_COLUMNS = {
+    "installations": ("user_id",),
+    "sessions": ("user_id",),
+    "connections": ("user_id",),
+    "tokens": ("owner_user_id",),
+}
+
+
+def _ensure_user_columns(conn: sqlite3.Connection) -> None:
+    for table, columns in _USER_COLUMNS.items():
+        present = {row[1] for row in
+                   conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        for column in columns:
+            if column not in present:
+                conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN {column} TEXT NULL")
 
 
 class SqliteStore:
@@ -128,10 +164,15 @@ class SqliteStore:
 
 class SqliteInstallationStore(SqliteStore, InstallationStore):
     def create(self, installation: Installation, secret: str) -> None:
+        # UPSERT que conserva `user_id`: re-bootstrap tras adopción no
+        # desadopta (spec §3, sin reset).
         with self._lock:
             self._conn.execute(
-                "INSERT OR REPLACE INTO installations "
-                "(id, created_at, revoked, secret) VALUES (?,?,?,?)",
+                "INSERT INTO installations "
+                "(id, created_at, revoked, secret) VALUES (?,?,?,?) "
+                "ON CONFLICT(id) DO UPDATE SET created_at=excluded."
+                "created_at, revoked=excluded.revoked, "
+                "secret=excluded.secret",
                 (installation.id, installation.created_at,
                  int(installation.revoked), secret))
             self._conn.commit()
@@ -160,13 +201,44 @@ class SqliteInstallationStore(SqliteStore, InstallationStore):
                                (installation_id,))
             self._conn.commit()
 
+    def set_user_id(self, installation_id: str, user_id: str) -> bool:
+        """Adopción Fase 1 (spec §3). False si no existe (sin efectos)."""
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE installations SET user_id=? WHERE id=?",
+                (user_id, installation_id))
+            self._conn.commit()
+            return cursor.rowcount > 0
+
+    def get_user_id(self, installation_id: str) -> str | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT user_id FROM installations WHERE id=?",
+                (installation_id,)).fetchone()
+        return row[0] if row else None
+
+    def list_for_user(self, user_id: str) -> list:
+        """Instalaciones adoptadas por el usuario (Fase 5a). Ordenadas."""
+        if not user_id:
+            return []
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id FROM installations WHERE user_id=?",
+                (user_id,)).fetchall()
+        return sorted(row[0] for row in rows)
+
 
 class SqliteSessionStore(SqliteStore, SessionStore):
     def save_session(self, session_id: str, payload: dict) -> None:
+        # Fase 2: las sesiones de usuario viajan en la misma tabla
+        # (columna user_id + payload JSON; lectura uniforme vía
+        # `load_session`). Portable: la columna la garantiza el SCHEMA
+        # post-003 + `_ensure_user_columns` en ficheros pre-existentes.
+        user_id = payload.get("user_id") if isinstance(payload, dict) else None
         with self._lock:
             self._conn.execute(
-                "INSERT OR REPLACE INTO sessions (id, payload_json) "
-                "VALUES (?,?)", (session_id, json.dumps(payload)))
+                "INSERT OR REPLACE INTO sessions (id, payload_json, user_id) "
+                "VALUES (?,?,?)", (session_id, json.dumps(payload), user_id))
             self._conn.commit()
 
     def load_session(self, session_id: str) -> dict | None:
@@ -195,6 +267,20 @@ class SqliteSessionStore(SqliteStore, SessionStore):
             self._conn.commit()
             return len(doomed)
 
+    def delete_for_user(self, user_id: str) -> int:
+        """Borra las sesiones marcadas con `user_id` (Fase 5a)."""
+        if not user_id:
+            return 0
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, payload_json FROM sessions").fetchall()
+            doomed = [sid for sid, blob in rows
+                      if json.loads(blob).get("user_id") == user_id]
+            for sid in doomed:
+                self._conn.execute("DELETE FROM sessions WHERE id=?", (sid,))
+            self._conn.commit()
+            return len(doomed)
+
     def purge_expired(self, now: float) -> dict:
         """Borra sesiones expiradas o revocadas (F-C4). Conteos disjuntos."""
         with self._lock:
@@ -214,6 +300,25 @@ class SqliteSessionStore(SqliteStore, SessionStore):
                                        (sid,))
             self._conn.commit()
             return {"expired": expired, "revoked": revoked}
+
+    def set_user_id_for_installation(self, installation_id: str,
+                                     user_id: str) -> int:
+        """Adopción Fase 1 (spec §3): columna + payload JSON (lectura
+        uniforme vía `load_session` en todos los backends)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, payload_json FROM sessions").fetchall()
+            count = 0
+            for sid, blob in rows:
+                payload = json.loads(blob)
+                if payload.get("installation_id") == installation_id:
+                    payload["user_id"] = user_id
+                    self._conn.execute(
+                        "UPDATE sessions SET user_id=?, payload_json=? "
+                        "WHERE id=?", (user_id, json.dumps(payload), sid))
+                    count += 1
+            self._conn.commit()
+            return count
 
 
 class SqliteOAuthTransactionStore(SqliteStore):
@@ -341,6 +446,50 @@ class SqliteConnectionStore(SqliteStore):
                           "account", {}).get("provider_user_id")
                       == provider_user_id)
 
+    def list_for_user(self, user_id: str,
+                      installation_ids=()) -> list:
+        """Parejas `(installation_id, provider)` del usuario (Fase 5a):
+        entrada marcada con su `user_id`, o sin marca en una instalación
+        suya (backfill). Ordenadas."""
+        if not user_id:
+            return []
+        owned = set(installation_ids or ())
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT installation_id, provider, entry_json "
+                "FROM connections").fetchall()
+        out = []
+        for iid, provider, blob in rows:
+            marker = json.loads(blob).get("user_id")
+            if marker == user_id or (marker is None and iid in owned):
+                out.append((iid, provider))
+        return sorted(out)
+
+    def set_user_id_for_installation(
+            self, installation_id: str,
+            user_id: str) -> list[tuple[str, str]]:
+        """Adopción Fase 1 (spec §3): columna + entry JSON, devuelve las
+        parejas `(provider, provider_user_id)` para `owner_user_id`."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT provider, entry_json FROM connections "
+                "WHERE installation_id=?", (installation_id,)).fetchall()
+            pairs = []
+            for provider, blob in rows:
+                entry = json.loads(blob)
+                entry["user_id"] = user_id
+                self._conn.execute(
+                    "UPDATE connections SET user_id=?, entry_json=? "
+                    "WHERE installation_id=? AND provider=?",
+                    (user_id, json.dumps(entry), installation_id,
+                     provider))
+                provider_user_id = entry.get("account", {}).get(
+                    "provider_user_id")
+                if provider_user_id:
+                    pairs.append((provider, provider_user_id))
+            self._conn.commit()
+            return sorted(pairs)
+
 
 def _pair_to_row(account: Account, tokens: TokenPair) -> tuple:
     return (account.provider.value, account.provider_user_id,
@@ -374,6 +523,85 @@ class SqliteTokenStore(SqliteStore, TokenStore):
                 "DELETE FROM tokens WHERE provider=? AND provider_user_id=?",
                 (account.provider.value, account.provider_user_id))
             self._conn.commit()
+
+    def set_owner(self, provider: str, provider_user_id: str,
+                  owner_user_id: str) -> bool:
+        """Adopción Fase 1 (spec §3). False si no existe la fila."""
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE tokens SET owner_user_id=? "
+                "WHERE provider=? AND provider_user_id=?",
+                (owner_user_id, provider, provider_user_id))
+            self._conn.commit()
+            return cursor.rowcount > 0
+
+    def owner_of(self, provider: str,
+                 provider_user_id: str) -> str | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT owner_user_id FROM tokens "
+                "WHERE provider=? AND provider_user_id=?",
+                (provider, provider_user_id)).fetchone()
+        return row[0] if row else None
+
+
+class SqliteUserStore(SqliteStore):
+    """Cuentas Managed sobre SQLite (Fase 1, spec §3). DEV/TEST únicamente
+    (hereda DEVELOPMENT_ONLY de SqliteStore; SQLite nunca es producción)."""
+
+    def create(self, user: User) -> None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id FROM users WHERE username=?",
+                (user.username,)).fetchone()
+            if row is not None:
+                raise UserExistsError("username already exists")
+            try:
+                self._conn.execute(
+                    "INSERT INTO users (id, username, password_hash, "
+                    "created_at, updated_at, totp_secret, oauth_provider, "
+                    "oauth_subject) VALUES (?,?,?,?,?,?,?,?)",
+                    (user.id, user.username, user.password_hash,
+                     user.created_at, user.updated_at, user.totp_secret,
+                     user.oauth_provider, user.oauth_subject))
+            except sqlite3.IntegrityError as exc:
+                self._conn.rollback()
+                raise UserExistsError(
+                    "username already exists") from exc
+            self._conn.commit()
+
+    @staticmethod
+    def _row_to_user(row) -> User:
+        return User(id=row[0], username=row[1], password_hash=row[2],
+                    created_at=row[3], updated_at=row[4],
+                    totp_secret=row[5], oauth_provider=row[6],
+                    oauth_subject=row[7])
+
+    def load_by_id(self, user_id: str) -> User | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id, username, password_hash, created_at, "
+                "updated_at, totp_secret, oauth_provider, oauth_subject "
+                "FROM users WHERE id=?", (user_id,)).fetchone()
+        return self._row_to_user(row) if row else None
+
+    def load_by_username(self, username: str) -> User | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id, username, password_hash, created_at, "
+                "updated_at, totp_secret, oauth_provider, oauth_subject "
+                "FROM users WHERE username=?", (username,)).fetchone()
+        return self._row_to_user(row) if row else None
+
+    def delete(self, user_id: str) -> bool:
+        """Borrado de la fila (Fase 5a). Idempotente: True si existía."""
+        if not user_id:
+            return False
+        with self._lock:
+            cursor = self._conn.execute("DELETE FROM users WHERE id=?",
+                                        (user_id,))
+            self._conn.commit()
+            return cursor.rowcount > 0
 
 
 class FileSecretStore(SecretStore):

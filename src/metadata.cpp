@@ -348,8 +348,7 @@ RevokeEndpoint revokeEndpoint(Platform p)
 }
 
 QString userMessage(Outcome o, Platform p)
-{
-	switch (o) {
+{	switch (o) {
 	case Outcome::Success:
 		return QStringLiteral("%1 updated.").arg(platformName(p));
 	case Outcome::BadRequest:
@@ -442,6 +441,70 @@ TwPollAction classifyTwPoll(int http, bool netFail, const QString &message,
 	if (message.contains(QStringLiteral("access_denied")))
 		return TwPollAction::FailDenied;
 	return TwPollAction::FailExpired;
+}
+
+// Fase 4: gate login previo a Managed (spec §5). Texto exacto único,
+// reutilizado por las 4 plataformas en Connect/Apply/erase/status/
+// broadcasts. Sin secretos, sin nombres de plataforma: el mismo para
+// todas, para no filtrar ni inventar mapeos.
+QString managedLoginRequiredMessage()
+{
+	return QStringLiteral(
+		"Managed login required. Log in to use Managed.");
+}
+
+bool managedActionAllowed(bool hasUserSession)
+{
+	return hasUserSession;
+}
+
+QString userSessionHeaderName()
+{
+	return QStringLiteral("X-User-Session");
+}
+
+bool managedHeadersIncludeUserSession(bool isManaged)
+{
+	return isManaged;
+}
+
+QStringList forbiddenUserSessionShapes()
+{
+	return QStringList{QStringLiteral("user_session"),
+			   QStringLiteral("userSession"),
+			   QStringLiteral("X-User-Session")};
+}
+
+QString userNoRecoveryNotice()
+{
+	return QStringLiteral(
+		"v1 account has no email: no account recovery. "
+		"Keep your password safe.");
+}
+
+// Fase 5: borrado de CUENTA (/users/erase) separado de F-C2
+// (/privacy/erase). Rutas canónicas distintas por construcción; el
+// resumen de respuesta solo incrusta enteros (conteos por tabla).
+const char *accountErasePath()
+{
+	return "/users/erase";
+}
+
+const char *managedDataErasePath()
+{
+	return "/privacy/erase";
+}
+
+QString accountEraseCountsMessage(int users, int installations, int sessions,
+				  int connections, int tokens)
+{
+	return QStringLiteral("Account erased (users=%1, installations=%2, "
+			      "sessions=%3, connections=%4, tokens=%5).")
+		.arg(users)
+		.arg(installations)
+		.arg(sessions)
+		.arg(connections)
+		.arg(tokens);
 }
 
 } // namespace meta

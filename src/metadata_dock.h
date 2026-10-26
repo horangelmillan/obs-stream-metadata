@@ -133,6 +133,19 @@ private slots:
 	QString managedAuthError(meta::Platform p, backend_auth::Result r, int);
 	QString managedApiError(meta::Platform p,
 				const backend_auth::Client::ApiReply &rep);
+	// Fase 4: gate login previo a Managed (spec §5). Independent:
+	// siempre true (sin cambios). Managed: exige user-session en
+	// memoria; sin ella, mensaje exacto reutilizado y CERO red (el
+	// llamador retorna sin fallback a Independent).
+	bool requireManagedLogin(meta::Platform p);
+	bool requireManagedLoginMsg();
+	// 401 Managed normalizado (auth doble): cae la conexión local,
+	// mensaje de login y formulario al frente. Independent intacto.
+	void noteManagedAuthFailure(meta::Platform p);
+	// Estados del formulario de cuenta Managed (solo Managed).
+	void refreshManagedLoginUi();
+	// Error de signup/login a mensaje UI (sin secretos, sin detalles).
+	QString userAuthError(backend_auth::Result r, bool isSignup);
 	// FASE 2.1-C: Apply Managed YouTube via backend (tokens server-side).
 	// Independent YouTube path untouched.
 	void fetchManagedBroadcasts();
@@ -194,6 +207,14 @@ private slots:
 	void clearFbIngest();
 	// F-C2: borrado total Managed (POST /privacy/erase + snapshots).
 	void onEraseManagedData();
+	// Fase 5b: borrado de CUENTA Managed (POST /users/erase en cascada
+	// + sesión/snapshots locales). Operación distinta de F-C2.
+	void onEraseAccount();
+	// Fase 4: cuenta de usuario Managed (v1: username+password, sin
+	// email; aviso "sin recuperación en v1"). Solo memoria.
+	void onUserLogin();
+	void onUserSignup();
+	void onUserLogout();
 
 private:
 	// One request at a time; replies carry their Op in a property.
@@ -371,6 +392,19 @@ private:
 	QPushButton *applyButton_ = nullptr;
 	// F-C2: "Borrar mis datos" (solo Managed; Independent intacto).
 	QPushButton *eraseButton_ = nullptr;
+	// Fase 4: formulario de cuenta Managed (username+password v1, sin
+	// email). Solo memoria, jamás Store/DPAPI. Visible solo en Managed.
+	QLineEdit *userNameEdit_ = nullptr;
+	QLineEdit *userPassEdit_ = nullptr;
+	QPushButton *userLoginBtn_ = nullptr;
+	QPushButton *userSignupBtn_ = nullptr;
+	QPushButton *userLogoutBtn_ = nullptr;
+	QLabel *userStatus_ = nullptr;
+	QLabel *userNotice_ = nullptr;
+	// Fase 5b: borrado de CUENTA Managed (POST /users/erase en cascada).
+	// Operación distinta de POST /privacy/erase (F-C2, por
+	// instalación): aquí cae el usuario con TODAS sus instalaciones.
+	QPushButton *eraseAccountButton_ = nullptr;
 	QLabel *twResult_ = nullptr;
 	QLabel *ytResult_ = nullptr;
 	QLabel *kkResult_ = nullptr;

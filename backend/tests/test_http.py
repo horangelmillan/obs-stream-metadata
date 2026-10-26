@@ -31,6 +31,27 @@ def _post(base, path, payload, headers=None):
         return e.code, dict(e.headers), e.read()
 
 
+# Fase 3: headers duales Managed (bearer instalación + X-User-Session).
+# Hace signup+login adoptando la instalación del bearer llamante.
+_DUAL_PW = "correct-horse-7-dual-9"
+
+
+def _dual_headers(base, install_token, username=None):
+    import secrets as _secrets
+    username = username or ("dual-" + _secrets.token_hex(4))
+    auth = {"Authorization": "Bearer " + install_token}
+    status, _, body = _post(base, "/users/signup",
+                            {"username": username, "password": _DUAL_PW},
+                            headers=auth)
+    assert status == 201, body
+    status, _, body = _post(base, "/users/login",
+                            {"username": username, "password": _DUAL_PW},
+                            headers=auth)
+    assert status == 200, body
+    return {"Authorization": "Bearer " + install_token,
+            "X-User-Session": json.loads(body)["user_session"]}
+
+
 class HttpTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -78,13 +99,15 @@ class HttpTest(unittest.TestCase):
 
     def test_connect_alias_and_generic_routes(self):
         """El alias /connect/youtube debe comportarse como el genérico
-        (regresión: AttributeError app.youtube → 500)."""
+        (regresión: AttributeError app.youtube → 500). Fase 3: con doble
+        sesión (instalación + usuario)."""
         base = self._served_app()
         token = self._session(base)
+        headers = _dual_headers(base, token)
         for path in ("/connect/youtube",):
             status, _, body = _post(
                 base, path, {},
-                {"Authorization": "Bearer " + token})
+                headers)
             self.assertEqual(status, 200, path)
             payload = json.loads(body)
             self.assertIn("authorization_url", payload)
@@ -136,7 +159,8 @@ class HttpTest(unittest.TestCase):
         self.assertEqual(json.loads(body)["error"]["code"], "authentication_error")
 
     def test_session_allows_reserved_paths_shape(self):
-        """El gate existe: con sesión vigente emitida por /auth/* no hay 401."""
+        """El gate existe: con doble sesión vigente (Fase 3) no hay 401 en
+        rutas Managed (el dispatcher responde 400 ante proveedor ausente)."""
         import time as _time
         from backend.auth import sign_installation_secret
         status, _, body = _post(self.base, "/auth/bootstrap", {})
@@ -152,9 +176,9 @@ class HttpTest(unittest.TestCase):
                                  "signature": sig})
         self.assertEqual(status, 200)
         token = json.loads(body)["session_token"]
-        status, _, _ = _get(self.base, "/connect/youtube",
-                            {"Authorization": "Bearer " + token})
-        self.assertNotEqual(status, 401)
+        headers = _dual_headers(self.base, token)
+        status, _, _ = _get(self.base, "/connect/youtube/status", headers)
+        self.assertEqual(status, 400)
 
     def test_privacy_erase_route(self):
         """F-C2: POST /privacy/erase borra la instalación; el bearer usado

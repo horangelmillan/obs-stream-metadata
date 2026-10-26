@@ -157,6 +157,38 @@ FbVerifyResult facebookVerifyPrepared(const QString &expTitle,
 // User-facing message. Never leaks JSON, headers, tokens or URLs (§16).
 QString userMessage(Outcome o, Platform p);
 
+// Fase 4 (cuentas de usuario Managed, spec §§4–5): gate login previo a
+// Managed. Sin user-session válida en memoria, TODAS las acciones
+// Managed (Connect/Apply/erase por proveedor + status/broadcasts)
+// quedan funcionalmente deshabilitadas con UN mensaje exacto,
+// reutilizado en las 4 plataformas, sin red ni fallback silencioso a
+// Independent. Puro QtCore, sin I/O/red/logs.
+QString managedLoginRequiredMessage();
+// true solo con user-session válida en memoria. El llamador NO hace red
+// cuando esto es false (gate previo, sin fallback a Independent).
+bool managedActionAllowed(bool hasUserSession);
+// Nombre canónico del header de sesión de usuario (debe coincidir con
+// el backend: `X-User-Session`). Independent jamás lo envía ni lo exige.
+QString userSessionHeaderName();
+// Managed adjunta X-User-Session; Independent nunca (ADR-008/012).
+bool managedHeadersIncludeUserSession(bool isManaged);
+// Formas de serialización prohibidas en accounts.json/DPAPI: la sesión
+// de usuario vive SOLO en memoria (spec §5). El selfcheck las busca en
+// el fichero crudo tras un save completo.
+QStringList forbiddenUserSessionShapes();
+// Aviso v1 sin email (spec §7): sin recuperación de cuenta. Solo UI.
+QString userNoRecoveryNotice();
+
+// Fase 5: borrado de CUENTA (/users/erase) separado del borrado de DATOS
+// F-C2 (/privacy/erase). Rutas canónicas distintas; la respuesta lleva
+// solo conteos por tabla + revocaciones por proveedor (jamás secretos).
+const char *accountErasePath(); // "/users/erase"
+const char *managedDataErasePath(); // "/privacy/erase" (F-C2, intacto)
+// Mensaje UI con solo conteos (enteros como texto; nada de tokens,
+// secretos, hashes ni IDs). Puro QtCore, sin I/O/red/logs.
+QString accountEraseCountsMessage(int users, int installations, int sessions,
+				  int connections, int tokens);
+
 // T-032: bounded retry policy for 429/5xx on Apply (§28). At most
 // kBackoffMaxRetries resends per platform with backoffDelayMs spacing;
 // never a loop. Refresh-once (§25) is preserved across resends.

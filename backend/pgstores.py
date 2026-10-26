@@ -15,6 +15,7 @@ from backend.db import PgPool
 from backend.kernel import Account
 from backend.ports import (Installation, InstallationStore, SessionStore,
                            TokenPair, TokenStore)
+from backend.users import User, UserExistsError
 
 
 class PgInstallationStore(InstallationStore):
@@ -62,19 +63,56 @@ class PgInstallationStore(InstallationStore):
                             (installation_id,))
             conn.commit()
 
+    def set_user_id(self, installation_id: str, user_id: str) -> bool:
+        """Adopción Fase 1 (spec §3). False si no existe (sin efectos)."""
+        with self._pool as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE installations SET user_id=%s "
+                            "WHERE id=%s", (user_id, installation_id))
+                updated = cur.rowcount
+            conn.commit()
+            return updated > 0
+
+    def get_user_id(self, installation_id: str) -> str | None:
+        with self._pool as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT user_id FROM installations WHERE id=%s",
+                            (installation_id,))
+                row = cur.fetchone()
+            conn.commit()
+        return row[0] if row else None
+
+    def list_for_user(self, user_id: str) -> list:
+        """Instalaciones adoptadas por el usuario (Fase 5a). Ordenadas."""
+        if not user_id:
+            return []
+        with self._pool as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM installations WHERE user_id=%s",
+                            (user_id,))
+                rows = cur.fetchall()
+            conn.commit()
+        return sorted(row[0] for row in rows)
+
 
 class PgSessionStore(SessionStore):
     def __init__(self, pool: PgPool) -> None:
         self._pool = pool
 
     def save_session(self, session_id: str, payload: dict) -> None:
+        # Fase 2: columna user_id para sesiones de usuario (migración 003;
+        # el runner la aplica antes de servir). Misma tabla, lectura
+        # uniforme vía `load_session`.
+        user_id = payload.get("user_id") if isinstance(payload, dict) else None
         with self._pool as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "INSERT INTO sessions (id, payload_json) VALUES (%s, %s) "
+                    "INSERT INTO sessions (id, payload_json, user_id) "
+                    "VALUES (%s, %s, %s) "
                     "ON CONFLICT (id) DO UPDATE SET "
-                    "payload_json=EXCLUDED.payload_json",
-                    (session_id, json.dumps(payload)))
+                    "payload_json=EXCLUDED.payload_json, "
+                    "user_id=EXCLUDED.user_id",
+                    (session_id, json.dumps(payload), user_id))
             conn.commit()
 
     def load_session(self, session_id: str) -> dict | None:
@@ -127,6 +165,42 @@ class PgSessionStore(SessionStore):
                                     (sid,))
             conn.commit()
             return {"expired": expired, "revoked": revoked}
+
+    def delete_for_user(self, user_id: str) -> int:
+        """Borra las sesiones marcadas con `user_id` (Fase 5a)."""
+        if not user_id:
+            return 0
+        with self._pool as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id, payload_json FROM sessions")
+                rows = cur.fetchall()
+                doomed = [sid for sid, blob in rows
+                          if json.loads(blob).get("user_id") == user_id]
+                for sid in doomed:
+                    cur.execute("DELETE FROM sessions WHERE id=%s", (sid,))
+            conn.commit()
+            return len(doomed)
+
+    def set_user_id_for_installation(self, installation_id: str,
+                                     user_id: str) -> int:
+        """Adopción Fase 1 (spec §3): columna + payload JSON (lectura
+        uniforme vía `load_session` en todos los backends)."""
+        with self._pool as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id, payload_json FROM sessions")
+                rows = cur.fetchall()
+                count = 0
+                for sid, blob in rows:
+                    payload = json.loads(blob)
+                    if payload.get("installation_id") == installation_id:
+                        payload["user_id"] = user_id
+                        cur.execute(
+                            "UPDATE sessions SET user_id=%s, "
+                            "payload_json=%s WHERE id=%s",
+                            (user_id, json.dumps(payload), sid))
+                        count += 1
+            conn.commit()
+            return count
 
 
 class PgOAuthTransactionStore:
@@ -272,6 +346,55 @@ class PgConnectionStore:
                           "account", {}).get("provider_user_id")
                       == provider_user_id)
 
+    def list_for_user(self, user_id: str,
+                      installation_ids=()) -> list:
+        """Parejas `(installation_id, provider)` del usuario (Fase 5a):
+        entrada marcada con su `user_id`, o sin marca en una instalación
+        suya (backfill). Ordenadas."""
+        if not user_id:
+            return []
+        owned = set(installation_ids or ())
+        with self._pool as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT installation_id, provider, entry_json "
+                    "FROM connections")
+                rows = cur.fetchall()
+            conn.commit()
+        out = []
+        for iid, provider, blob in rows:
+            marker = json.loads(blob).get("user_id")
+            if marker == user_id or (marker is None and iid in owned):
+                out.append((iid, provider))
+        return sorted(out)
+
+    def set_user_id_for_installation(
+            self, installation_id: str,
+            user_id: str) -> list[tuple[str, str]]:
+        """Adopción Fase 1 (spec §3): columna + entry JSON, devuelve las
+        parejas `(provider, provider_user_id)` para `owner_user_id`."""
+        with self._pool as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT provider, entry_json FROM connections "
+                    "WHERE installation_id=%s", (installation_id,))
+                rows = cur.fetchall()
+                pairs = []
+                for provider, blob in rows:
+                    entry = json.loads(blob)
+                    entry["user_id"] = user_id
+                    cur.execute(
+                        "UPDATE connections SET user_id=%s, entry_json=%s "
+                        "WHERE installation_id=%s AND provider=%s",
+                        (user_id, json.dumps(entry), installation_id,
+                         provider))
+                    provider_user_id = entry.get("account", {}).get(
+                        "provider_user_id")
+                    if provider_user_id:
+                        pairs.append((provider, provider_user_id))
+            conn.commit()
+            return sorted(pairs)
+
 
 class PgTokenStore(TokenStore):
     def __init__(self, pool: PgPool) -> None:
@@ -317,3 +440,103 @@ class PgTokenStore(TokenStore):
                     "WHERE provider=%s AND provider_user_id=%s",
                     (account.provider.value, account.provider_user_id))
             conn.commit()
+
+    def set_owner(self, provider: str, provider_user_id: str,
+                  owner_user_id: str) -> bool:
+        """Adopción Fase 1 (spec §3). False si no existe la fila."""
+        with self._pool as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE tokens SET owner_user_id=%s "
+                    "WHERE provider=%s AND provider_user_id=%s",
+                    (owner_user_id, provider, provider_user_id))
+                updated = cur.rowcount
+            conn.commit()
+            return updated > 0
+
+    def owner_of(self, provider: str,
+                 provider_user_id: str) -> str | None:
+        with self._pool as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT owner_user_id FROM tokens "
+                    "WHERE provider=%s AND provider_user_id=%s",
+                    (provider, provider_user_id))
+                row = cur.fetchone()
+            conn.commit()
+        return row[0] if row else None
+
+
+class PgUserStore:
+    """Cuentas Managed sobre PostgreSQL (Fase 1, spec §3). Sin
+    DEVELOPMENT_ONLY: apto para `production` (pasa los gates T-053)."""
+
+    def __init__(self, pool: PgPool) -> None:
+        self._pool = pool
+
+    @staticmethod
+    def _row_to_user(row) -> User:
+        return User(id=row[0], username=row[1], password_hash=row[2],
+                    created_at=row[3], updated_at=row[4],
+                    totp_secret=row[5], oauth_provider=row[6],
+                    oauth_subject=row[7])
+
+    def create(self, user: User) -> None:
+        with self._pool as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM users WHERE username=%s",
+                            (user.username,))
+                if cur.fetchone() is not None:
+                    conn.rollback()
+                    raise UserExistsError("username already exists")
+                try:
+                    cur.execute(
+                        "INSERT INTO users (id, username, password_hash, "
+                        "created_at, updated_at, totp_secret, "
+                        "oauth_provider, oauth_subject) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                        (user.id, user.username, user.password_hash,
+                         user.created_at, user.updated_at,
+                         user.totp_secret, user.oauth_provider,
+                         user.oauth_subject))
+                except Exception as exc:
+                    conn.rollback()
+                    if getattr(exc, "pgcode", "") == "23505":
+                        raise UserExistsError(
+                            "username already exists") from exc
+                    raise
+            conn.commit()
+
+    def load_by_id(self, user_id: str) -> User | None:
+        with self._pool as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id, username, password_hash, created_at, "
+                    "updated_at, totp_secret, oauth_provider, "
+                    "oauth_subject FROM users WHERE id=%s", (user_id,))
+                row = cur.fetchone()
+            conn.commit()
+        return self._row_to_user(row) if row else None
+
+    def load_by_username(self, username: str) -> User | None:
+        with self._pool as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id, username, password_hash, created_at, "
+                    "updated_at, totp_secret, oauth_provider, "
+                    "oauth_subject FROM users WHERE username=%s",
+                    (username,))
+                row = cur.fetchone()
+            conn.commit()
+        return self._row_to_user(row) if row else None
+
+    def delete(self, user_id: str) -> bool:
+        """Borrado de la fila (Fase 5a). Idempotente: True si existía."""
+        if not user_id:
+            return False
+        with self._pool as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM users WHERE id=%s", (user_id,))
+                gone = cur.rowcount > 0
+            conn.commit()
+            return gone

@@ -1079,6 +1079,150 @@ int main(int argc, char **argv)
 		      "adopt-case-insensitive");
 	}
 
+	// Fase 4: gate login previo a Managed (spec §5). Sin user-session
+	// en memoria: TODAS las acciones Managed deshabilitadas con UN
+	// mensaje exacto reutilizado en las 4 plataformas; sin red ni
+	// fallback silencioso a Independent. Sesión solo-memoria: jamás
+	// en accounts.json/DPAPI. Independent jamás exige user header.
+	{
+		const QString gate =
+			meta::managedLoginRequiredMessage();
+		CHECK(!gate.isEmpty(), "f4-gate-nonempty");
+		CHECK(gate == meta::managedLoginRequiredMessage(),
+		      "f4-gate-stable");
+		CHECK(!gate.contains(QStringLiteral("Bearer")) &&
+			      !gate.contains(QStringLiteral("token")) &&
+			      !gate.contains(QStringLiteral("secret")) &&
+			      !gate.contains(QStringLiteral("password")) &&
+			      !gate.contains(QStringLiteral("http")),
+		      "f4-gate-safe");
+		CHECK(!meta::managedActionAllowed(false),
+		      "f4-gate-blocked");
+		CHECK(meta::managedActionAllowed(true), "f4-gate-allowed");
+		CHECK(meta::userSessionHeaderName() ==
+			      QStringLiteral("X-User-Session"),
+		      "f4-user-header");
+		CHECK(!meta::managedHeadersIncludeUserSession(false),
+		      "f4-independent-no-user-header");
+		CHECK(meta::managedHeadersIncludeUserSession(true),
+		      "f4-managed-user-header");
+		const QStringList forbidden =
+			meta::forbiddenUserSessionShapes();
+		CHECK(forbidden.contains(QStringLiteral("user_session")) &&
+			      forbidden.contains(
+				      QStringLiteral("userSession")) &&
+			      forbidden.contains(
+				      QStringLiteral("X-User-Session")),
+		      "f4-forbidden-shapes");
+		CHECK(!meta::userNoRecoveryNotice().isEmpty() &&
+			      meta::userNoRecoveryNotice().contains(
+				      QStringLiteral("no account recovery")),
+		      "f4-no-recovery");
+	}
+#ifdef Q_OS_WIN
+	// Fase 4: memoria-only probado en disco. Con TODO conectado
+	// (Independent + backendInstall + snapshots Managed), el fichero
+	// crudo jamás contiene formas de user-session.
+	{
+		QTemporaryDir tmp;
+		CHECK(tmp.isValid(), "f4-store-tmpdir");
+		const QString path =
+			tmp.filePath(QStringLiteral("accounts.json"));
+		secure::Store store(path);
+		secure::Data d;
+		d.twitch.connected = true;
+		d.twitch.display = QStringLiteral("fake-login");
+		d.twitch.access = QStringLiteral("fk-tok-4cc3ss-9z");
+		d.twitch.clientId = QStringLiteral("fk-client-id-9z");
+		d.youtube.connected = true;
+		d.youtube.display = QStringLiteral("fake-chan");
+		d.youtube.access = QStringLiteral("fk-yt-4cc3ss-9z");
+		d.youtube.clientId = QStringLiteral("fk-yt-id-9z");
+		d.youtube.secret = QStringLiteral("fk-yt-secret-9z");
+		d.backendInstall.connected = true;
+		d.backendInstall.clientId = QStringLiteral("fk-install-9z");
+		d.backendInstall.secret = QStringLiteral("fk-isecret-9z");
+		d.connectionMode = QStringLiteral("managed");
+		d.managedYoutube.connected = true;
+		d.managedYoutube.userId = QStringLiteral("UC9z");
+		d.managedYoutube.display = QStringLiteral("Canal 9z");
+		d.managedTwitch.connected = true;
+		d.managedTwitch.userId = QStringLiteral("123");
+		d.managedTwitch.display = QStringLiteral("Tw 9z");
+		d.managedKick.connected = true;
+		d.managedKick.userId = QStringLiteral("456");
+		d.managedKick.display = QStringLiteral("Kk 9z");
+		d.managedFacebook.connected = true;
+		d.managedFacebook.userId = QStringLiteral("789");
+		d.managedFacebook.display = QStringLiteral("Fb 9z");
+		CHECK(store.save(d), "f4-store-save");
+		QFile raw(path);
+		CHECK(raw.open(QIODevice::ReadOnly), "f4-store-raw");
+		const QByteArray bytes = raw.readAll();
+		raw.close();
+		for (const QString &shape :
+		     meta::forbiddenUserSessionShapes()) {
+			if (bytes.contains(shape.toUtf8())) {
+				std::printf("FAIL f4-store-no-user-session\n");
+				return 1;
+			}
+		}
+		std::printf("PASS f4-store-no-user-session\n");
+		CHECK(bytes.contains("Canal 9z"), "f4-store-labels-kept");
+	}
+#endif
+
+	// Fase 5: borrado de CUENTA (/users/erase) separado de F-C2.
+	// Exige login (gate §5), usa auth doble (instalación + usuario),
+	// la respuesta muestra solo conteos (jamás secretos) y F-C2 queda
+	// intacto (ruta propia, operación distinta).
+	{
+		CHECK(QString::fromLatin1(meta::accountErasePath()) ==
+			      QStringLiteral("/users/erase"),
+		      "f5-erase-path");
+		CHECK(QString::fromLatin1(meta::managedDataErasePath()) ==
+			      QStringLiteral("/privacy/erase"),
+		      "f5-fc2-path");
+		CHECK(QString::fromLatin1(meta::accountErasePath()) !=
+			      QString::fromLatin1(
+				      meta::managedDataErasePath()),
+		      "f5-paths-distinct");
+		CHECK(!meta::managedActionAllowed(false),
+		      "f5-erase-requires-login");
+		CHECK(meta::managedActionAllowed(true),
+		      "f5-erase-allowed-logged");
+		CHECK(meta::managedHeadersIncludeUserSession(true),
+		      "f5-erase-dual-managed");
+		CHECK(!meta::managedHeadersIncludeUserSession(false),
+		      "f5-erase-no-user-header-independent");
+		CHECK(meta::userSessionHeaderName() ==
+			      QStringLiteral("X-User-Session"),
+		      "f5-erase-user-header");
+		const QString em = meta::accountEraseCountsMessage(
+			1, 2, 3, 4, 5);
+		CHECK(!em.isEmpty(), "f5-erase-msg-nonempty");
+		CHECK(em.contains(QStringLiteral("users=1")) &&
+			      em.contains(QStringLiteral("installations=2")) &&
+			      em.contains(QStringLiteral("sessions=3")) &&
+			      em.contains(QStringLiteral("connections=4")) &&
+			      em.contains(QStringLiteral("tokens=5")),
+		      "f5-erase-msg-counts");
+		const QStringList shapes{
+			QStringLiteral("token="), QStringLiteral("secret"),
+			QStringLiteral("password"), QStringLiteral("Bearer"),
+			QStringLiteral("http"),
+			QStringLiteral("user_session"),
+			QStringLiteral("userSession"),
+			QStringLiteral("X-User-Session")};
+		for (const QString &shape : shapes) {
+			if (em.contains(shape)) {
+				std::printf("FAIL f5-erase-msg-safe\n");
+				return 1;
+			}
+		}
+		std::printf("PASS f5-erase-msg-safe\n");
+	}
+
 	std::printf("SELFCHECK OK\n");
 	return 0;
 }
