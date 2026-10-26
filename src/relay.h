@@ -33,6 +33,7 @@ y GET de confirmacion; aqui solo se construye el body.
 
 #pragma once
 
+#include <QJsonObject>
 #include <QString>
 #include <QStringList>
 
@@ -90,6 +91,25 @@ long long cooldownRemainingMs(long long lastOkMs, long long nowMs);
 // F-098: aviso auto-VOD (cierre deja VOD salvo borrado explicito).
 QString vodNoticeMessage();
 
+// Fase A punto 4: senal del emisor (solo localhost, sin Graph).
+// Path de lectura del path live (config get, no patch) + parse
+// tolerante para la vista (a demanda, sin polling aun).
+QString controlSignalPath(); // "/v3/config/paths/get/live"
+// Estado crudo del path live para la vista (puro, sin I/O/red).
+// present=false si el objeto no trae el path; ready=emitiendo
+// configurado; hasSource=hay fuente entrante; inboundBytes=-1 si
+// no se informa; forwardDests=destinos forward configurados.
+struct Signal {
+	bool present = false;
+	bool ready = false;
+	bool hasSource = false;
+	long long inboundBytes = -1;
+	QStringList forwardDests;
+};
+Signal parseSignal(const QJsonObject &o);
+// true si hay emisor real: path presente + ready + fuente + bytes>0.
+// Puro para la vista (el dock expone el estado crudo + este predicado).
+bool signalHasEmitter(const Signal &s);
 // Fase 3 (T-078): estado del relay para el indicador. La vista redacta
 // los textos finales; aqui solo estados (puros, testeables) + el nombre
 // corto para logs (sin secretos). El cooldown bloqueado NO es estado:

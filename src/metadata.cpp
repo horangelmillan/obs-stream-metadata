@@ -348,6 +348,50 @@ FbVerifyResult facebookVerifyPrepared(const QString &expTitle,
 	return {FbVerify::Verified, QStringLiteral("verified")};
 }
 
+// Fase A auto-preparacion (puro): fallback titulo/desc.
+QString fbAutoCreateTitle(const QString &widgetTitle,
+			 const QString &prevTitle)
+{
+	const QString w = widgetTitle.trimmed();
+	if (!w.isEmpty())
+		return w;
+	return prevTitle.trimmed();
+}
+
+QString fbAutoCreateDesc(const QString &widgetDesc,
+			const QString &prevDesc)
+{
+	const QString w = widgetDesc.trimmed();
+	if (!w.isEmpty())
+		return w;
+	return prevDesc.trimmed();
+}
+
+bool fbPrevIsReusablePreview(const QString &prevStatus)
+{
+	return prevStatus == QStringLiteral("UNPUBLISHED");
+}
+
+bool fbAutoShouldDeletePrev(const QString &prevStatus,
+			   const QString &prevId, const QString &newId)
+{
+	const QString p = prevId.trimmed();
+	const QString n = newId.trimmed();
+	if (p.isEmpty() || n.isEmpty() || p == n)
+		return false;
+	return fbPrevIsReusablePreview(prevStatus.trimmed());
+}
+
+QString fbApplyChainNote(const FbVerifyResult &v)
+{
+	if (v.outcome == FbVerify::Verified)
+		return QString();
+	if (v.outcome == FbVerify::AudienceUnverified)
+		return QStringLiteral(
+			" — title/desc ok, audience not verified");
+	return QStringLiteral(" — title/desc written, not verified");
+}
+
 Outcome classifyStatus(int code)
 {
 	if (code >= 200 && code < 300)
