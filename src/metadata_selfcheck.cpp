@@ -1396,6 +1396,8 @@ int main(int argc, char **argv)
 		d.managedUser.token = QStringLiteral("fk-usersess-9z");
 		d.managedUser.expiry =
 			QDateTime::currentDateTimeUtc().addSecs(1800);
+		d.managedUser.loginAt =
+			QDateTime::currentDateTimeUtc().addSecs(-86400);
 		d.backendBaseUrl =
 			QStringLiteral("http://127.0.0.1:8080");
 		CHECK(store.save(d), "muser-save");
@@ -1429,6 +1431,9 @@ int main(int argc, char **argv)
 				      QStringLiteral("fk-usersess-9z") &&
 			      back.managedUser.expiry.toSecsSinceEpoch() ==
 				      d.managedUser.expiry
+					      .toSecsSinceEpoch() &&
+			      back.managedUser.loginAt.toSecsSinceEpoch() ==
+				      d.managedUser.loginAt
 					      .toSecsSinceEpoch() &&
 			      back.backendBaseUrl ==
 				      QStringLiteral("http://127.0.0.1:8080"),
@@ -2116,6 +2121,136 @@ int main(int argc, char **argv)
 			      !csum.contains(
 				      QStringLiteral("publisher")),
 		      "relay-signal-config-summary");
+	}
+
+	// Sesion Managed larga ([D 2026-10-26], contrato
+	// backend/tests/test_users_session_sliding.py): espejos del backend
+	// (15 d deslizantes + tope 30 d + margen 5 min), clasificacion del
+	// motivo del re-login y mensajes en lenguaje de persona. Sin red,
+	// sin secretos, sin pedir logs al usuario.
+	{
+		using meta::UserReloginReason;
+		CHECK(meta::kUserSessionTtlSecs == 15LL * 24 * 3600,
+		      "usess-ttl-15d");
+		CHECK(meta::kUserSessionMaxTtlSecs == 30LL * 24 * 3600,
+		      "usess-max-30d");
+		CHECK(meta::kUserSessionMarginSecs == 300,
+		      "usess-margin-5min");
+		CHECK(QString::fromLatin1(meta::userReloginReasonName(
+						 UserReloginReason::InactivityExpired)) ==
+			      QStringLiteral("expired-idle"),
+		      "usess-code-idle");
+		CHECK(QString::fromLatin1(meta::userReloginReasonName(
+						 UserReloginReason::LifetimeCap)) ==
+			      QStringLiteral("lifetime-cap"),
+		      "usess-code-cap");
+		CHECK(QString::fromLatin1(meta::userReloginReasonName(
+						 UserReloginReason::ServerMismatch)) ==
+			      QStringLiteral("server-mismatch"),
+		      "usess-code-mismatch");
+		CHECK(QString::fromLatin1(meta::userReloginReasonName(
+						 UserReloginReason::RevokedByServer)) ==
+			      QStringLiteral("revoked"),
+		      "usess-code-revoked");
+		CHECK(QString::fromLatin1(meta::userReloginReasonName(
+						 UserReloginReason::Unknown)) ==
+			      QStringLiteral("unknown"),
+		      "usess-code-unknown");
+		// Clasificacion: tope > expiracion > revocado > desconocido.
+		CHECK(meta::classifyUserRelogin(
+			      QStringLiteral("session_expired"), false,
+			      false) == UserReloginReason::InactivityExpired,
+		      "usess-cls-expired-code");
+		CHECK(meta::classifyUserRelogin(QString(), false, true) ==
+			      UserReloginReason::InactivityExpired,
+		      "usess-cls-expired-local");
+		CHECK(meta::classifyUserRelogin(
+			      QStringLiteral("session_expired"), true,
+			      true) == UserReloginReason::LifetimeCap,
+		      "usess-cls-cap-wins");
+		CHECK(meta::classifyUserRelogin(
+			      QStringLiteral("authentication_error"), false,
+			      false) == UserReloginReason::RevokedByServer,
+		      "usess-cls-revoked");
+		CHECK(meta::classifyUserRelogin(QString(), false, false) ==
+			      UserReloginReason::Unknown,
+		      "usess-cls-unknown");
+		// Mensajes: no vacios, sin secretos, sin tecnicismos, sin
+		// pedir logs. Unknown cae al gate (nunca vacio).
+		const QString idleMsg = meta::userReloginMessage(
+			UserReloginReason::InactivityExpired, 18);
+		CHECK(idleMsg.contains(QStringLiteral("18")) &&
+			      idleMsg.contains(QStringLiteral("Log in")),
+		      "usess-msg-idle-days");
+		CHECK(meta::userReloginMessage(
+			      UserReloginReason::InactivityExpired)
+				      .contains(QStringLiteral("inactivity")),
+		      "usess-msg-idle-generic");
+		CHECK(meta::userReloginMessage(
+			      UserReloginReason::LifetimeCap)
+				      .contains(QStringLiteral("30-day")),
+		      "usess-msg-cap");
+		CHECK(meta::userReloginMessage(
+			      UserReloginReason::ServerMismatch)
+				      .contains(
+					      QStringLiteral("different server")),
+		      "usess-msg-mismatch");
+		CHECK(meta::userReloginMessage(
+			      UserReloginReason::RevokedByServer)
+				      .contains(
+					      QStringLiteral("server ended")),
+		      "usess-msg-revoked");
+		CHECK(meta::userReloginMessage(UserReloginReason::Unknown) ==
+			      meta::managedLoginRequiredMessage(),
+		      "usess-msg-unknown-gate");
+		const UserReloginReason allReasons[] = {
+			UserReloginReason::Unknown,
+			UserReloginReason::InactivityExpired,
+			UserReloginReason::LifetimeCap,
+			UserReloginReason::ServerMismatch,
+			UserReloginReason::RevokedByServer,
+		};
+		for (UserReloginReason r : allReasons) {
+			for (int idle : {-1, 0, 18}) {
+				const QString m = meta::userReloginMessage(
+					r, idle);
+				if (m.isEmpty() ||
+				    m.contains(QStringLiteral("Bearer")) ||
+				    m.contains(QStringLiteral("token")) ||
+				    m.contains(QStringLiteral("secret")) ||
+				    m.contains(QStringLiteral("password")) ||
+				    m.contains(QStringLiteral("http")) ||
+				    m.contains(QStringLiteral("logs")) ||
+				    m.contains(QStringLiteral("requestId"))) {
+					std::printf("FAIL usess-msg-safe\n");
+					return 1;
+				}
+			}
+		}
+		std::printf("PASS usess-msg-safe\n");
+		// Tope absoluto: loginAt + 30 d; <=0 (heredada sin origen)
+		// nunca afirma (decide el servidor).
+		CHECK(meta::userSessionAtLifetimeCap(
+			      1000000, 1000000 + 30LL * 24 * 3600),
+		      "usess-cap-at");
+		CHECK(!meta::userSessionAtLifetimeCap(
+			1000000, 1000000 + 30LL * 24 * 3600 - 1),
+		      "usess-cap-before");
+		CHECK(!meta::userSessionAtLifetimeCap(0, 9999999999LL),
+		      "usess-cap-no-origin");
+		// Dias sin usarlo: (TTL - restante) / dia, nunca < 0.
+		CHECK(meta::userSessionIdleDays(15LL * 24 * 3600,
+						15LL * 24 * 3600) == 0,
+		      "usess-idle-fresh");
+		CHECK(meta::userSessionIdleDays(15LL * 24 * 3600,
+						15LL * 12 * 3600) == 7,
+		      "usess-idle-half");
+		CHECK(meta::userSessionIdleDays(15LL * 24 * 3600, -86400) ==
+			      16,
+		      "usess-idle-expired");
+		CHECK(meta::userSessionIdleDays(15LL * 24 * 3600,
+						15LL * 24 * 3600 + 100) == 0,
+		      "usess-idle-clamp");
 	}
 
 	std::printf("SELFCHECK OK\n");

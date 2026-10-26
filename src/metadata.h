@@ -248,6 +248,45 @@ QStringList forbiddenUserSessionShapes();
 // Aviso v1 sin email (spec §7): sin recuperación de cuenta. Solo UI.
 QString userNoRecoveryNotice();
 
+// Sesion Managed larga ([D 2026-10-26], contrato
+// backend/tests/test_users_session_sliding.py): ventana deslizante de 15 d
+// renovada por actividad + tope absoluto de 30 d desde el login. El backend
+// es la autoridad (renueva/recorta/rechaza con SESSION_EXPIRED o
+// authentication_error en el 401); aqui solo espejos para mensajes de
+// persona y margen de seguridad. Puro QtCore, sin I/O/red/logs.
+extern const qint64 kUserSessionTtlSecs;    // 15 d: ventana deslizante
+extern const qint64 kUserSessionMaxTtlSecs; // 30 d: tope absoluto login
+extern const int kUserSessionMarginSecs; // 300: margen de seguridad corto
+
+// Motivo por el que se pide login de nuevo: visible en la UI en lenguaje
+// de persona + codigo corto para obs_log. Sin secretos, sin tecnicismos,
+// sin pedir al usuario que busque logs.
+enum class UserReloginReason {
+	Unknown,
+	InactivityExpired, // 15 d sin uso (local o session_expired)
+	LifetimeCap, // tope de 30 d alcanzado aunque hubiera actividad
+	ServerMismatch, // login de otro servidor (fail-closed, nada entregado)
+	RevokedByServer, // el servidor termino la sesion (authentication_error)
+};
+const char *userReloginReasonName(UserReloginReason r); // "expired-idle", ...
+// backendCode = error.code del 401 ("session_expired" /
+// "authentication_error", puede ir vacio); atLifetimeCap sale de
+// userSessionAtLifetimeCap(); locallyExpired de la expiracion local.
+// Orden: mismatch (lo aporta el llamador) > tope > expiracion > revocado.
+UserReloginReason classifyUserRelogin(const QString &backendCode,
+				      bool atLifetimeCap,
+				      bool locallyExpired);
+// Mensaje en lenguaje de persona (idleDays = dias desde el ultimo uso;
+// <0 = sin dato, mensaje generico). Vacio jamas: Unknown cae al gate.
+QString userReloginMessage(UserReloginReason r, int idleDays = -1);
+// true si nowSecs alcanzo loginAtSecs + tope de 30 d. loginAtSecs <= 0
+// (sesion heredada sin origen) = false: el tope lo sigue aplicando el
+// servidor; aqui no se inventa.
+bool userSessionAtLifetimeCap(qint64 loginAtSecs, qint64 nowSecs);
+// Dias desde el ultimo uso a partir del TTL y lo que queda de sesion
+// (puede ser negativo si ya expiro: entonces idle > TTL). Nunca < 0.
+int userSessionIdleDays(qint64 ttlSecs, qint64 secsToExpiry);
+
 // f7 (bug 2026-10-26): resolucion del texto de sesion cuando NO hay
 // sesion de usuario. El llamador pasa el mensaje vigente (p. ej. el
 // error especifico de signup/login); si esta vacio se muestra el gate

@@ -16,6 +16,14 @@ const int kYouTubeTitleMax = 100;
 const int kYouTubeDescMax = 5000;
 const int kFacebookTitleMax = 254;
 
+// Sesion Managed larga ([D 2026-10-26]): espejos del backend
+// (backend/users.py: USER_SESSION_TTL_S / USER_SESSION_MAX_TTL_S, solo
+// lectura). El backend es la autoridad; el plugin solo los usa para el
+// margen de seguridad y los mensajes de persona.
+const qint64 kUserSessionTtlSecs = 15LL * 24 * 3600;
+const qint64 kUserSessionMaxTtlSecs = 30LL * 24 * 3600;
+const int kUserSessionMarginSecs = 300;
+
 const char *platformName(Platform p)
 {
 	switch (p) {
@@ -639,6 +647,82 @@ QString userNoRecoveryNotice()
 	return QStringLiteral(
 		"v1 account has no email: no account recovery. "
 		"Keep your password safe.");
+}
+
+// Sesion Managed larga ([D 2026-10-26]): motivo visible del re-login.
+// Criterio: mismatch (otro servidor) lo decide el llamador con el binding;
+// el tope absoluto gana a la ventana deslizante; session_expired o
+// expiracion local = inactividad; authentication_error = revocado.
+const char *userReloginReasonName(UserReloginReason r)
+{
+	switch (r) {
+	case UserReloginReason::InactivityExpired:
+		return "expired-idle";
+	case UserReloginReason::LifetimeCap:
+		return "lifetime-cap";
+	case UserReloginReason::ServerMismatch:
+		return "server-mismatch";
+	case UserReloginReason::RevokedByServer:
+		return "revoked";
+	case UserReloginReason::Unknown:
+		break;
+	}
+	return "unknown";
+}
+
+UserReloginReason classifyUserRelogin(const QString &backendCode,
+				      bool atLifetimeCap,
+				      bool locallyExpired)
+{
+	if (atLifetimeCap)
+		return UserReloginReason::LifetimeCap;
+	if (backendCode == QStringLiteral("session_expired") ||
+	    locallyExpired)
+		return UserReloginReason::InactivityExpired;
+	if (backendCode == QStringLiteral("authentication_error"))
+		return UserReloginReason::RevokedByServer;
+	return UserReloginReason::Unknown;
+}
+
+QString userReloginMessage(UserReloginReason r, int idleDays)
+{
+	switch (r) {
+	case UserReloginReason::InactivityExpired:
+		if (idleDays >= 0)
+			return QStringLiteral(
+				       "You haven't used it in %1 days. "
+				       "Log in again.")
+				.arg(idleDays);
+		return QStringLiteral(
+			"Your session expired from inactivity. Log in again.");
+	case UserReloginReason::LifetimeCap:
+		return QStringLiteral(
+			"Your session reached its 30-day limit. "
+			"Log in again to start a new one.");
+	case UserReloginReason::ServerMismatch:
+		return QStringLiteral(
+			"This login belongs to a different server. "
+			"Log in again here.");
+	case UserReloginReason::RevokedByServer:
+		return QStringLiteral(
+			"The server ended your session. Log in again.");
+	case UserReloginReason::Unknown:
+		break;
+	}
+	return managedLoginRequiredMessage();
+}
+
+bool userSessionAtLifetimeCap(qint64 loginAtSecs, qint64 nowSecs)
+{
+	if (loginAtSecs <= 0)
+		return false; // sin origen conocido: decide el servidor
+	return nowSecs >= loginAtSecs + kUserSessionMaxTtlSecs;
+}
+
+int userSessionIdleDays(qint64 ttlSecs, qint64 secsToExpiry)
+{
+	const qint64 idle = (ttlSecs - secsToExpiry) / 86400;
+	return idle < 0 ? 0 : static_cast<int>(idle);
 }
 
 // f7: sin mensaje vigente (vacio) => gate; con mensaje (error

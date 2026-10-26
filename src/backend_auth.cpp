@@ -19,10 +19,28 @@ namespace backend_auth {
 namespace {
 constexpr int kTimeoutMs = 15000;
 constexpr int kExpiryMarginSecs = 30;
+// Margen de seguridad corto para la sesion de usuario Managed ([D
+// 2026-10-26], 5 min, documentado): con TTL largo (15 d deslizantes +
+// tope 30 d) evita restaurar/usar una sesion que moriria a mitad de la
+// revalidacion silenciosa. La autoridad del TTL es el backend
+// (backend/tests/test_users_session_sliding.py); la sesion de
+// instalacion (corta) sigue con kExpiryMarginSecs.
 
 qint64 nowSecs()
 {
 	return QDateTime::currentDateTimeUtc().toSecsSinceEpoch();
+}
+
+// Solo el codigo de error del backend ("session_expired" /
+// "authentication_error", ...). La respuesta publica nunca trae secretos
+// (backend/errors.py public_body: code+message+requestId), pero aqui solo
+// se lee el codigo: el motivo visible sin tecnicismos.
+QString userAuthCodeOf(const QJsonObject &o)
+{
+	return o.value(QStringLiteral("error"))
+		.toObject()
+		.value(QStringLiteral("code"))
+		.toString();
 }
 } // namespace
 
@@ -303,14 +321,39 @@ bool Client::hasUserSession() const
 {
 	return !userSessionToken_.isEmpty() &&
 	       QDateTime::currentDateTimeUtc().secsTo(userExpiry_) >
-		       kExpiryMarginSecs;
+		       meta::kUserSessionMarginSecs;
+}
+
+qint64 Client::userSecsToExpiry() const
+{
+	if (userSessionToken_.isEmpty() || !userExpiry_.isValid())
+		return 0;
+	return QDateTime::currentDateTimeUtc().secsTo(userExpiry_);
+}
+
+// Ultimo error.code del 401 ("session_expired" = ventana o tope,
+// "authentication_error" = revocada/desconocida). Vacio = el backend no
+// dijo el motivo: el llamador usa la expiracion local y el tope.
+meta::UserReloginReason Client::userReloginReason() const
+{
+	const qint64 now = nowSecs();
+	const bool atCap =
+		meta::userSessionAtLifetimeCap(userLoginAt_.toSecsSinceEpoch(),
+					       now);
+	const bool locallyExpired =
+		userExpiry_.isValid() &&
+		nowSecs() >= userExpiry_.toSecsSinceEpoch();
+	return meta::classifyUserRelogin(lastUserAuthCode_, atCap,
+					 locallyExpired);
 }
 
 void Client::clearUserSession()
 {
 	userSessionToken_.clear();
 	loggedUsername_.clear();
-	userExpiry_ = QDateTime();
+	// userExpiry_/userLoginAt_/lastUserAuthCode_ se conservan: describen
+	// la sesion que termino y alimentan userReloginReason() (mensaje de
+	// persona + codigo de log). Los borra el proximo login/restore.
 	// [D 2026-10-26]: memoria y disco van juntos (logout/401/expirada
 	// nunca dejan una sesion muerta que reaparezca al reiniciar).
 	clearPersistedUserSession();
@@ -322,7 +365,8 @@ void Client::clearUserSession()
 bool Client::persistUserSession()
 {
 	if (!store_ || baseUrl_.isEmpty() || userSessionToken_.isEmpty() ||
-	    loggedUsername_.isEmpty() || !userExpiry_.isValid())
+	    loggedUsername_.isEmpty() || !userExpiry_.isValid() ||
+	    !userLoginAt_.isValid())
 		return false;
 	secure::Data d;
 	store_->load(d); // best-effort: keep provider records when present
@@ -330,6 +374,7 @@ bool Client::persistUserSession()
 	d.managedUser.username = loggedUsername_;
 	d.managedUser.token = userSessionToken_;
 	d.managedUser.expiry = userExpiry_;
+	d.managedUser.loginAt = userLoginAt_;
 	d.backendBaseUrl = baseUrl_;
 	return store_->save(d);
 }
@@ -346,41 +391,48 @@ void Client::clearPersistedUserSession()
 	store_->save(d); // best-effort: memory is already clean
 }
 
-bool Client::tryRestoreUserSession()
+Client::RestoreResult Client::tryRestoreUserSession()
 {
 	// Ya en memoria y vigente: nada que restaurar.
 	if (hasUserSession())
-		return true;
+		return RestoreResult::Restored;
 	userSessionToken_.clear();
 	loggedUsername_.clear();
 	userExpiry_ = QDateTime();
+	userLoginAt_ = QDateTime();
+	lastUserAuthCode_.clear();
 	if (!store_ || baseUrl_.isEmpty())
-		return false;
+		return RestoreResult::NoSession;
 	secure::Data d;
 	store_->load(d); // false = no usable file; managedUser stays empty
 	if (!d.managedUser.loggedIn || d.managedUser.username.isEmpty() ||
 	    d.managedUser.token.isEmpty() ||
 	    !d.managedUser.expiry.isValid())
-		return false;
+		return RestoreResult::NoSession;
 	// Fail-closed ante mismatch (igual que loadInstallation): un secreto
 	// de otro backend jamas se entrega al configurado. Legacy/sin binding
 	// nunca coincide.
 	if (!secure::installationUrlMatches(d.backendBaseUrl, baseUrl_)) {
 		clearPersistedUserSession();
-		return false;
+		return RestoreResult::Mismatch;
 	}
-	// Expirada (con el mismo margen que hasUserSession): se ignora y se
-	// limpia; el dock pide login de nuevo. NO hay red aqui: la revalida
-	// contra el backend la hace el dock con me().
+	// Expirada (con el margen de seguridad de hasUserSession): se ignora
+	// y se limpia; el dock pide login de nuevo con el motivo. NO hay red
+	// aqui: la revalida contra el backend la hace el dock con me().
 	if (QDateTime::currentDateTimeUtc().secsTo(d.managedUser.expiry) <=
-	    kExpiryMarginSecs) {
+	    meta::kUserSessionMarginSecs) {
+		// Se conserva la expiracion para el mensaje ("dias sin
+		// usarlo") aunque el token ya no sea usable.
+		userExpiry_ = d.managedUser.expiry;
+		userLoginAt_ = d.managedUser.loginAt;
 		clearPersistedUserSession();
-		return false;
+		return RestoreResult::Expired;
 	}
 	userSessionToken_ = d.managedUser.token;
 	loggedUsername_ = d.managedUser.username;
 	userExpiry_ = d.managedUser.expiry;
-	return true;
+	userLoginAt_ = d.managedUser.loginAt;
+	return RestoreResult::Restored;
 }
 
 // POST público con bearer de instalación best-effort (adopción sin
@@ -487,6 +539,8 @@ void Client::login(const QString &username, const QString &password,
 		cb(Result::InvalidResponse);
 		return;
 	}
+	// El motivo anterior describia otra sesion: no contamina este login.
+	lastUserAuthCode_.clear();
 	// La adopción necesita el bearer de instalación: asegurar sesión
 	// primero (bootstrap/re-auth lo decide ensureSession).
 	ensureSession([this, user, password, cb](Result r) {
@@ -518,6 +572,12 @@ void Client::login(const QString &username, const QString &password,
 				   userExpiry_ =
 					   QDateTime::currentDateTimeUtc().addSecs(
 						   expiresIn);
+				   // Origen del tope absoluto de 30 d: este
+				   // login abre un ciclo nuevo (el backend
+				   // emite expires_at = login + 15 d).
+				   userLoginAt_ =
+					   QDateTime::currentDateTimeUtc();
+				   lastUserAuthCode_.clear();
 				   // [D 2026-10-26]: sesion OK -> persiste
 				   // cifrada para volver directo al panel al
 				   // reabrir. Sin persistencia no hay restore:
@@ -583,8 +643,13 @@ void Client::userSend(const QString &verb, const QString &path,
 				netErr ==
 					QNetworkReply::OperationCanceledError ||
 				(netErr != QNetworkReply::NoError && http == 0);
-			if (http == 401)
+			if (http == 401) {
+				// El codigo del backend distingue el motivo
+				// (ventana/tope vs revocada); se guarda ANTES
+				// de olvidar la sesion (clear la preserva).
+				lastUserAuthCode_ = userAuthCodeOf(o);
 				clearUserSession();
+			}
 			Result res = Result::Ok;
 			if (transportFail) {
 				res = Result::NetworkError;
@@ -705,7 +770,11 @@ void Client::apiSendUser(const QString &verb, const QString &path,
 					 http == 0);
 				if (http == 401) {
 					// El backend normaliza (auth doble):
-					// olvidar ambas y pedir re-login.
+					// olvidar ambas y pedir re-login. El
+					// codigo distingue el motivo (ventana/
+					// tope vs revocada); se guarda ANTES
+					// de olvidar (clear la preserva).
+					lastUserAuthCode_ = userAuthCodeOf(o);
 					sessionToken_.clear();
 					clearUserSession();
 				}

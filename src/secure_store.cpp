@@ -217,9 +217,11 @@ bool managedFromJson(const QJsonObject &o, ManagedSnapshot &m)
 
 // [D 2026-10-26]: sesion de usuario Managed (blob DPAPI, fail-closed).
 // Todo el contenido dentro del blob ("u" username, "t" token opaco,
-// "e" expiry epoch UTC): nada en claro fuera de el. Expirada (no futura)
-// se ignora: el llamador pide login de nuevo. Sin DPAPI (no-Windows)
-// siempre ausente, como el resto de secretos.
+// "e" expiry epoch UTC, "l" loginAt epoch UTC origen del tope de 30 d):
+// nada en claro fuera de el. "l" ausente (sesiones del regimen anterior)
+// = loginAt invalido, sin inventar: el tope lo aplica el servidor.
+// Expirada (no futura) se ignora: el llamador pide login de nuevo. Sin
+// DPAPI (no-Windows) siempre ausente, como el resto de secretos.
 #ifdef Q_OS_WIN
 QJsonObject managedUserRecordToJson(const ManagedUserSession &m)
 {
@@ -228,6 +230,9 @@ QJsonObject managedUserRecordToJson(const ManagedUserSession &m)
 	plain[QStringLiteral("t")] = m.token;
 	plain[QStringLiteral("e")] = static_cast<qint64>(
 		m.expiry.toSecsSinceEpoch());
+	if (m.loginAt.isValid())
+		plain[QStringLiteral("l")] = static_cast<qint64>(
+			m.loginAt.toSecsSinceEpoch());
 	const QByteArray blob = protect(QJsonDocument(plain)
 						.toJson(QJsonDocument::Compact));
 	if (blob.isEmpty())
@@ -270,6 +275,15 @@ bool managedUserRecordFromJson(const QJsonObject &o, ManagedUserSession &m)
 	m.username = username;
 	m.token = token;
 	m.expiry = expiry;
+	// "l" ausente = regimen anterior sin origen del tope: invalido sin
+	// inventar (el servidor sigue aplicando el tope absoluto).
+	const qint64 loginSecs = p.value(QStringLiteral("l")).toInteger();
+	if (loginSecs > 0) {
+		QDateTime loginAt;
+		loginAt.setSecsSinceEpoch(loginSecs);
+		if (loginAt.isValid())
+			m.loginAt = loginAt;
+	}
 	return true;
 #else
 	Q_UNUSED(o);
