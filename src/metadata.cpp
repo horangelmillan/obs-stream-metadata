@@ -356,6 +356,13 @@ FbVerifyResult facebookVerifyPrepared(const QString &expTitle,
 	return {FbVerify::Verified, QStringLiteral("verified")};
 }
 
+// Diseno 2026-10-26 [D]: puerta de creacion bajo demanda (pura).
+bool fbCreateTitleValid(const QString &title)
+{
+	const QString t = title.trimmed();
+	return !t.isEmpty() && t.size() <= kFacebookTitleMax;
+}
+
 // Fase A auto-preparacion (puro): fallback titulo/desc.
 QString fbAutoCreateTitle(const QString &widgetTitle,
 			 const QString &prevTitle)

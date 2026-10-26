@@ -769,13 +769,18 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 		qPrintable(managedBaseUrl_),
 		managedSupported(meta::Platform::Twitch) ? "yes" : "no");
 	// Plan v3 Fase 1: arranque exacto SIN temporizadores de reintento.
-	// Nada se auto-inicia aqui: el unico punto de arranque es
-	// fbAutoStartFromConnected(), llamado SOLO desde
-	// finishManagedConnected(p == Facebook) y desde la rama
-	// "connected" del lambda de silentRevalidateManaged (post-GET
-	// fresco). La escucha del repetidor (watcher + respaldo 3 s) se
-	// arma aqui sin red (solo observa el dir de senales local).
+	// Diseno 2026-10-26 [D]: al abrir SOLO se valida (fbValidateAtStartup:
+	// relay en silencio si hay sesion FB —local, sin handshake— y una
+	// lectura de estado si hay ID persistido). Jamas create/refire/
+	// countdown/triangulo por causa propia: la creacion solo ocurre
+	// ante la primera intencion real (Apply con FB, senal con emisor
+	// sin video, Salir al aire sin video). La escucha del repetidor
+	// (watcher + respaldo 3 s) se arma aqui sin red (solo observa el
+	// dir de senales local).
 	ensureFbSignalWatch();
+	if (platformUsable(meta::Platform::Facebook) && relay_)
+		relay_->ensureStarted(); // silencioso: proceso local, sin red
+	fbValidateAtStartup(meta::Platform::Facebook);
 }
 
 MetadataDock::~MetadataDock()
@@ -1226,6 +1231,15 @@ void MetadataDock::cancelPendingForModeSwitch()
 	fbSignalCancelPending();
 	clearFbGoLiveSession();
 	fbCancelRefire();
+	// Diseno 2026-10-26 [D]: los pendientes de creacion bajo demanda
+	// (Apply FB / Salir al aire sin video) pertenecen al contexto
+	// anterior: se cancelan sin red (la cola Apply se vacia abajo por
+	// el cambio de modo en la practica: el create en vuelo, si llega,
+	// ya no encuentra su pendiente).
+	fbApplyCreatePending_ = false;
+	fbGoLivePendingAfterCreate_ = false;
+	fbIntentCreateInFlight_ = false;
+	fbSignalNoVideoServed_ = false;
 	// Go live automatico: el intento/vuelo/aviso/contador pertenecen
 	// al contexto anterior (por ID); se cancelan sin red.
 	fbGoLiveInFlight_ = false;
@@ -1999,33 +2013,94 @@ void MetadataDock::maybeFbAutoStart()
 
 void MetadataDock::fbAutoStartFromConnected(meta::Platform p)
 {
-	// INVARIANTE (Plan v3 Fase 1): este es el UNICO punto de arranque.
-	// Llamadores permitidos: finishManagedConnected(p == Facebook) y
-	// la rama "connected" del lambda de silentRevalidateManaged.
-	// Prohibido: managedPollTimer_/onManagedPollTimeout,
-	// scheduleBackoff/backoff, polls Twitch.
+	// Diseno 2026-10-26 [D]: el arranque automatico queda RETIRADO (el
+	// instalador sha c07166aa hacia create+refire al abrir: de ahi el
+	// "~2:59 tras preparar el video al abrir" y el triangulo sin haber
+	// hecho nada). Este punto solo valida (una lectura si hay ID) y
+	// arranca el relay en silencio. Jamas create/refire/countdown.
+	fbValidateAtStartup(p);
+}
+
+// Diseno 2026-10-26 [D]: al abrir SOLO se valida. Si hay ID persistido,
+// UNA lectura de estado silenciosa (fbQuietStatus_: sin mensaje
+// generico); el relay, local y sin handshake, arranca en silencio.
+// Sin ID no hay nada que leer ni crear: ni create, ni refire, ni
+// countdown, ni triangulo por causa propia.
+void MetadataDock::fbValidateAtStartup(meta::Platform p)
+{
 	if (p != meta::Platform::Facebook)
 		return;
 	if (!platformUsable(meta::Platform::Facebook))
 		return;
-	if (fbAutoActive_ || fbAutoArmed_ || fbAutoDidCreate_)
-		return; // un solo intento por arranque/sesion
-	if (!isManaged())
-		return; // v3: el arranque exacto es Managed (post-GET fresco)
-	if (!managedAuth_ || !managedAuth_->hasUserSession())
-		return;
-	if (!managedAccount(meta::Platform::Facebook).connected)
-		return;
 	if (relay_)
-		relay_->ensureStarted(); // punto 1: informa, sin reintentar
-	fbAutoArmed_ = true; // probe GET en vuelo; active se fija DENTRO
-	fbAutoDidCreate_ = false;
-	fbAutoDidDelete_ = false;
-	fbAutoPrevId_.clear();
-	fbAutoPrevStatus_.clear();
-	fbAutoPrevTitle_.clear();
-	fbAutoPrevDesc_.clear();
-	fbAutoProbe();
+		relay_->ensureStarted(); // local, sin handshake
+	if (fbQuietStatus_)
+		return; // lectura ya en vuelo: no duplicar
+	const QString persisted = currentFbLiveId().trimmed();
+	if (persisted.isEmpty())
+		return; // sin video: nada que leer, nada que crear
+	if (isManaged()) {
+		// Sin sesion aun (p. ej. constructor antes del restore):
+		// solo relay; la revalidacion hara la lectura post-GET.
+		if (!managedAuth_ ||
+		    !managedAuth_->hasUserSession() ||
+		    !managedAccount(meta::Platform::Facebook).connected)
+			return;
+		fbQuietStatus_ = true;
+		startManagedFbOp(QStringLiteral("status"), persisted);
+		return;
+	}
+	if (!fb_.connected)
+		return;
+	fbQuietStatus_ = true;
+	startFbStatusIndependent(persisted);
+}
+
+bool MetadataDock::fbHasVideoForIntent() const
+{
+	return !currentFbLiveId().trimmed().isEmpty();
+}
+
+bool MetadataDock::fbTitleValidForCreate(QString &titleOut,
+					QString &descOut) const
+{
+	titleOut = titleEdit_ ? titleEdit_->text().trimmed() : QString();
+	descOut = descEdit_ ? descEdit_->toPlainText() : QString();
+	return meta::fbCreateTitleValid(titleOut);
+}
+
+// Diseno 2026-10-26 [D]: primera intencion real sin video vigente y con
+// titulo valido: crea con ese titulo/desc por los caminos existentes
+// (Independent directo / Managed backend). Sin titulo valido: pide
+// "escribe el título y pulsa Aplicar" (sin crear untitulado, sin
+// espera). Login/conexion gateados (cero red sin ellos).
+void MetadataDock::fbCreateForIntent()
+{
+	QString t, d;
+	if (!fbTitleValidForCreate(t, d)) {
+		generalMsg_->setText(
+			tr("escribe el título y pulsa Aplicar"));
+		return;
+	}
+	if (!requireManagedLogin(meta::Platform::Facebook))
+		return;
+	if (isManaged()) {
+		if (!managedAccount(meta::Platform::Facebook).connected) {
+			generalMsg_->setText(meta::userMessage(
+				meta::Outcome::AuthRequired,
+				meta::Platform::Facebook));
+			return;
+		}
+		startManagedFbOp(QStringLiteral("create"), QString());
+		return;
+	}
+	if (!fb_.connected) {
+		generalMsg_->setText(meta::userMessage(
+			meta::Outcome::AuthRequired,
+			meta::Platform::Facebook));
+		return;
+	}
+	startFbCreateIndependent();
 }
 
 void MetadataDock::fbAutoProbe()
@@ -2377,81 +2452,18 @@ void MetadataDock::fbSendAutoGoLive(const QString &liveId)
 	startFbGoLiveIndependent(id);
 }
 
-// Punto 5: un solo create tras End confirmado (con canRefire). Sin
-// opt-in nuevo: siempre con mensaje y limpieza posterior por el ciclo
-// normal (el siguiente arranque/end gestiona el huerfano). Si el
-// cooldown bloquea, difiere con mensaje + ID, sin crear huerfano.
-// Presupuesto propio de un intento (fbEndAutoPending_); no consume ni
-// reutiliza el del arranque (punto 2). El terminado queda como VOD:
-// este create jamas borra nada.
+// Diseno 2026-10-26 [D]: punto 5 RETIRADO (fbEndAutoPrepare es no-op).
+// Tras End no se crea nada sin nueva intencion real; el siguiente
+// video nace ante Apply/senal/GoLive (fbCreateForIntent).
 void MetadataDock::fbEndAutoPrepare(const QString &endedId)
 {
-	const QString eid = endedId.trimmed();
-	if (fbEndAutoPending_ || fbAutoActive_)
-		return; // un solo intento; sin pisar el arranque
-	// Plan v3 Fase 1: si la escucha ya pre-creo el siguiente al
-	// detectar el corte, el End solo cierra el anterior (sin otro
-		// create duplicado; el pre-creado es el siguiente).
-	if (fbSigPrecreated_)
-		return;
-	const qint64 now = QDateTime::currentMSecsSinceEpoch();
-	const qint64 lastOk =
-		relay_ ? relay_->lastForwardOkMs() : 0;
-	if (!relay::canRefire(lastOk, now)) {
-		generalMsg_->setText(
-			tr("Tu directo terminó. Espero un poco antes del siguiente "
-			   "— pulsa Crear cuando quieras."));
-		ensureCooldownTick();
-		return;
-	}
-	const QString title = meta::fbAutoCreateTitle(
-		titleEdit_ ? titleEdit_->text() : QString(), QString());
-	const QString desc = meta::fbAutoCreateDesc(
-		descEdit_ ? descEdit_->toPlainText() : QString(),
-		QString());
-	if (title.isEmpty() ||
-	    title.size() > meta::kFacebookTitleMax) {
-		generalMsg_->setText(
-			tr("Tu directo terminó. Revisa el título y pulsa Crear."));
-		return;
-	}
-	fbEndAutoPending_ = true;
-	clearFbVerify();
-	fbExpectedTitle_ = title;
-	fbExpectedDesc_ = desc;
-	generalMsg_->setText(
-		tr("Tu directo terminó. Preparo el siguiente — no tienes que "
-		   "hacer nada."));
-	if (isManaged()) {
-		if (!managedAccount(meta::Platform::Facebook).connected) {
-			fbEndAutoPending_ = false;
-			return;
-		}
-		if (titleEdit_ && titleEdit_->text().trimmed().isEmpty())
-			titleEdit_->setText(title);
-		if (descEdit_ &&
-		    descEdit_->toPlainText().trimmed().isEmpty())
-			descEdit_->setPlainText(desc);
-		startManagedFbOp(QStringLiteral("create"), QString());
-		return;
-	}
-	if (!fb_.connected) {
-		fbEndAutoPending_ = false;
-		return;
-	}
-	QString token = fb_.access;
-	const QString target =
-		fbTarget_.isEmpty() ? QStringLiteral("me") : fbTarget_;
-	if (target != QStringLiteral("me"))
-		token = fbPageTokens_.value(target, token);
-	QUrl url(QString::fromLatin1(kFbGraph) + QStringLiteral("/") +
-		 target + QStringLiteral("/live_videos"));
-	const QJsonObject body = meta::facebookCreatePayload(
-		title, desc, fbPersistent_);
-	sendJson(url, QStringLiteral("POST"),
-		 QString::fromUtf8(
-			 QJsonDocument(body).toJson(QJsonDocument::Compact)),
-		 Op::FbCreate, token);
+	Q_UNUSED(endedId);
+	// Diseno 2026-10-26 [D]: RETIRADO. Tras End no se crea nada sin
+	// nueva intencion real (regla: sin titulo+descripcion aplicados y
+	// sin Aitum, NO se crea ningun video). El siguiente video nace
+	// ante Apply/senal/GoLive (fbCreateForIntent) y encadena como hoy.
+	// Se conserva como no-op (el reply de End ya dejo su mensaje).
+	return;
 }
 
 void MetadataDock::requestRelaySignal()
@@ -2616,63 +2628,12 @@ void MetadataDock::fbSignalCancelPending()
 
 void MetadataDock::fbSignalMaybePrecreate()
 {
-	// Apagado probable (~6 s): pre-crea el siguiente con fallback de
-	// titulo y mensaje citando el titulo usado. En Managed NO muta
-	// widgets (body parametrizado); un solo disparo por corte.
-	if (fbSigPrecreated_)
-		return;
-	if (!platformUsable(meta::Platform::Facebook))
-		return;
-	if (fbAutoDidCreate_ && fbAutoActive_)
-		return; // el arranque ya prepara uno
-	{
-		int present = 0;
-		for (bool b : fbSigBallot_)
-			if (b)
-				present++;
-		if (meta::fbSignalBallotUnstable(present,
-						 fbSigBallot_.size()))
-			return; // votacion "inestable": espera, sin crear
-	}
-	const QString title = meta::fbAutoCreateTitle(
-		titleEdit_ ? titleEdit_->text() : QString(),
-		fbAutoPrevTitle_);
-	const QString desc = meta::fbAutoCreateDesc(
-		descEdit_ ? descEdit_->toPlainText() : QString(),
-		fbAutoPrevDesc_);
-	if (title.isEmpty() ||
-	    title.size() > meta::kFacebookTitleMax)
-		return;
-	fbSigPrecreated_ = true;
-	fbSigLastTitle_ = title;
-		generalMsg_->setText(
-			tr("Se perdió la señal. Preparo el siguiente — no tienes "
-			   "que hacer nada."));
-	obs_log(LOG_INFO, "relay signal gone: pre-creating next video");
-	if (isManaged()) {
-		if (!managedAccount(meta::Platform::Facebook).connected)
-			return;
-		startManagedFbCreateWithTitle(title, desc);
-		return;
-	}
-	if (!fb_.connected)
-		return;
-	clearFbVerify();
-	fbExpectedTitle_ = title;
-	fbExpectedDesc_ = desc;
-	QString token = fb_.access;
-	const QString target =
-		fbTarget_.isEmpty() ? QStringLiteral("me") : fbTarget_;
-	if (target != QStringLiteral("me"))
-		token = fbPageTokens_.value(target, token);
-	QUrl url(QString::fromLatin1(kFbGraph) + QStringLiteral("/") +
-		 target + QStringLiteral("/live_videos"));
-	sendJson(url, QStringLiteral("POST"),
-		 QString::fromUtf8(QJsonDocument(
-			 meta::facebookCreatePayload(title, desc,
-						     fbPersistent_))
-					 .toJson(QJsonDocument::Compact)),
-		 Op::FbCreate, token);
+	// Diseno 2026-10-26 [D]: RETIRADO. Ante la perdida de senal no se
+	// crea nada: la creacion solo ocurre ante intencion real (Apply
+	// con FB, senal con emisor sin video, Salir al aire sin video).
+	// Se conserva como no-op para no dejar llamadas colgadas
+	// (fbSignalNoteResult sigue evaluando votacion/auto-End).
+	return;
 }
 
 void MetadataDock::fbMaybeAutoEnd()
@@ -3055,14 +3016,13 @@ void MetadataDock::silentRevalidateManaged()
 						setStatus(p, tr("Connected as %1")
 									     .arg(m.display));
 						saveStore();
-						// Plan v3 Fase 1 (arranque
-						// exacto): segundo y unico otro
-						// llamador permitido de
-						// fbAutoStartFromConnected
-						// (post-GET fresco). Sin timers.
+						// Diseno 2026-10-26 [D]: sin auto-create al
+						// abrir (solo valida: una lectura si hay
+						// ID + relay en silencio). La creacion
+						// solo ocurre ante intencion real.
 						if (p == meta::Platform::
 							    Facebook)
-							fbAutoStartFromConnected(
+							fbValidateAtStartup(
 								p);
 					});
 			}
@@ -3292,11 +3252,11 @@ void MetadataDock::finishManagedConnected(meta::Platform p,
 	setResult(p, true, tr("connected"));
 	obs_log(LOG_INFO, "managed connected: %s", meta::platformName(p));
 	saveStore(); // persist the snapshot (identity labels only, T-051)
-	// Plan v3 Fase 1 (arranque exacto): unico punto de arranque junto
-	// con la rama "connected" de silentRevalidateManaged. Sin timers
-	// de reintento; el flag se fija DENTRO, post-GET fresco.
+	// Diseno 2026-10-26 [D]: sin auto-create al conectar/abrir (solo
+	// valida: una lectura si hay ID + relay en silencio). La creacion
+	// solo ocurre ante intencion real (Apply/senal/GoLive).
 	if (p == meta::Platform::Facebook)
-		fbAutoStartFromConnected(p);
+		fbValidateAtStartup(p);
 }
 
 void MetadataDock::finishManagedError(meta::Platform p, const QString &msg)
@@ -3728,6 +3688,12 @@ void MetadataDock::onDisconnectManaged(meta::Platform p)
 	if (p == meta::Platform::Facebook) {
 		clearFbIngest();
 		clearFbVerify();
+		// Diseno 2026-10-26 [D]: los pendientes de creacion bajo
+		// demanda mueren con la conexion (el ID persistido sobrevive).
+		fbApplyCreatePending_ = false;
+		fbGoLivePendingAfterCreate_ = false;
+		fbIntentCreateInFlight_ = false;
+		fbSignalNoVideoServed_ = false;
 		// T-078 Fase 3: parada limpia del relay (el forward moria
 		// con esa ingesta; sin tocar Aitum/OBS).
 		if (relay_)
@@ -4730,6 +4696,12 @@ void MetadataDock::wipeLocal(meta::Platform p)
 		fbGoLiveAutoTriedId_.clear();
 		fbAutoAudienceAskedId_.clear();
 		fbAutoGoDeferCount_ = 0;
+		// Diseno 2026-10-26 [D]: los pendientes de creacion bajo
+		// demanda mueren con la conexion (el ID persistido sobrevive).
+		fbApplyCreatePending_ = false;
+		fbGoLivePendingAfterCreate_ = false;
+		fbIntentCreateInFlight_ = false;
+		fbSignalNoVideoServed_ = false;
 		fbTargetCombo_->clear();
 		fbPageTokens_.clear();
 		fbTarget_.clear();
@@ -5322,6 +5294,9 @@ void MetadataDock::setFbLiveId(const QString &id)
 	const QString clean = id.trimmed();
 	if (clean.isEmpty() || !fbLiveCombo_)
 		return;
+	// Episodio nuevo con video vigente: la escucha puede servir
+	// de nuevo ante otro corte sin video.
+	fbSignalNoVideoServed_ = false;
 	// Go live automatico: el intento auto es por ID; un ID distinto
 	// abre un ciclo nuevo (se olvida el intento, el aviso pedido y el
 	// vuelo/contador del anterior).
@@ -5584,6 +5559,13 @@ void MetadataDock::onFbStatus()
 
 void MetadataDock::onFbCreate()
 {
+	// Diseno 2026-10-26 [D]: create bajo demanda en vuelo (por Apply,
+	// senal o GoLive): no duplicar; el pendiente ya trae titulo/desc.
+	if (fbIntentCreateInFlight_) {
+		generalMsg_->setText(
+			tr("Creando el vídeo — espera un momento."));
+		return;
+	}
 	// Fase 4: gate login previo en Managed (no-op en Independent).
 	if (!requireManagedLogin(meta::Platform::Facebook))
 		return;
@@ -5614,8 +5596,39 @@ void MetadataDock::onFbGoLive()
 		return;
 	const QString liveId = currentFbLiveId();
 	if (liveId.isEmpty()) {
-		generalMsg_->setText(meta::userMessage(
-			meta::Outcome::NotFound, meta::Platform::Facebook));
+		// Diseno 2026-10-26 [D]: sin video, Salir al aire crea
+		// primero (intencion real) y sigue el flujo tras verificar.
+		// Un create en vuelo no se duplica; sin titulo valido se
+		// pide titulo (sin crear untitulado, sin espera).
+		if (fbIntentCreateInFlight_ || fbApplyCreatePending_ ||
+			    fbGoLivePendingAfterCreate_) {
+			fbGoLivePendingAfterCreate_ = true;
+			generalMsg_->setText(
+				tr("Creando el vídeo — espera un momento y "
+				   "pulsa Salir al aire de nuevo."));
+			return;
+		}
+		QString ct, cd;
+		if (!fbTitleValidForCreate(ct, cd)) {
+			generalMsg_->setText(
+				tr("escribe el título y pulsa Aplicar"));
+			return;
+		}
+		if (!requireManagedLogin(meta::Platform::Facebook))
+			return;
+		const bool canCreate =
+			isManaged()
+				? managedAccount(meta::Platform::Facebook)
+					      .connected
+				: fb_.connected;
+		if (!canCreate) {
+			generalMsg_->setText(meta::userMessage(
+				meta::Outcome::AuthRequired,
+				meta::Platform::Facebook));
+			return;
+		}
+		fbGoLivePendingAfterCreate_ = true;
+		fbCreateForIntent();
 		return;
 	}
 	// Gate previo a cualquier confirmacion u operacion remota. Reglas
@@ -5869,6 +5882,9 @@ void MetadataDock::startFbCreateIndependent()
 	clearFbVerify();
 	fbExpectedTitle_ = title;
 	fbExpectedDesc_ = descEdit_->toPlainText();
+	// Diseno 2026-10-26 [D]: create bajo demanda en vuelo (todos los
+	// ganchos pasan por aqui en Independent; el reply lo baja).
+	fbIntentCreateInFlight_ = true;
 	const QString target =
 		fbTarget_.isEmpty() ? QStringLiteral("me") : fbTarget_;
 	QString token = fb_.access;
@@ -5959,6 +5975,9 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 		clearFbVerify();
 		fbExpectedTitle_ = cTitle;
 		fbExpectedDesc_ = cDesc;
+		// Diseno 2026-10-26 [D]: create bajo demanda en vuelo (el
+		// reply del lambda lo baja, exito o error).
+		fbIntentCreateInFlight_ = true;
 	}
 	generalMsg_->setText(tr("Facebook %1…").arg(op));
 	managedAuth_->apiPostUser(
@@ -5970,12 +5989,23 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 				static_cast<int>(rep.result), rep.http);
 			if (!isManaged())
 				return;
+			// Diseno 2026-10-26 [D]: el create en vuelo termina
+			// aqui (exito o error); los ganchos ya pueden crear
+			// de nuevo si el usuario lo pide.
+			if (op == QStringLiteral("create"))
+				fbIntentCreateInFlight_ = false;
 			if (rep.result !=
 			    backend_auth::Result::Ok) {
 				// Plan v3 Fase 1: lectura fallida != confirmacion
 				// fresca: el End pendiente se cancela (el proximo
 				// ciclo de escucha lo reintentara si sigue caido).
 				fbSigEndConfirm_ = false;
+				// La verificacion pendiente del Salir-al-aire
+				// exige lectura OK: ante fallo se baja (el
+				// usuario reintenta a mano).
+				if (op == QStringLiteral("status"))
+					fbGoLivePendingAfterCreate_ =
+						false;
 				// Fase A: el probe del arranque no inventa
 				// estado. status fallido -> decide (404 =
 				// crear sin borrar; otro fallo = diferir
@@ -6055,7 +6085,28 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 						: meta::classifyStatus(
 							  rep.http == 0 ? -1
 									: rep.http);
-				// Go live automatico (plan v2/v3): el reply consume
+				// Diseno 2026-10-26 [D]: Apply FB con create bajo
+			// demanda: el error del create completa su entrada
+			// (el usuario reintenta Aplicar a mano). El pendiente de
+			// GoLive tambien cae.
+			if (fbApplyCreatePending_ &&
+				    op == QStringLiteral("create")) {
+				fbApplyCreatePending_ = false;
+				fbGoLivePendingAfterCreate_ = false;
+				if (!applyQueue_.isEmpty() &&
+					    applyQueue_.first() ==
+						    meta::Platform::Facebook)
+					applyQueue_.takeFirst();
+				finishPlatform(
+					meta::Platform::Facebook, false,
+					meta::userMessage(
+						oc,
+						meta::Platform::Facebook));
+				fbEndAutoPending_ = false;
+				startApplyNext();
+				return;
+			}
+			// Go live automatico (plan v2/v3): el reply consume
 				// el vuelo (exito o error: UN SOLO intento por
 				// ID). Unauthorized -> cae la conexion local
 				// (auth doble) y se aborta la cadena; RateLimited
@@ -6312,6 +6363,24 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 					tryFbAutoGoLive();
 					return;
 				}
+				// Diseno 2026-10-26 [D]: Salir al aire sin video
+				// creo primero; tras verificar sigue el flujo
+				// (Verified o audiencia sin verificar con aviso ->
+				// onFbGoLive muestra su modal).
+				if (fbGoLivePendingAfterCreate_) {
+					fbGoLivePendingAfterCreate_ = false;
+					fbQuietStatus_ = false;
+					if ((fbVerify_.outcome ==
+						     meta::FbVerify::Verified ||
+						     fbVerify_.outcome ==
+						     meta::FbVerify::AudienceUnverified) &&
+						    !rid.trimmed().isEmpty() &&
+						    rid.trimmed() ==
+							    currentFbLiveId().trimmed()) {
+						onFbGoLive();
+						return;
+					}
+				}
 			}
 			// PoC ingestión: solo en create (el backend la
 			// reenvía únicamente ahí). Un create nuevo sin URL
@@ -6338,6 +6407,38 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 								ingest);
 				}
 			}
+			// Diseno 2026-10-26 [D]: Apply FB con create bajo
+			// demanda: el create aplico titulo/desc -> la entrada
+			// se completa aqui y encadena verificacion silenciosa
+			// como el Apply normal (el refire ya ocurrio arriba;
+			// el auto-GoLive lo dispara la cadena verify).
+			if (op == QStringLiteral("create") &&
+				    fbApplyCreatePending_) {
+				fbApplyCreatePending_ = false;
+				if (!applyQueue_.isEmpty() &&
+					    applyQueue_.first() ==
+						    meta::Platform::Facebook)
+					applyQueue_.takeFirst();
+				if (id.isEmpty()) {
+					fbGoLivePendingAfterCreate_ = false;
+					finishPlatform(
+						meta::Platform::Facebook, false,
+						meta::userMessage(
+							meta::Outcome::ServerRetry,
+							meta::Platform::Facebook));
+				} else {
+					finishPlatform(
+						meta::Platform::Facebook, true,
+						meta::userMessage(
+							meta::Outcome::Success,
+							meta::Platform::Facebook));
+					if (managedAccount(
+						        meta::Platform::Facebook)
+						        .connected)
+					fbChainSilentVerify(id);
+				}
+				startApplyNext();
+			}
 			// go_live Managed: NO pintar res.status ni LIVE optimista;
 			// estado desconocido/pendiente hasta la lectura encadenada
 			// del mismo ID (ella confirma o deja bloqueado).
@@ -6345,6 +6446,17 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 				setFbState(QString());
 			} else if (!st.isEmpty()) {
 				setFbState(st);
+				if (op == QStringLiteral("create")) {
+					// Diseno 2026-10-26 [D]: Salir al aire sin video
+					// creo primero; la respuesta trajo status pero sin
+					// verificar: una lectura encadenada verifica y sigue
+					// el flujo (consume el pendiente).
+					if (fbGoLivePendingAfterCreate_ && !id.isEmpty()) {
+						fbQuietStatus_ = true;
+						startManagedFbOp(
+							QStringLiteral("status"), id);
+					}
+				}
 				if (op == QStringLiteral("create"))
 					setFbVerifyLabel(
 						tr("Created — press Check live "
@@ -6846,10 +6958,23 @@ void MetadataDock::startApplyNext()
 		if (liveId.isEmpty())
 			liveId = fbLiveCombo_->currentText().trimmed();
 		if (liveId.isEmpty()) {
-			// Fetch targets+list first, then retry this platform.
+			// Diseno 2026-10-26 [D]: sin video no hay update;
+			// Apply con FB es intencion real: crea con el
+			// titulo/desc de los widgets (o pide titulo). La
+			// entrada vuelve a la cola; el reply del create
+			// la completa (fbApplyCreatePending_).
+			QString ct, cd;
+			if (!fbTitleValidForCreate(ct, cd)) {
+				finishPlatform(
+					p, false,
+					tr("escribe el título y pulsa "
+					   "Aplicar"));
+				startApplyNext();
+				return;
+			}
 			applyQueue_.prepend(p);
-			applyAfterList_ = true;
-			fetchFacebookTargets();
+			fbApplyCreatePending_ = true;
+			fbCreateForIntent();
 			return;
 		}
 		const QString target =
@@ -7081,10 +7206,21 @@ void MetadataDock::startManagedFacebookApply()
 	if (liveId.isEmpty())
 		liveId = fbLiveCombo_->currentText().trimmed();
 	if (liveId.isEmpty()) {
-		// Fetch the list first, then retry this platform.
+		// Diseno 2026-10-26 [D]: sin video no hay update; Apply con
+		// FB es intencion real: crea con el titulo/desc de los
+		// widgets (o pide titulo). La entrada vuelve a la cola; el
+		// reply del create la completa (fbApplyCreatePending_).
+		QString ct, cd;
+		if (!fbTitleValidForCreate(ct, cd)) {
+			finishPlatform(p, false,
+				       tr("escribe el título y pulsa "
+					  "Aplicar"));
+			startApplyNext();
+			return;
+		}
 		applyQueue_.prepend(p);
-		applyAfterList_ = true;
-		fetchManagedFacebookVideos();
+		fbApplyCreatePending_ = true;
+		fbCreateForIntent();
 		return;
 	}
 	setResult(p, true, tr("Updating…"));
@@ -7879,10 +8015,19 @@ void MetadataDock::onReply(QNetworkReply *reply)
 			// Cambio B: la lectura encadenada tras go_live fallo:
 			// nada que informar como publicado.
 			fbGoLiveConfirm_ = false;
+			// Diseno 2026-10-26 [D]: la verificacion pendiente del
+			// Salir-al-aire exige lectura OK (ante fallo se baja).
+			fbGoLivePendingAfterCreate_ = false;
+			// Sin video no hay triangulo propio: la lectura fallida
+			// sin ID vigente no marca fallo (no hay nada que leer).
+			if (currentFbLiveId().trimmed().isEmpty()) {
+				clearFbVerify();
+			} else {
 			fbVerify_ = {meta::FbVerify::Blocked,
 				     QStringLiteral("read-failed")};
 			setFbVerifyLabel(
 				tr("Status read failed — not verified."));
+			}
 			return;
 		}
 		const QJsonObject o = fbBody;
@@ -7902,6 +8047,21 @@ void MetadataDock::onReply(QNetworkReply *reply)
 				  st,
 				  meta::facebookPrivacyValue(
 					  o.value(QStringLiteral("privacy"))));
+		// Diseno 2026-10-26 [D]: Salir al aire sin video creo
+		// primero; tras verificar sigue el flujo (Verified o
+		// audiencia sin verificar con aviso -> onFbGoLive muestra
+		// su modal).
+		if (fbGoLivePendingAfterCreate_) {
+			fbGoLivePendingAfterCreate_ = false;
+			fbQuietStatus_ = false;
+			if ((fbVerify_.outcome == meta::FbVerify::Verified ||
+				     fbVerify_.outcome ==
+					     meta::FbVerify::AudienceUnverified) &&
+				    !rid.trimmed().isEmpty() &&
+				    rid.trimmed() == currentFbLiveId().trimmed())
+					onFbGoLive();
+			return;
+		}
 		// Fase A punto 2: lectura del arranque -> decide (una sola).
 		if ((fbAutoActive_ || fbAutoArmed_) && !fbAutoDidCreate_) {
 			fbQuietStatus_ = false;
@@ -8040,10 +8200,19 @@ void MetadataDock::onReply(QNetworkReply *reply)
 			// Cambio B: la lectura encadenada tras go_live fallo:
 			// nada que informar como publicado.
 			fbGoLiveConfirm_ = false;
+			// Diseno 2026-10-26 [D]: la verificacion pendiente del
+			// Salir-al-aire exige lectura OK (ante fallo se baja).
+			fbGoLivePendingAfterCreate_ = false;
+			// Sin video no hay triangulo propio: la lectura fallida
+			// sin ID vigente no marca fallo (no hay nada que leer).
+			if (currentFbLiveId().trimmed().isEmpty()) {
+				clearFbVerify();
+			} else {
 			fbVerify_ = {meta::FbVerify::Blocked,
 				     QStringLiteral("read-failed")};
 			setFbVerifyLabel(
 				tr("Status read failed — not verified."));
+			}
 			return;
 		}
 		const QJsonObject o = fbBody;
@@ -8065,6 +8234,19 @@ void MetadataDock::onReply(QNetworkReply *reply)
 		if (fbVerifyLabel_)
 			setFbVerifyLabel(fbVerifyLabel_->text() +
 					 tr(" — fallback"));
+		// Diseno 2026-10-26 [D]: Salir al aire sin video creo
+		// primero; tras verificar sigue el flujo.
+		if (fbGoLivePendingAfterCreate_) {
+			fbGoLivePendingAfterCreate_ = false;
+			fbQuietStatus_ = false;
+			if ((fbVerify_.outcome == meta::FbVerify::Verified ||
+				     fbVerify_.outcome ==
+					     meta::FbVerify::AudienceUnverified) &&
+				    !rid.trimmed().isEmpty() &&
+				    rid.trimmed() == currentFbLiveId().trimmed())
+					onFbGoLive();
+			return;
+		}
 		// Fase A punto 2 (retry como probe definitivo del arranque).
 		if ((fbAutoActive_ || fbAutoArmed_) && !fbAutoDidCreate_) {
 			fbQuietStatus_ = false;
@@ -8130,6 +8312,9 @@ void MetadataDock::onReply(QNetworkReply *reply)
 	}
 
 	case Op::FbCreate: {
+		// Diseno 2026-10-26 [D]: el create en vuelo termina aqui;
+		// los ganchos ya pueden crear de nuevo si el usuario lo pide.
+		fbIntentCreateInFlight_ = false;
 		if (netFail || http != 200) {
 			const QJsonObject err = replyJson(reply)
 							    .value(QStringLiteral(
@@ -8145,6 +8330,15 @@ void MetadataDock::onReply(QNetworkReply *reply)
 					fbAutoHandleCreateFailed(
 						fbAutoPrevStatus_);
 					fbEndAutoPending_ = false;
+				} else if (fbApplyCreatePending_) {
+					fbApplyCreatePending_ = false;
+					fbGoLivePendingAfterCreate_ = false;
+					if (!applyQueue_.isEmpty() &&
+						    applyQueue_.first() == P::Facebook)
+						applyQueue_.takeFirst();
+					finishPlatform(P::Facebook, false,
+						meta::fbPersistentNotAllowedMessage());
+					startApplyNext();
 				} else {
 					generalMsg_->setText(
 						meta::
@@ -8177,6 +8371,24 @@ void MetadataDock::onReply(QNetworkReply *reply)
 					: meta::userMessage(
 						  meta::classifyFb(http, code),
 						  P::Facebook));
+			// Diseno 2026-10-26 [D]: Apply FB con create bajo
+			// demanda: el error completa su entrada (el usuario
+			// reintenta Aplicar a mano).
+			if (fbApplyCreatePending_) {
+				fbApplyCreatePending_ = false;
+				fbGoLivePendingAfterCreate_ = false;
+				if (!applyQueue_.isEmpty() &&
+					    applyQueue_.first() == P::Facebook)
+					applyQueue_.takeFirst();
+				finishPlatform(P::Facebook, false,
+					!spec.isEmpty()
+						? spec
+						: meta::userMessage(
+							meta::classifyFb(http, code),
+							P::Facebook));
+				startApplyNext();
+				return;
+			}
 			return;
 		}
 		const QJsonObject o = replyJson(reply);
@@ -8187,6 +8399,21 @@ void MetadataDock::onReply(QNetworkReply *reply)
 				fbAutoHandleCreateFailed(
 					fbAutoPrevStatus_);
 				fbEndAutoPending_ = false;
+				return;
+			}
+			// Diseno 2026-10-26 [D]: Apply FB con create bajo
+			// demanda sin ID: la entrada se completa en fallo.
+			if (fbApplyCreatePending_) {
+				fbApplyCreatePending_ = false;
+				fbGoLivePendingAfterCreate_ = false;
+				if (!applyQueue_.isEmpty() &&
+					    applyQueue_.first() == P::Facebook)
+					applyQueue_.takeFirst();
+				finishPlatform(P::Facebook, false,
+					meta::userMessage(
+						meta::Outcome::ServerRetry,
+						P::Facebook));
+				startApplyNext();
 				return;
 			}
 			generalMsg_->setText(meta::userMessage(
@@ -8217,6 +8444,25 @@ void MetadataDock::onReply(QNetworkReply *reply)
 		} else if (!ingest.isEmpty() && relay_) {
 			fbRefireOrDefer(nid, ingest);
 		}
+		// Diseno 2026-10-26 [D]: Apply FB con create bajo
+		// demanda: el create aplico titulo/desc -> la entrada se
+		// completa aqui y encadena verificacion silenciosa como el
+		// Apply normal (el refire ya ocurrio arriba; el auto-GoLive
+		// lo dispara la cadena verify). Si la respuesta no trajo
+		// status, la lectura encadenada de abajo hace de cadena.
+		bool applyCreateChained = false;
+		if (fbApplyCreatePending_) {
+			fbApplyCreatePending_ = false;
+			if (!applyQueue_.isEmpty() &&
+				    applyQueue_.first() == P::Facebook)
+				applyQueue_.takeFirst();
+			finishPlatform(P::Facebook, true,
+				meta::userMessage(
+					meta::Outcome::Success,
+					P::Facebook));
+			startApplyNext();
+			applyCreateChained = true;
+		}
 		// Estado real vía lectura Meta: si la respuesta trae status
 		// se usa; si no, NO se supone UNPUBLISHED: lectura
 		// encadenada (una vez, sin polling) que deja el indicador
@@ -8231,9 +8477,26 @@ void MetadataDock::onReply(QNetworkReply *reply)
 			generalMsg_->setText(
 				tr("Facebook live video created (%1).")
 					.arg(nid));
+			// Diseno 2026-10-26 [D]: la cadena del Apply (si venia
+			// con create bajo demanda) y el Salir-al-aire sin video
+			// (creo primero): con status conocido pero sin verificar,
+			// una lectura encadenada verifica y sigue el flujo.
+			if (applyCreateChained && !nid.isEmpty())
+				fbChainSilentVerify(nid);
+			if (fbGoLivePendingAfterCreate_ && !nid.isEmpty()) {
+				fbQuietStatus_ = true;
+				startFbStatusIndependent(nid);
+			}
 		} else {
-			fbQuietStatus_ = true;
-			startFbStatusIndependent(nid);
+			// Diseno 2026-10-26 [D]: el Apply con create bajo
+			// demanda reusa esta lectura como cadena silenciosa
+			// (fbApplyChain_); el resto igual que antes.
+			if (applyCreateChained)
+				fbChainSilentVerify(nid);
+			else {
+				fbQuietStatus_ = true;
+				startFbStatusIndependent(nid);
+			}
 			generalMsg_->setText(
 				tr("Facebook live video created (%1).")
 					.arg(nid));
@@ -8582,6 +8845,34 @@ void MetadataDock::onReply(QNetworkReply *reply)
 		// votacion 2-de-3, 30 s + 5 min + confirmacion Graph).
 		fbSignalNoteResult(relay::signalHasEmitter(relaySignal_));
 		if (relay::signalHasEmitter(relaySignal_)) {
+			// Diseno 2026-10-26 [D]: senal con emisor sin video =
+			// intencion real. Con titulo valido crea con el; sin el
+			// pide titulo (sin crear untitulado, sin espera). Un
+			// create en vuelo no se duplica.
+			if (!fbHasVideoForIntent()) {
+				// Un solo intento por episodio sin video: el respaldo
+				// pregunta cada 3 s; sin esta guarda, un fallo persistente
+				// reintentaria el create sin parar. Apply/GoLive/Crear
+				// reintentan a mano (el episodio se rearma al aparecer
+				// un video o al desconectar/cambiar de modo).
+				if (fbSignalNoVideoServed_ ||
+					    fbIntentCreateInFlight_ ||
+					    fbApplyCreatePending_ ||
+					    fbGoLivePendingAfterCreate_) {
+					updateFbHappyPath();
+					return;
+				}
+				fbSignalNoVideoServed_ = true;
+				QString it, idesc;
+				if (!fbTitleValidForCreate(it, idesc)) {
+					generalMsg_->setText(
+						tr("escribe el título y pulsa Aplicar"));
+				} else {
+					fbCreateForIntent();
+				}
+				updateFbHappyPath();
+				return;
+			}
 			generalMsg_->setText(
 				tr("Relay signal: live emitter detected."));
 			// Senal del emisor = intencion real: dispara el

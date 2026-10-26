@@ -1821,6 +1821,20 @@ int main(int argc, char **argv)
 				      QStringLiteral("Prev")) ==
 		      QStringLiteral("Hola"),
 	      "fbauto-title-widget");
+	// Diseno 2026-10-26 [D]: puerta de creacion bajo demanda (pura).
+	// Solo titulo valido 1-254 (trim): sin titulo valido no hay create
+	// ante Apply/senal/GoLive (el llamador pide titulo, sin espera).
+	CHECK(meta::fbCreateTitleValid(QStringLiteral("Directo")) &&
+		      !meta::fbCreateTitleValid(QString()) &&
+		      !meta::fbCreateTitleValid(
+			      QStringLiteral("   ")) &&
+		      !meta::fbCreateTitleValid(
+			      QString(255, QLatin1Char('x'))) &&
+		      meta::fbCreateTitleValid(
+			      QString(254, QLatin1Char('x'))) &&
+		      meta::fbCreateTitleValid(
+			      QStringLiteral("  Hola  ")),
+	      "fb-intent-title-gate");
 	CHECK(meta::fbAutoCreateTitle(QString(), QStringLiteral(" Prev ")) ==
 		      QStringLiteral("Prev"),
 	      "fbauto-title-fallback");

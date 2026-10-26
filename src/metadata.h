@@ -107,6 +107,12 @@ QString facebookPayload(const QString &title, const QString &desc);
 // (cada objeto trae su propia ingesta): jamas prometer persistencia.
 QJsonObject facebookCreatePayload(const QString &title,
 				 const QString &desc, bool persistentOptIn);
+// Diseno 2026-10-26 [D]: puerta de creacion bajo demanda (pura, sin
+// I/O/red/logs). El video solo se crea ante intencion real (Apply con
+// FB, senal del emisor sin video, Salir al aire sin video) y solo con
+// titulo valido 1-254 (trim). Sin titulo valido no hay create (el
+// llamante pide "escribe el título y pulsa Aplicar"), sin espera.
+bool fbCreateTitleValid(const QString &title);
 // Fase A auto-preparacion (puro, sin I/O/red/logs): titulo/descripcion
 // efectivos para el create automatico. Regla: widgets vigentes si no
 // estan vacios; si estan vacios, los leidos del anterior (fallback).
