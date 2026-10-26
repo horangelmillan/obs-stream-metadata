@@ -35,6 +35,7 @@ secrets in memory + DPAPI-encrypted store, never plaintext/printed/logged.
 #include <QScrollArea>
 #include <QSignalBlocker>
 #include <QStackedWidget>
+#include <QTabWidget>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTimer>
@@ -309,17 +310,64 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 	// Managed (refreshModeUi). Sin login, las acciones Managed no
 	// hacen red: piden login con el mensaje exacto de
 	// meta::managedLoginRequiredMessage().
-	userNameEdit_ = new QLineEdit(this);
+	// f8 REDISENO ENTRAR (2026-10-26 [D]): dos modos excluyentes con
+	// QTabWidget (doc oficial Qt6
+	// https://doc.qt.io/qt-6/qtabwidget.html : tab bar + page area,
+	// solo la pagina actual visible; la exclusividad la garantiza el
+	// propio widget). "Entrar" reusa los campos de login; "Crear
+	// cuenta" tiene sus propios campos + aviso visible de la politica
+	// (minimo 12, sin email, sin recuperacion). Los botones ya no
+	// comparten campos.
+	authTabs_ = new QTabWidget(this);
+	loginTab_ = new QWidget(authTabs_);
+	signupTab_ = new QWidget(authTabs_);
+	QVBoxLayout *loginTabLayout = new QVBoxLayout(loginTab_);
+	QVBoxLayout *signupTabLayout = new QVBoxLayout(signupTab_);
+	userNameEdit_ = new QLineEdit(loginTab_);
 	userNameEdit_->setPlaceholderText(tr("Managed username"));
-	userPassEdit_ = new QLineEdit(this);
+	userPassEdit_ = new QLineEdit(loginTab_);
 	userPassEdit_->setPlaceholderText(tr("Managed password"));
 	userPassEdit_->setEchoMode(QLineEdit::Password);
-	userLoginBtn_ = new QPushButton(tr("Log in (Managed)"), this);
+	loginNameError_ = new QLabel(loginTab_);
+	loginNameError_->setWordWrap(true);
+	loginPassError_ = new QLabel(loginTab_);
+	loginPassError_->setWordWrap(true);
+	userLoginBtn_ = new QPushButton(tr("Log in (Managed)"), loginTab_);
 	connect(userLoginBtn_, &QPushButton::clicked, this,
 		&MetadataDock::onUserLogin);
-	userSignupBtn_ = new QPushButton(tr("Sign up (Managed)"), this);
+	loginTabLayout->addWidget(userNameEdit_);
+	loginTabLayout->addWidget(loginNameError_);
+	loginTabLayout->addWidget(userPassEdit_);
+	loginTabLayout->addWidget(loginPassError_);
+	loginTabLayout->addWidget(userLoginBtn_);
+	loginTabLayout->addStretch(1);
+	signupNameEdit_ = new QLineEdit(signupTab_);
+	signupNameEdit_->setPlaceholderText(tr("Choose a username"));
+	signupPassEdit_ = new QLineEdit(signupTab_);
+	signupPassEdit_->setPlaceholderText(tr("Choose a password"));
+	signupPassEdit_->setEchoMode(QLineEdit::Password);
+	signupNameError_ = new QLabel(signupTab_);
+	signupNameError_->setWordWrap(true);
+	signupPassError_ = new QLabel(signupTab_);
+	signupPassError_->setWordWrap(true);
+	signupPolicy_ = new QLabel(meta::managedPasswordPolicyNotice(),
+				   signupTab_);
+	signupPolicy_->setWordWrap(true);
+	userSignupBtn_ =
+		new QPushButton(tr("Create account (Managed)"), signupTab_);
 	connect(userSignupBtn_, &QPushButton::clicked, this,
 		&MetadataDock::onUserSignup);
+	signupTabLayout->addWidget(signupNameEdit_);
+	signupTabLayout->addWidget(signupNameError_);
+	signupTabLayout->addWidget(signupPassEdit_);
+	signupTabLayout->addWidget(signupPassError_);
+	signupTabLayout->addWidget(signupPolicy_);
+	signupTabLayout->addWidget(userSignupBtn_);
+	signupTabLayout->addStretch(1);
+	authTabs_->addTab(loginTab_, tr("Log in"));
+	authTabs_->addTab(signupTab_, tr("Create account"));
+	connect(authTabs_, &QTabWidget::currentChanged, this,
+		&MetadataDock::onAuthTabChanged);
 	userLogoutBtn_ = new QPushButton(tr("Log out (Managed)"), this);
 	connect(userLogoutBtn_, &QPushButton::clicked, this,
 		&MetadataDock::onUserLogout);
@@ -328,10 +376,7 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 	userNotice_ =
 		new QLabel(meta::userNoRecoveryNotice(), this);
 	userNotice_->setWordWrap(true);
-	top->addWidget(userNameEdit_);
-	top->addWidget(userPassEdit_);
-	top->addWidget(userLoginBtn_);
-	top->addWidget(userSignupBtn_);
+	top->addWidget(authTabs_);
 	top->addWidget(userLogoutBtn_);
 	top->addWidget(userStatus_);
 	top->addWidget(userNotice_);
@@ -578,7 +623,7 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 	loginPage_ = new QWidget(managedStack_);
 	QVBoxLayout *loginLayout = new QVBoxLayout(loginPage_);
 	QWidget *enterWidgets[] = {
-		userNameEdit_, userPassEdit_, userLoginBtn_, userSignupBtn_,
+		authTabs_,
 		userStatus_, userNotice_,
 	};
 	for (QWidget *w : enterWidgets) {
@@ -698,15 +743,12 @@ void MetadataDock::refreshModeUi()
 		eraseAccountButton_->setVisible(managed);
 	// Fase 4: formulario de cuenta (solo Managed; Independent no lo
 	// ve ni lo necesita, ADR-008/012).
+	// f8: las pestanas Entrar|Crear cuenta viajan juntas (authTabs_);
+	// los campos/botones viven dentro de su pestana y jamas se
+	// ocultan por separado.
 	const bool showLogin = managed;
-	if (userNameEdit_)
-		userNameEdit_->setVisible(showLogin);
-	if (userPassEdit_)
-		userPassEdit_->setVisible(showLogin);
-	if (userLoginBtn_)
-		userLoginBtn_->setVisible(showLogin);
-	if (userSignupBtn_)
-		userSignupBtn_->setVisible(showLogin);
+	if (authTabs_)
+		authTabs_->setVisible(showLogin);
 	if (userLogoutBtn_)
 		userLogoutBtn_->setVisible(showLogin);
 	if (userStatus_)
@@ -1568,9 +1610,48 @@ void MetadataDock::refreshManagedScreen()
 		managedStack_->setCurrentWidget(panelPage_);
 	// Accesibilidad (doc Qt6 "Keyboard Focus in Widgets": foco inicial
 	// explícito con setFocus): al mostrar ENTRAR, el foco va al primer
-	// campo para poder operar con teclado desde el inicio.
-	if (managedStack_->currentWidget() == loginPage_ && userNameEdit_)
+	// campo de la pestana visible para poder operar con teclado desde
+	// el inicio.
+	if (managedStack_->currentWidget() == loginPage_) {
+		if (authMode() == meta::ManagedAuthMode::Signup &&
+		    signupNameEdit_)
+			signupNameEdit_->setFocus();
+		else if (userNameEdit_)
+			userNameEdit_->setFocus();
+	}
+}
+
+// f8: modo Entrar|Crear cuenta = pestana visible del QTabWidget
+// (excluyentes por construccion). Sin red, solo vista.
+meta::ManagedAuthMode MetadataDock::authMode() const
+{
+	if (authTabs_ && authTabs_->currentWidget() == signupTab_)
+		return meta::ManagedAuthMode::Signup;
+	return meta::ManagedAuthMode::Login;
+}
+
+void MetadataDock::onAuthTabChanged(int)
+{
+	// Cambiar de modo no reintenta nada: solo limpia los errores
+	// inline del otro modo y enfoca el primer campo (sin red).
+	clearAuthInlineErrors();
+	if (authMode() == meta::ManagedAuthMode::Signup &&
+	    signupNameEdit_)
+		signupNameEdit_->setFocus();
+	else if (userNameEdit_)
 		userNameEdit_->setFocus();
+}
+
+void MetadataDock::clearAuthInlineErrors()
+{
+	if (loginNameError_)
+		loginNameError_->clear();
+	if (loginPassError_)
+		loginPassError_->clear();
+	if (signupNameError_)
+		signupNameError_->clear();
+	if (signupPassError_)
+		signupPassError_->clear();
 }
 
 void MetadataDock::refreshManagedLoginUi(const QString &statusOverride)
@@ -1605,8 +1686,15 @@ void MetadataDock::refreshManagedLoginUi(const QString &statusOverride)
 		userNameEdit_->setEnabled(!logged);
 	if (userPassEdit_)
 		userPassEdit_->setEnabled(!logged);
+	// f8: los campos de Crear cuenta viven en su propia pestana.
+	if (signupNameEdit_)
+		signupNameEdit_->setEnabled(!logged);
+	if (signupPassEdit_)
+		signupPassEdit_->setEnabled(!logged);
 	if (userLogoutBtn_)
 		userLogoutBtn_->setEnabled(logged);
+	if (logged)
+		clearAuthInlineErrors();
 	if (userStatus_) {
 		if (logged) {
 			const QString label = managedAuth_->userLabel();
@@ -1655,12 +1743,26 @@ void MetadataDock::onUserSignup()
 {
 	if (!isManaged() || !managedAuth_)
 		return; // Independent: sin formulario, sin acción
-	const QString user = field(userNameEdit_);
-	const QString pass = userPassEdit_->text();
-	if (user.isEmpty() || pass.isEmpty()) {
-		userStatus_->setText(
-			tr("Username and password are required."));
-		return;
+	// f8: Crear cuenta lee SUS propios campos (jamas los de Entrar).
+	const QString user =
+		signupNameEdit_ ? field(signupNameEdit_) : QString();
+	const QString pass =
+		signupPassEdit_ ? signupPassEdit_->text() : QString();
+	// f8: validación LOCAL inmediata (sin red): el 400 de signup por
+	// password corta (politica 12-128) se frena aqui con mensaje
+	// claro junto al campo, en vez de "username may be taken".
+	clearAuthInlineErrors();
+	const QString uErr = meta::validateManagedUsername(user);
+	const QString pErr = meta::validateManagedPassword(pass);
+	if (!uErr.isEmpty() || !pErr.isEmpty()) {
+		if (!uErr.isEmpty() && signupNameError_)
+			signupNameError_->setText(uErr);
+		if (!pErr.isEmpty() && signupPassError_)
+			signupPassError_->setText(pErr);
+		if (userStatus_)
+			userStatus_->setText(
+				!uErr.isEmpty() ? uErr : pErr);
+		return; // CERO red con entrada invalida
 	}
 	userSignupBtn_->setEnabled(false);
 	userLoginBtn_->setEnabled(false);
@@ -1672,10 +1774,13 @@ void MetadataDock::onUserSignup()
 		       const backend_auth::Client::UserInfo &) {
 			if (!isManaged())
 				return; // user switched mode
-			userPassEdit_->clear(); // jamás permanece en el widget
+			if (signupPassEdit_)
+				signupPassEdit_->clear(); // jamás permanece
 			if (r != backend_auth::Result::Ok) {
 				// f7: el error especifico viaja como override;
 				// el gate ya no lo pisa (bug 2026-10-26).
+				// El 409 queda como respaldo y sugiere Entrar
+				// (meta::managedSignupTakenMessage).
 				refreshManagedLoginUi(userAuthError(r, true));
 				return;
 			}
@@ -1709,10 +1814,20 @@ void MetadataDock::onUserLogin()
 		return;
 	const QString user = field(userNameEdit_);
 	const QString pass = userPassEdit_->text();
-	if (user.isEmpty() || pass.isEmpty()) {
-		userStatus_->setText(
-			tr("Username and password are required."));
-		return;
+	// f8: validación LOCAL inmediata (sin red) con mensaje inline
+	// junto al campo; CERO red con entrada invalida.
+	clearAuthInlineErrors();
+	const QString uErr = meta::validateManagedUsername(user);
+	const QString pErr = meta::validateManagedPassword(pass);
+	if (!uErr.isEmpty() || !pErr.isEmpty()) {
+		if (!uErr.isEmpty() && loginNameError_)
+			loginNameError_->setText(uErr);
+		if (!pErr.isEmpty() && loginPassError_)
+			loginPassError_->setText(pErr);
+		if (userStatus_)
+			userStatus_->setText(
+				!uErr.isEmpty() ? uErr : pErr);
+		return; // CERO red con entrada invalida
 	}
 	userLoginBtn_->setEnabled(false);
 	userSignupBtn_->setEnabled(false);
@@ -1744,6 +1859,10 @@ void MetadataDock::onUserLogout()
 		if (!isManaged())
 			return;
 		userPassEdit_->clear();
+		// f8: el password de Crear cuenta tampoco permanece.
+		if (signupPassEdit_)
+			signupPassEdit_->clear();
+		clearAuthInlineErrors();
 		// Las conexiones Managed pertenecen al usuario: al salir se
 		// olvidan localmente (el backend revocó la sesión; la
 		// propiedad por usuario invalida el resto en servidor).
