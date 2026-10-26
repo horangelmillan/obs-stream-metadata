@@ -1223,6 +1223,25 @@ int main(int argc, char **argv)
 		std::printf("PASS f5-erase-msg-safe\n");
 	}
 
+	// f6 ENTRAR-primero: Managed dos pantallas excluyentes (sin
+	// sesión se ve ENTRAR y no el panel; con sesión se ve PANEL y no
+	// ENTRAR; salir vuelve a ENTRAR); Independent intacto (siempre
+	// panel, jamás ENTRAR). Puro QtCore; la vista lo usa como gate
+	// del QStackedWidget.
+	CHECK(meta::managedEnterVisible(true, false),
+	      "f6-enter-nologin");
+	CHECK(!meta::managedPanelVisible(true, false),
+	      "f6-panel-hidden-nologin");
+	CHECK(!meta::managedEnterVisible(true, true),
+	      "f6-enter-hidden-login");
+	CHECK(meta::managedPanelVisible(true, true), "f6-panel-login");
+	CHECK(!meta::managedEnterVisible(false, false) &&
+		      !meta::managedEnterVisible(false, true),
+	      "f6-independent-no-enter");
+	CHECK(meta::managedPanelVisible(false, false) &&
+		      meta::managedPanelVisible(false, true),
+	      "f6-independent-panel-always");
+
 	std::printf("SELFCHECK OK\n");
 	return 0;
 }

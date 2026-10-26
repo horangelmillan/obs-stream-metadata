@@ -34,6 +34,7 @@ secrets in memory + DPAPI-encrypted store, never plaintext/printed/logged.
 #include <QRandomGenerator>
 #include <QScrollArea>
 #include <QSignalBlocker>
+#include <QStackedWidget>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTimer>
@@ -110,7 +111,9 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 	// T-041: connection mode selector (ADR-012). One mode per plugin
 	// installation; Independent keeps the existing direct/BYO-app flows,
 	// Managed only prepares the context until T-048 wires the backend.
-	QLabel *modeLabel = new QLabel(tr("Connection mode"), this);
+	// f6: chrome global (fuera del QStackedWidget) para poder salir de
+	// ENTRAR a Independent sin sesión.
+	modeLabel_ = new QLabel(tr("Connection mode"), this);
 	modeCombo_ = new QComboBox(this);
 	modeCombo_->addItem(QString::fromLatin1(meta::connectionModeName(
 		meta::ConnectionMode::Independent)));
@@ -120,7 +123,7 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 		static_cast<void (QComboBox::*)(int)>(
 			&QComboBox::currentIndexChanged),
 		this, &MetadataDock::onModeChanged);
-	top->addWidget(modeLabel);
+	top->addWidget(modeLabel_);
 	top->addWidget(modeCombo_);
 
 	QLabel *platTitle = new QLabel(tr("Platforms"), this);
@@ -562,13 +565,54 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 	top->addWidget(generalMsg_);
 
 	body->setLayout(top);
-	QScrollArea *scroll = new QScrollArea(this);
+	// f6 ENTRAR-primero: dos pantallas excluyentes en Managed con
+	// QStackedWidget (doc oficial Qt6
+	// https://doc.qt.io/qt-6/qstackedwidget.html : addWidget +
+	// setCurrentWidget; la exclusividad la garantiza el propio widget,
+	// no flags manuales). ENTRAR (indice 0) solo el formulario de
+	// cuenta; PANEL (indice 1) el dock completo con el scroll
+	// existente. Independent queda fijado en PANEL (una sola pantalla,
+	// sin cambios visibles). El selector de modo queda como chrome
+	// global para poder salir de ENTRAR a Independent sin sesión.
+	managedStack_ = new QStackedWidget(this);
+	loginPage_ = new QWidget(managedStack_);
+	QVBoxLayout *loginLayout = new QVBoxLayout(loginPage_);
+	QWidget *enterWidgets[] = {
+		userNameEdit_, userPassEdit_, userLoginBtn_, userSignupBtn_,
+		userStatus_, userNotice_,
+	};
+	for (QWidget *w : enterWidgets) {
+		top->removeWidget(w);
+		loginLayout->addWidget(w);
+	}
+	loginLayout->addStretch(1);
+	managedStack_->addWidget(loginPage_); // 0 = ENTRAR
+	panelPage_ = new QWidget(managedStack_);
+	QVBoxLayout *panelLayout = new QVBoxLayout(panelPage_);
+	panelLayout->setContentsMargins(0, 0, 0, 0);
+	panelSession_ = new QLabel(panelPage_);
+	panelSession_->setWordWrap(true);
+	panelSession_->setVisible(false); // solo Managed con sesión
+	panelLayout->addWidget(panelSession_);
+	top->removeWidget(userLogoutBtn_);
+	panelLayout->addWidget(userLogoutBtn_);
+	QScrollArea *scroll = new QScrollArea(panelPage_);
 	scroll->setWidget(body);
 	scroll->setWidgetResizable(true);
 	scroll->setFrameShape(QFrame::NoFrame);
+	panelLayout->addWidget(scroll);
+	managedStack_->addWidget(panelPage_); // 1 = PANEL
 	QVBoxLayout *outer = new QVBoxLayout(this);
 	outer->setContentsMargins(0, 0, 0, 0);
-	outer->addWidget(scroll);
+	// Chrome global: selector de modo + nota Managed (salida de ENTRAR
+	// sin sesión; el modo debe poder cambiarse sin estar logueado).
+	top->removeWidget(modeLabel_);
+	outer->addWidget(modeLabel_);
+	top->removeWidget(modeCombo_);
+	outer->addWidget(modeCombo_);
+	top->removeWidget(managedNote_);
+	outer->addWidget(managedNote_);
+	outer->addWidget(managedStack_);
 	setLayout(outer);
 
 	net_ = new QNetworkAccessManager(this);
@@ -673,6 +717,7 @@ void MetadataDock::refreshModeUi()
 	repaintModeStatuses();
 	updateAllCardStyles();
 	refreshContentVisibility();
+	refreshManagedScreen(); // f6: Managed sin sesión => ENTRAR
 }
 
 // --- platform cards (UX FASE 1, Modelo B; visibility/style only) --------
@@ -1508,10 +1553,49 @@ void MetadataDock::noteManagedAuthFailure(meta::Platform p)
 	refreshManagedLoginUi();
 }
 
+// --- f6 ENTRAR-primero -------------------------------------------------
+void MetadataDock::refreshManagedScreen()
+{
+	if (!managedStack_ || !loginPage_ || !panelPage_)
+		return;
+	// Gates puros (testeados en f6, src/metadata.cpp): excluyentes en
+	// Managed, PANEL siempre en Independent. Sin red: solo lee la
+	// sesión en memoria (territorio obs-plugin intacto).
+	const bool logged = managedAuth_ && managedAuth_->hasUserSession();
+	if (meta::managedEnterVisible(isManaged(), logged))
+		managedStack_->setCurrentWidget(loginPage_);
+	else
+		managedStack_->setCurrentWidget(panelPage_);
+	// Accesibilidad (doc Qt6 "Keyboard Focus in Widgets": foco inicial
+	// explícito con setFocus): al mostrar ENTRAR, el foco va al primer
+	// campo para poder operar con teclado desde el inicio.
+	if (managedStack_->currentWidget() == loginPage_ && userNameEdit_)
+		userNameEdit_->setFocus();
+}
+
 void MetadataDock::refreshManagedLoginUi()
 {
-	if (!isManaged() || !managedAuth_)
+	// f6: la línea de sesión del PANEL solo existe en Managed con
+	// sesión; en Independent (o sin sesión) queda oculta. userStatus_
+	// (página ENTRAR) sigue dando el feedback de login/signup.
+	const bool loggedNow = isManaged() && managedAuth_ &&
+			       managedAuth_->hasUserSession();
+	if (panelSession_) {
+		panelSession_->setVisible(loggedNow);
+		if (loggedNow) {
+			const QString label = managedAuth_->userLabel();
+			panelSession_->setText(
+				label.isEmpty()
+					? tr("Session active.")
+					: tr("Session: %1").arg(label));
+		} else {
+			panelSession_->clear();
+		}
+	}
+	if (!isManaged() || !managedAuth_) {
+		refreshManagedScreen();
 		return; // Independent: formulario oculto, nada que actualizar
+	}
 	const bool logged = managedAuth_->hasUserSession();
 	if (userLoginBtn_)
 		userLoginBtn_->setEnabled(!logged);
@@ -1535,6 +1619,7 @@ void MetadataDock::refreshManagedLoginUi()
 				meta::managedLoginRequiredMessage());
 		}
 	}
+	refreshManagedScreen();
 }
 
 QString MetadataDock::userAuthError(backend_auth::Result r, bool isSignup)

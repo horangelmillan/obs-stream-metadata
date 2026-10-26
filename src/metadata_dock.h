@@ -39,6 +39,7 @@ class QNetworkAccessManager;
 class QNetworkReply;
 class QPlainTextEdit;
 class QPushButton;
+class QStackedWidget;
 class QTcpServer;
 class QTimer;
 
@@ -144,6 +145,10 @@ private slots:
 	void noteManagedAuthFailure(meta::Platform p);
 	// Estados del formulario de cuenta Managed (solo Managed).
 	void refreshManagedLoginUi();
+	// f6 ENTRAR-primero: pagina visible del QStackedWidget segun los
+	// predicados puros meta::managedEnterVisible/PanelVisible
+	// (excluyentes en Managed; Independent siempre PANEL). Sin red.
+	void refreshManagedScreen();
 	// Error de signup/login a mensaje UI (sin secretos, sin detalles).
 	QString userAuthError(backend_auth::Result r, bool isSignup);
 	// FASE 2.1-C: Apply Managed YouTube via backend (tokens server-side).
@@ -394,6 +399,14 @@ private:
 	QPushButton *eraseButton_ = nullptr;
 	// Fase 4: formulario de cuenta Managed (username+password v1, sin
 	// email). Solo memoria, jamás Store/DPAPI. Visible solo en Managed.
+	// f6 ENTRAR-primero: el formulario de cuenta vive en la página
+	// ENTRAR del QStackedWidget (Managed sin sesión); el botón Salir
+	// vive en la página PANEL. Independent intacto (siempre PANEL).
+	QLabel *modeLabel_ = nullptr;
+	QStackedWidget *managedStack_ = nullptr;
+	QWidget *loginPage_ = nullptr;
+	QWidget *panelPage_ = nullptr;
+	QLabel *panelSession_ = nullptr;
 	QLineEdit *userNameEdit_ = nullptr;
 	QLineEdit *userPassEdit_ = nullptr;
 	QPushButton *userLoginBtn_ = nullptr;

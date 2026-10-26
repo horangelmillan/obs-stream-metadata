@@ -2369,8 +2369,14 @@ Definiciones en `.opencode/agents/` (descubrimiento:
     documentos de su alcance (único escritor de `docs/BACKLOG.md`;
     dueño de `.gitignore` para entradas de ignorado); sin código ni
     operaciones externas.
--   `obs-plugin`: C++/Qt6 y cliente del plugin; trabaja en `src/`;
-    sin despliegues ni cuentas externas.
+-   `obs-plugin`: C++/Qt6 y cliente del plugin; lógica en `src/`
+    (auth/red/storage); sin despliegues ni cuentas externas.
+-   `ux-ui`: diseñador-constructor de la interfaz del dock (Qt6
+    Widgets: pantallas, estados, textos, estilos); vista en `src/`;
+    investiga documentación oficial; no toca lógica de auth/red/
+    secretos. Reparto con `obs-plugin` en §tabla: serializados por
+    el orquestador, jamás a la vez (creación 2026-10-26 [D],
+    autorización del usuario en chat).
 -   `backend-integrations`: backend Python/OAuth/pruebas; trabaja en
     `backend/`; dueño ejecutor del lab Facebook (`lab/**`, Node);
     sin infraestructura productiva ni despliegues.
@@ -2395,11 +2401,16 @@ Tabla de propiedad (un escritor por ruta; reforma 2026-10-25):
 | `docs/BACKLOG.md` | `harness-steward` (único) |
 | `.gitignore` (entradas de ignorado) | `harness-steward` |
 | Resto documental (`AGENTS.md`, `README.md`, `docs/STATE.md`, `docs/PROJECT_CONTEXT.md`, `docs/DEPLOYMENT.md`, `docs/VALIDATION.md`, `docs/TOOLS.md`, `docs/WORKFLOW.md`, `docs/FINDINGS.md`) | `harness-steward` |
-| `src/**` | `obs-plugin` |
+| `src/**` (lógica: auth/red/storage) | `obs-plugin` |
+| `src/**` (vista: pantallas, textos, estados, estilos) | `ux-ui` |
 | `backend/**` | `backend-integrations` |
 | `lab/**` | `backend-integrations` (ejecutor lab) |
 | `tools/**` | `release-tooling` (sin ejecución) |
 | Integración Git (add/commit/push/PR/merge por paths, sin edición de archivos) | `git-integration` (solo bajo autorización escrita del gate vigente) |
+
+Reparto `src/**` (2026-10-26 [D]): `obs-plugin` = lógica,
+`ux-ui` = vista; el orquestador los serializa, jamás escriben a la
+vez (un solo escritor por checkout).
 
 Los límites de producto de §§23/51 no cambian con esta reforma.
 

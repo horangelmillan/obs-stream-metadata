@@ -482,6 +482,18 @@ QString userNoRecoveryNotice()
 		"Keep your password safe.");
 }
 
+// f6 ENTRAR-primero: Managed sin sesión => ENTRAR; con sesión => PANEL.
+// Independent => jamás ENTRAR (una sola pantalla, intacto).
+bool managedEnterVisible(bool isManaged, bool hasUserSession)
+{
+	return isManaged && !hasUserSession;
+}
+
+bool managedPanelVisible(bool isManaged, bool hasUserSession)
+{
+	return !isManaged || hasUserSession;
+}
+
 // Fase 5: borrado de CUENTA (/users/erase) separado de F-C2
 // (/privacy/erase). Rutas canónicas distintas por construcción; el
 // resumen de respuesta solo incrusta enteros (conteos por tabla).
