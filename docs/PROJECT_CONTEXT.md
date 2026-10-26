@@ -185,7 +185,18 @@ métricas F-099, audiencia F-093. Fases v3 completadas (2026-10-26) [D delegada,
  conteo estático [C] sin ejecutar], diff-check y scan limpios; sin
  commit. T-078 sigue en investigación sin cambio de estado [C contra
  BACKLOG]. Pendientes [P]: E2E dos directos reales, capturas
- visuales, instalador con relay+fix.
+ visuales, instalador con relay+fix. Fix trío señal/listo/contador
+  (2026-10-26) [D delegada, no re-ejecutada aquí]: causa raíz — dock
+  leía `GET /v3/config/paths/get/live` (PathConf estática, sin estado)
+  en vez de `GET /v3/paths/get/live` (Path runtime con
+  online/source/inboundBytes), por eso signalHasEmitter era falso
+  siempre con Aitum emitiendo; fix: endpoint runtime + parse
+  reescrito + predicado único fbEmitReadiness (verde exige las tres;
+  ámbar "lista pero sin señal") + contador con causa y gate
+  lastOk<=0 + log diagnóstico con conteos; build OK, selfcheck 367/0,
+  diff-check y scan limpios; T-078 sigue en investigación sin cambio
+  de estado; pendientes [P]: E2E operador, instalador. Detalle en
+  VALIDATION.md.
 NEXT REQUIRED TECHNICAL TASK: NONE.
 
 ## 14. Known Findings / Limitations

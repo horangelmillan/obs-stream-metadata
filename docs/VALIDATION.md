@@ -1,14 +1,42 @@
 # VALIDATION — estrategia progresiva
 
-> Nota de lectura (2026-10-24): este archivo es registro histórico de
+> Nota de lectura (2026-10-26): este archivo es registro histórico de
 > evidencia; se añaden entradas, no se reescribe el pasado (AGENTS.md
-> §55.6). Estado vigente: plan v3 con Fases lógica + vista completadas
-> abajo (sin commit; E2E pendiente). Los conteos antiguos
+> §55.6). Estado vigente: fix trío señal/listo/contador implementado
+> sin commit (detalle abajo; E2E pendiente). Los conteos antiguos
 > (134/218/244/249) son fotografías de su sesión, no el estado actual:
 > en este checkout hay 344 invocaciones `CHECK(` en
 > `src/metadata_selfcheck.cpp` (conteo estático [C], sin ejecutar aquí).
-> Últimos resultados documentados [D]: build OK + selfcheck 344/0
-> (Fases v3, delegado de la sesión implementadora).
+> Últimos resultados documentados [D]: build OK + selfcheck 367/0
+> (fix trío, delegado de la sesión implementadora).
+
+## Fix trío señal/listo/contador (2026-10-26 — IMPLEMENTADO SIN COMMIT; T-078 sin cambio de estado)
+
+```text
+FUENTE [D delegada de la sesión implementadora, no re-ejecutada
+  aquí; comunicada en la tarea que autoriza, 2026-10-26]:
+  causa raíz — el dock leía GET /v3/config/paths/get/live
+  (config estática PathConf, sin estado) en vez de
+  GET /v3/paths/get/live (runtime Path con online/source/
+  inboundBytes); por eso signalHasEmitter era falso siempre con
+  Aitum emitiendo.
+  Fix — endpoint runtime + parse reescrito + predicado único
+  fbEmitReadiness (verde exige las tres; ámbar "lista pero sin
+  señal") + contador con causa y gate lastOk<=0 + log
+  diagnóstico con conteos.
+  Validación — build OK, selfcheck 367/0, diff-check y
+  secret-scan limpios.
+BASE [C, esta subtarea documental]: solo edición de docs
+  (`VALIDATION.md`, `STATE.md`, `PROJECT_CONTEXT.md`) +
+  `git diff --check`; sin commit/push, sin secretos, sin
+  `staging/`/`dev.env`. No reescribe historia: las entradas
+  anteriores quedan intactas abajo.
+ESTADO [C contra BACKLOG]: T-078 SIGUE en investigación, sin cambio
+  de estado en esta subtarea (canónico BACKLOG; esta entrada no
+  cambia estados). T-077 intacta.
+PENDIENTES [P]: E2E operador + instalador con relay+fix.
+FINAL: fix trío documentado; E2E de aceptación pendiente.
+```
 
 ## Plan v3 — Fases completadas: lógica + vista (2026-10-26 — IMPLEMENTADO SIN COMMIT; T-078 sin cambio de estado)
 
