@@ -18,6 +18,7 @@ obs_module_config_path) and passes it in.
 
 #include "metadata.h"
 
+#include <QDateTime>
 #include <QString>
 
 namespace secure {
@@ -29,6 +30,21 @@ struct ManagedSnapshot {
 	bool connected = false;
 	QString userId;
 	QString display;
+};
+
+// [D 2026-10-26 usuario]: sesion de usuario Managed persistida
+// ("si entraste antes, al abrir OBS vuelve directo al panel; solo pide
+// login si vencio el tiempo o cerraste sesion"). SUSTITUYE spec §5
+// memoria-solo. BLOB CIFRADO DPAPI como backendInstall (jamas en claro,
+// incluida la etiqueta username); ligado a backendBaseUrl (fail-closed
+// ante mismatch, igual que loadInstallation). Los snapshots Managed
+// siguen en claro porque no son secretos; la sesion SI lo es. TTL lo
+// manda el backend (30 min); expirada = login de nuevo.
+struct ManagedUserSession {
+	bool loggedIn = false;
+	QString username; // etiqueta "Conectado como" (dentro del blob)
+	QString token;    // user_session opaco (jamas en claro)
+	QDateTime expiry; // UTC
 };
 
 struct Record {
@@ -67,6 +83,10 @@ struct Data {
 	// F-075 ID-centrico). Plaintext ID no-sensible (como userId/display):
 	// sobrevive a Disconnect/restart; se limpia con DELETE.
 	QString facebookLiveId;
+	// [D 2026-10-26]: sesion de usuario Managed (ver ManagedUserSession).
+	// Solo valida junto a backendBaseUrl (fail-closed); se limpia en
+	// logout/401/expirada. No afecta a load(): es contexto, no proveedor.
+	ManagedUserSession managedUser;
 	// T-053: backend this installation belongs to (explicit environment
 	// binding). Plaintext URL, not a secret; empty = legacy file without
 	// binding (treated as mismatch → re-bootstrap, never cross-backend

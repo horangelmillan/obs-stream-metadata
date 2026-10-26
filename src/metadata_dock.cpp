@@ -976,6 +976,10 @@ void MetadataDock::updateCardStyle(meta::Platform p)
 	if (!card || !status || !result)
 		return;
 	// Same sources the labels already show; no new state system.
+	// Bugfix visual 2026-10-26 [D]: el tono sale del predicado puro
+	// meta::cardToneFor (unica fuente; testeado en selfcheck).
+	// Neutral = gris (limpio/logout), Brand = color (conectada),
+	// Error = rojo (solo tras accion fallida o ruptura).
 	bool connected = false;
 	if (isManaged())
 		connected = managedAccount(p).connected;
@@ -983,11 +987,9 @@ void MetadataDock::updateCardStyle(meta::Platform p)
 		connected = account(p).connected;
 	const QString st = status->text();
 	const QString rs = result->text();
-	const bool failed =
-		st.startsWith(tr("Error")) ||
-		st == tr("Needs reconnection.") ||
-		st == meta::managedLoginRequiredMessage() ||
-		rs.contains(QStringLiteral(" ✗ "));
+	const meta::CardTone tone =
+		meta::cardToneFor(connected, st, rs);
+	const bool failed = (tone == meta::CardTone::Error);
 	const char *brand = "#8a8a8a";
 	const char *tint = "transparent";
 	if (p == meta::Platform::Twitch) {
@@ -1171,60 +1173,70 @@ void MetadataDock::initManaged()
 	refreshManagedLoginUi(); // formulario al frente (login o gate)
 }
 
-// T-075: silent startup revalidation (no browser, single pass). Fase 4:
-// la sesión de usuario vive solo en memoria: al reiniciar OBS se
-// revalida vía GET /users/me ([P] fijado: revalidar silencioso y si
-// 401 pedir login). Sin login: pedir login, CERO red. Con login: me()
-// y luego una ensureSession + un status por plataforma con snapshot.
-// Nunca borra snapshots aquí salvo 401 (noteManagedAuthFailure);
-// Connect/Apply deciden.
+// T-075: silent startup revalidation (no browser, single pass). Fase 4 +
+// AUTORIZACION [D usuario 2026-10-26]: "si entraste antes, al abrir OBS
+// vuelve directo al panel; solo pide login si vencio o cerraste sesion".
+// Arranque Managed sin sesion en memoria: tryRestoreUserSession()
+// (cero red) -> si true, me() silencioso: OK => PANEL directo (con la
+// revalidacion de plataformas existente); 401/expirada => ENTRAR con
+// mensaje normal. Sin restaurable => ENTRAR directo, CERO red.
+// Reinicio con sesion valida NO borra visual: las tarjetas conservan su
+// ultimo estado conocido hasta revalidar (sin parpadeo a gris/rojo).
 void MetadataDock::silentRevalidateManaged()
 {
 	if (!isManaged() || !managedAuth_)
 		return;
-	bool any = false;
-	for (meta::Platform p :
-	     {meta::Platform::Twitch, meta::Platform::YouTube,
-	      meta::Platform::Kick, meta::Platform::Facebook}) {
-		if (managedAccount(p).connected)
-			any = true;
-	}
-	if (!any) {
-		refreshManagedLoginUi();
-		return;
-	}
-	if (!managedAuth_->hasUserSession()) {
+	// 1. Restaurar sesion persistida (cero red, territorio obs-plugin
+	// intacto: solo llamada al cliente). Si ya habia sesion en memoria,
+	// tryRestore es no-op (devuelve true sin tocar nada).
+	if (!managedAuth_->hasUserSession())
+		managedAuth_->tryRestoreUserSession();
+	// 2. Gate puro (testeado): sin sesion tras el restore => ENTRAR
+	// directo, CERO red, sin tocar tarjetas (conservan el repaint
+	// inicial de loadStore: nada de parpadeo a gris/rojo ni gate de
+	// error en plataformas).
+	if (!meta::managedStartupShouldRevalidate(
+		    managedAuth_->hasUserSession())) {
 		obs_log(LOG_INFO,
 			"managed silent revalidate skipped: login required");
-		for (meta::Platform p :
-		     {meta::Platform::Twitch, meta::Platform::YouTube,
-		      meta::Platform::Kick, meta::Platform::Facebook}) {
-			if (managedAccount(p).connected)
-				setStatus(p,
-					  meta::managedLoginRequiredMessage());
-		}
 		refreshManagedLoginUi();
 		return;
 	}
+	// 3. Con sesion: PANEL directo ya (refresh muestra PANEL por
+	// hasUserSession) antes de la revalidacion de red.
 	obs_log(LOG_INFO, "managed silent revalidate started");
+	refreshManagedLoginUi();
 	managedAuth_->me([this](backend_auth::Result r,
 			       const backend_auth::Client::UserInfo &) {
 		if (!isManaged())
 			return;
 		if (r != backend_auth::Result::Ok) {
+			// 401/expirada => ENTRAR con mensaje normal (sin
+			// dramatismo): limpieza neutra "Not connected" /
+			// "disconnected" (tono Neutral, jamas gate rojo en
+			// tarjetas; el gate vive solo en userStatus_).
+			// clearUserSession ya ocurrio en el cliente (401).
 			obs_log(LOG_WARNING,
 				"managed silent revalidate user failed");
 			for (meta::Platform p :
 			     {meta::Platform::Twitch,
 			      meta::Platform::YouTube, meta::Platform::Kick,
 			      meta::Platform::Facebook}) {
-				if (managedAccount(p).connected)
-					noteManagedAuthFailure(p);
-				else
-					setStatus(
-						p,
-						meta::managedLoginRequiredMessage());
+				if (managedAccount(p).connected) {
+					ManagedConn &m =
+						managedAccount(p);
+					m.connected = false;
+					m.userId.clear();
+					m.display.clear();
+					setStatus(p,
+						  tr("Not connected"));
+					setResult(p, true,
+						  tr("disconnected"));
+				} else {
+					setStatus(p, tr("Not connected"));
+				}
 			}
+			saveStore(); // drop stale snapshots
 			refreshManagedLoginUi();
 			return;
 		}
@@ -1309,6 +1321,18 @@ void MetadataDock::repaintModeStatuses()
 {
 	// Labels always reflect the active mode's own state objects; the
 	// other mode's accounts are never read here (§17: no mixing).
+	// Bugfix visual 2026-10-26 [D]: al repintar una plataforma
+	// desconectada se restaura tambien su result a pristine neutro
+	// ("Name —"): un ✗ heredado de un intento anterior no debe
+	// pegarse como rojo en un estado ya limpio.
+	auto resetPristine = [this](meta::Platform p) {
+		setStatus(p, tr("Not connected"));
+		if (QLabel *r = resultFor(p))
+			r->setText(QStringLiteral("%1 \u2014")
+					   .arg(QString::fromLatin1(
+						   meta::platformName(p))));
+		updateCardStyle(p);
+	};
 	if (isManaged()) {
 		for (meta::Platform p :
 		     {meta::Platform::Twitch, meta::Platform::YouTube,
@@ -1317,7 +1341,7 @@ void MetadataDock::repaintModeStatuses()
 			if (m.connected && !m.display.isEmpty())
 				setStatus(p, tr("Connected as %1").arg(m.display));
 			else
-				setStatus(p, tr("Not connected"));
+				resetPristine(p);
 		}
 		return;
 	}
@@ -1328,7 +1352,7 @@ void MetadataDock::repaintModeStatuses()
 		if (a.connected && !a.display.isEmpty())
 			setStatus(p, tr("Connected as %1").arg(a.display));
 		else
-			setStatus(p, tr("Not connected"));
+			resetPristine(p);
 	}
 }
 
@@ -1803,6 +1827,7 @@ void MetadataDock::onUserSignup()
 						return;
 					}
 					refreshManagedLoginUi();
+					repaintModeStatuses();
 					silentRevalidateManaged();
 				});
 		});
@@ -1845,6 +1870,7 @@ void MetadataDock::onUserLogin()
 					    return;
 				    }
 				    refreshManagedLoginUi();
+				    repaintModeStatuses();
 				    silentRevalidateManaged();
 			    });
 }
@@ -1867,14 +1893,18 @@ void MetadataDock::onUserLogout()
 		// olvidan localmente (el backend revocó la sesión; la
 		// propiedad por usuario invalida el resto en servidor).
 		// Independent intacto por construcción.
+		// Bugfix visual 2026-10-26 [D]: logout = estado LIMPIO
+		// (gris neutro "Not connected" + result neutro), JAMAS el
+		// gate login-required ni un ✗ heredado: el rojo solo vive
+		// tras accion fallida o ruptura (regla del usuario).
 		using P = meta::Platform;
 		for (P p : {P::Twitch, P::YouTube, P::Kick, P::Facebook}) {
 			ManagedConn &m = managedAccount(p);
 			m.connected = false;
 			m.userId.clear();
 			m.display.clear();
-			setStatus(p,
-				  meta::managedLoginRequiredMessage());
+			setStatus(p, tr("Not connected"));
+			setResult(p, true, tr("disconnected"));
 		}
 		if (broadcastCombo_)
 			broadcastCombo_->clear();

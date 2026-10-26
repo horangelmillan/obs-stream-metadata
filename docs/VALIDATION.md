@@ -9,6 +9,30 @@
 > `#define`; conteo estático [C], sin ejecutar aquí). Últimos resultados documentados [D]: backend 250 OK
 > (T-076) + SELFCHECK OK (T-073).
 
+## T-086 Sesión Managed persistente + routing arranque + estados tarjeta (2026-10-26, decisión [D usuario])
+
+```text
+DECISIÓN:  usuario 2026-10-26 [D]: SUSTITUYE spec §5 memoria-solo —
+           la sesión de usuario Managed persiste cifrada en DPAPI
+           (`managedUser`: token+expiry+username, fail-closed ante
+           mismatch de `backendBaseUrl`) hasta logout explícito /
+           401 / expiración; abrir OBS con sesión válida → directo
+           al panel; login solo si venció o hubo logout.
+CÓDIGO:    obs-plugin (persistencia `managedUser` DPAPI + revalidación
+           al arrancar) + routing ux-ui (estados gris/rojo de tarjeta)
+           [C: cambios sin commitear en este checkout —
+           `src/secure_store.*`, `src/backend_auth.*`,
+           `src/metadata_dock.cpp`; checks `startup-*` / `muser-*` /
+           `card-*` / `f6-*` / `f7-*` / `f8-*` presentes en
+           `src/metadata_selfcheck.cpp`].
+EVIDENCIA: build + selfcheck verdes [D: sesión implementadora, no
+           re-ejecutados en esta sesión documental]: selfcheck
+           `startup-*` / `muser-*` / `card-*` / `f6-f8` PASS, DLL OK.
+PENDIENTE: integrar (commit/PR), recompilar instalador, E2E operador
+           con capturas [P].
+FINAL: T-086 HECHA documental; E2E operador pendiente.
+```
+
 ## Deploy rev-managed-users-v1 + smoke prod Managed v1 (2026-10-26, autorización [D usuario: cerrar el loop deploy+verificación])
 
 ```text

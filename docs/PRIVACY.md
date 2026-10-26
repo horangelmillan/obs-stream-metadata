@@ -58,9 +58,13 @@ identity and without wiping `backendInstall` or connections/tokens [C:
   `src/backend_auth.cpp`]: opaque `user_session` token sent as the
   `X-User-Session` header, 30 min TTL (`USER_SESSION_TTL_S=1800`),
   revocable (`POST /users/logout`, idempotent 200); validated against
-  the `users` row on every use. The plugin holds it in memory only
-  (never `accounts.json` nor DPAPI; only set/sent/cleared, never
-  persisted — re-login after OBS restart; exact UX detail [P]).
+  the `users` row on every use. Decisión del usuario 2026-10-26 [D:
+  sustituye spec §5 memoria-solo]: the plugin persists it encrypted
+  in the DPAPI file (`managedUser`: token+expiry+username,
+  fail-closed on `backendBaseUrl` mismatch) until explicit logout /
+  401 / expiry; opening OBS with a valid session goes straight to
+  the panel, login only after expiry or logout [C:
+  `src/secure_store.cpp`, `src/backend_auth.cpp` en este checkout].
 - Dual auth on Managed connect/metadata routes [C:
   `check_managed_access`, `MANAGED_AUTH_DETAIL`]: a valid installation
   session (T-044) **plus** a valid user session are required on
@@ -197,9 +201,12 @@ D: spec §5].
   user access/refresh tokens only in backend `tokens` table; plugin
   holds neither (verified live: API returns `{provider, status,
   account}` only).
-  The Managed user-login session is an opaque token held in plugin
-  memory only (never DPAPI); the backend validates it against `users`
-  on every Managed call [C].
+  The Managed user-login session is an opaque token persisted
+  encrypted in the DPAPI file (`managedUser`, CurrentUser scope;
+  decisión usuario 2026-10-26 [D], sustituye el memoria-solo de
+  spec §5), never in plaintext; the backend validates it against
+  `users` on every Managed call (backend TTL governs: file presence
+  ≠ session validity).
 - Installation/session secrets: DPAPI (plugin) / PostgreSQL (backend).
 
 ## 8. Retention
@@ -249,6 +256,13 @@ Real behavior (no invented periods):
   disconnected entries) — no time-based deletion. Erase clears the
   Managed snapshots + local `backendInstall` record; Independent
   records are untouched.
+- Plugin `managedUser` session record: DPAPI-encrypted (CurrentUser)
+  `token`+`expiry`+`username`, bound to `backendBaseUrl` (fail-closed
+  mismatch → treated as logged-out); persists until explicit logout,
+  backend 401, or 30 min expiry — never in plaintext [D: decisión
+  usuario 2026-10-26; C: `src/secure_store.cpp`/`backend_auth.cpp` en
+  este checkout]. Backend TTL governs: the session expires even if the
+  file still exists.
 - Logs: Cloud Run stdout retention is the platform default (operator
   configurable, not app code). Log lines carry event types,
   platform/mode names, HTTP codes, redacted lengths, request IDs and
@@ -391,7 +405,8 @@ fixed here, never by silently changing the system (T-060 rule).
 | connection entry | callback | PG `connections` | status/reconnect | until Disconnect/erase | disconnect (per provider) or erase (all) |
 | user tokens | exchange/refresh | PG `tokens` (ciphertext `v1:` + metadata en claro) | API calls | until Disconnect/erase (shared rows kept while referenced) | disconnect / erase (guarded) + best-effort provider revoke |
 | username + `password_hash` (Managed v1) | `POST /users/signup` | PG `users` (hash `pbkdf2-sha256$600k$salt$hash`; no email) | Managed login identity | until account erase (no auto-expiry) | `POST /users/erase` (user row DELETE) |
-| `user_session` token (Managed v1) | `POST /users/login` | PG `sessions` (kind `user`, 30 min TTL; plugin copy memory-only) | Managed dual auth (`X-User-Session`) | 30 min access TTL; revoked/expired rejected; daily purge (default shared store) | logout (revoke) / purge / account or installation erase |
+| `user_session` token (Managed v1) | `POST /users/login` | PG `sessions` (kind `user`, 30 min TTL; plugin copy DPAPI-persisted `managedUser` desde T-086) | Managed dual auth (`X-User-Session`) | 30 min access TTL; revoked/expired rejected; daily purge (default shared store) | logout (revoke) / purge / account or installation erase |
+| `managedUser` (plugin DPAPI, T-086) | login/logout/401/expiry | DPAPI file (encrypted blob: `token`+`expiry`+`username`; CurrentUser; bound to `backendBaseUrl`) | skip login on OBS start when valid | until logout/401/30 min expiry (backend TTL governs even if the file still exists) | logout/401/expiry clears the record |
 | `user_id` / `owner_user_id` (Managed v1) | adoption at login/signup | PG `installations`/`sessions`/`connections`/`tokens` (nullable pre-adoption) | scope rows to their user | with the row | adoption sets; erases delete |
 | installation record | `/auth/bootstrap` | PG `installations` | backend auth | until erase | erase (row DELETE); revoke flags only |
 | provider client secrets | operator Secret Manager | Secret Manager → files | OAuth | managed externally | operator rotation |

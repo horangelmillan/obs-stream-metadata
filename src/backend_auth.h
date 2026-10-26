@@ -3,7 +3,10 @@
 
  Speaks the ADR-010 contract: anonymous bootstrap → per-installation
  secret (DPAPI via secure::Store, backendInstall record) → HMAC-signed
- session/refresh → short-lived opaque bearer in memory only.
+ session/refresh → short-lived opaque bearer in memory only. The Managed
+ user session ([D 2026-10-26]) additionally persists encrypted
+ (managedUser record, same DPAPI + backend binding) for direct-to-panel
+ reopen; it is wiped on logout/401/expiry.
 
  All networking is async (QNAM signals, same pattern as metadata_dock,
  F-025): never blocks the OBS UI thread. No values ever logged.
@@ -47,7 +50,7 @@ public:
 	explicit Client(QNetworkAccessManager *nam, QObject *parent = nullptr);
 
 	void setBaseUrl(const QString &baseUrl); // e.g. https://host (no trailing /)
-	void setStore(secure::Store *store); // not owned; persists backendInstall
+	void setStore(secure::Store *store); // not owned; persists backendInstall + managedUser
 
 	// Bootstrap a fresh installation. Persists identity via store.
 	// Callback receives Ok only when identity is safely stored.
@@ -67,10 +70,14 @@ public:
 	QString sessionToken() const { return sessionToken_; }
 	bool hasValidSession() const;
 
-	// Fase 4: cuenta de usuario Managed (spec §§4–5). La sesión de
-	// usuario vive SOLO en memoria (jamás en accounts.json/DPAPI; al
-	// reiniciar OBS se revalida vía me() o se pide login). Ningún
-	// token/secreto llega a la UI ni a logs: solo etiquetas
+	// Fase 4: cuenta de usuario Managed (spec §§4–5, regimen de sesion
+	// [D 2026-10-26 usuario] que SUSTITUYE spec §5 memoria-solo: "si
+	// entraste antes, al abrir OBS vuelve directo al panel; solo pide
+	// login si vencio el tiempo o cerraste sesion"). La sesion de usuario
+	// persiste CIFRADA (DPAPI, registro managedUser ligado a backendBaseUrl,
+	// igual que backendInstall; jamas en claro); al reiniciar OBS el dock
+	// la restaura con tryRestoreUserSession() y la revalida con me().
+	// Ningun token/secreto llega a la UI ni a logs: solo etiquetas
 	// (username/display). Rutas backend Fase 2: POST /users/signup,
 	// POST /users/login, POST /users/logout, GET /users/me.
 	struct UserInfo {
@@ -96,6 +103,14 @@ public:
 	bool hasUserSession() const;
 	// Etiqueta no sensible para la UI ("Conectado como").
 	QString userLabel() const { return loggedUsername_; }
+	// [D 2026-10-26]: restaura la sesion persistida (DPAPI) a memoria.
+	// Lee el store: si hay token no expirado Y ligado a este backendBaseUrl
+	// (fail-closed ante mismatch, igual que loadInstallation), lo carga a
+	// memoria y devuelve true. NO valida red: eso lo hace el dock con me().
+	// Expirada o mismatch = sin sesion (limpia el registro) y false.
+	// Sin store o sin baseUrl: false.
+	bool tryRestoreUserSession();
+	// Limpia memoria Y registro persistido (logout/401/expirada).
 	void clearUserSession();
 
 	// T-048: llamada autenticada contra el backend (asegura sesión
@@ -142,6 +157,10 @@ private:
 			 std::function<void(const ApiReply &)> cb);
 	bool persistInstallation(const QString &id, const QString &secret);
 	bool loadInstallation(QString &id, QString &secret);
+	// [D 2026-10-26]: el registro managedUser sigue las mismas reglas que
+	// backendInstall (DPAPI + binding a backendBaseUrl, best-effort load).
+	bool persistUserSession();
+	void clearPersistedUserSession();
 	bool storeSession(const QJsonObject &o);
 	void freshSession(std::function<void(Result)> cb);
 
@@ -150,8 +169,9 @@ private:
 	secure::Store *store_ = nullptr;
 	QString sessionToken_;
 	QDateTime sessionExpiry_;
-	// Fase 4: sesión de usuario, SOLO memoria (jamás Store/DPAPI).
-	// userExpiry_ con el mismo margen que la sesión de instalación.
+	// Fase 4 + [D 2026-10-26]: sesion de usuario en memoria con respaldo
+	// persistido cifrado (managedUser en el store). userExpiry_ con el
+	// mismo margen que la sesion de instalacion.
 	QString userSessionToken_;
 	QString loggedUsername_; // etiqueta no sensible ("Conectado como")
 	QDateTime userExpiry_;
