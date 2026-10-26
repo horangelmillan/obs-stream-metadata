@@ -41,11 +41,13 @@ permission:
     "git add tools/**": allow
     "git commit*": allow
     "git push*": allow
+    "gh pr checks*": allow
     "gh pr create*": allow
     "gh pr view*": allow
     "gh pr status*": allow
     "gh run list*": allow
     "gh run view*": allow
+    "gh run watch*": allow
     "gh pr merge*": allow
     "git merge --no-ff*": allow
     "git reset*": deny
@@ -122,7 +124,15 @@ Prohibido sin autorización separada escrita del usuario:
 5. `github` MCP: no disponible sin autenticación en este entorno;
    no afirmar acceso remoto. El estado de PRs/checks se obtiene
    solo vía `gh` autorizado.
-6. Rigen siempre privacidad, evidencia `[C]/[D]/[I]/[P]`, jerarquía
+6. Espera activa de CI con merge pre-autorizado (2026-10-26 [D],
+   usuario): si el run autorizó commit+push+PR+merge juntos, el
+   merge NO se devuelve como pendiente: se espera con espera
+   bloqueante (`gh run watch <run> --exit-status` o
+   `gh pr checks <n> --watch`), UNA sola espera + máximo 2
+   comprobaciones extra; si CI verde y mergeable → fusionar; si CI
+   falla → NO fusionar y traer el resumen del fallo. Sin
+   `sleep`/reintentos agresivos.
+7. Rigen siempre privacidad, evidencia `[C]/[D]/[I]/[P]`, jerarquía
    documental y rutas protegidas de `AGENTS.md` y
    `project-harness-governance`.
 
