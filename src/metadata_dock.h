@@ -228,6 +228,30 @@ private slots:
 	// update exitoso (MISMO liveId), dejando verificacion pendiente.
 	void noteFbUpdated(const QString &liveId, const QString &title,
 			   const QString &desc);
+	// Fase A auto-preparacion Facebook (un intento por arranque, sin
+	// loops ni modales; maximo 1 create + 1 delete; ingesta jamas en
+	// logs/persistencia). Decision tras End (punto 5): SIEMPRE un solo
+	// create tras End confirmado (sin opt-in nuevo: el checkbox
+	// persistente solo gobierna la clave, no el auto-prepare); con
+	// guarda canRefire (si el cooldown bloquea, difiere con mensaje +
+	// ID, sin crear huerfano inutil).
+	void maybeFbAutoStart();
+	void fbAutoProbe();
+	void fbAutoCreateFresh(const QString &prevStatus,
+			       const QString &prevTitle,
+			       const QString &prevDesc);
+	void fbAutoHandleRead(const QString &id, const QString &status,
+			      const QString &title, const QString &desc,
+			      bool readOk, bool notFound);
+	void fbAutoHandleCreated(const QString &newId);
+	void fbAutoHandleCreateFailed(const QString &prevStatus);
+	void fbAutoDeletePrev();
+	// Punto 3: encadena verificacion silenciosa tras UpFb OK (patron
+	// fbQuietStatus_ del create): status silencioso -> runFbVerification
+	// sin pisar el mensaje de Apply; audiencia honesta, jamas inflada.
+	void fbChainSilentVerify(const QString &liveId);
+	// Punto 5: un solo create tras End confirmado (con canRefire).
+	void fbEndAutoPrepare(const QString &endedId);
 	// Cambio B: la relectura encadenada tras go_live informa lo
 	// observado (LIVE leido => publicado; otro estado => no
 	// confirmado, sigue bloqueado). Consume fbGoLiveConfirm_.
@@ -256,6 +280,17 @@ private slots:
 	// muestra el mensaje, sin textos nuevos de vista.
 	void onRelayStateChanged(relay::State s);
 	void onRelayOperatorMessage(const QString &msg);
+	// Fase A punto 4: senal del emisor a demanda (localhost unicamente,
+	// jamas Graph). Sin polling: la vista la pide (requestRelaySignal)
+	// y lee el ultimo estado via relaySignal()/relaySignalHasEmitter().
+	// Solo memoria de sesion; el cuerpo del Control API jamas se loguea
+	// (solo codigos) ni se persiste.
+	void requestRelaySignal();
+	relay::Signal relaySignal() const { return relaySignal_; }
+	bool relaySignalHasEmitter() const
+	{
+		return relay::signalHasEmitter(relaySignal_);
+	}
 	// T-078 Fase 4 (vista): seccion relay en la tarjeta Facebook
 	// (ADR-016). Solo vista: Iniciar/Detener + URL fija copiable +
 	// indicador por estados + mensajes honestos del gestor tal cual.
@@ -263,6 +298,15 @@ private slots:
 	void onRelayToggle();
 	void onRelayFixedCopy();
 	void updateRelayUi();
+	// T-078 Fase B (vista simplificada Facebook): resumen compuesto
+	// global + senal del emisor + Avanzado colapsado. Solo vista (sin
+	// logica auth/red/secretos): reordena widgets existentes y decide
+	// visibilidad por estados Fase A (verify/relay/senal). Sin botones
+	// sin sentido: cada boton solo visible con su condicion cumplida.
+	void buildFbSimplifiedView();
+	void updateFbHappyPath();
+	void toggleFbAdvanced();
+	void onFbSignalCheck();
 
 private:
 	// One request at a time; replies carry their Op in a property.
@@ -300,6 +344,7 @@ private:
 		UpYtRetry,
 		UpKk,
 		UpKkRetry,
+		RelaySignal, // Fase A.4: GET localhost control (senal emisor)
 		RevTw, // fire-and-forget revoke on Disconnect (best effort)
 		RevYt,
 		RevKk,
@@ -367,6 +412,30 @@ private:
 	// Cambio B: go_live aceptado con relectura encadenada pendiente.
 	// La relectura informa lo observado y consume este flag.
 	bool fbGoLiveConfirm_ = false;
+	// Fase A auto-preparacion (un solo intento por arranque, sin loops,
+	// sin modales: todo por labels). fbAutoActive_=ciclo en curso;
+	// prev*=anterior persistido/probado; didCreate/didDelete=presupuesto
+	// maximo 1 create + 1 delete por arranque. fbApplyChain_=UpFb OK con
+	// verificacion silenciosa pendiente (no pisa el mensaje de Apply).
+	// fbEndAutoArmed_=create pendiente tras End confirmado.
+	bool fbAutoActive_ = false;
+	QString fbAutoPrevId_;
+	QString fbAutoPrevStatus_;
+	QString fbAutoPrevTitle_;
+	QString fbAutoPrevDesc_;
+	bool fbAutoDidCreate_ = false;
+	bool fbAutoDidDelete_ = false;
+	bool fbApplyChain_ = false;
+	QString fbApplyChainMsg_;
+	QString fbApplyChainId_;
+	// Punto 5: create tras End en vuelo (un solo intento, sin tocar el
+	// presupuesto del arranque; el terminado queda como VOD, sin delete).
+	bool fbEndAutoPending_ = false;
+	// ID del DELETE automatico del huerfano (punto 2): distingue el
+	// delete del arranque del borrado manual del operador.
+	QString fbAutoDeleteId_;
+	// Fase A punto 4: ultima senal del relay (sesion, sin persistencia).
+	relay::Signal relaySignal_;
 	meta::FbVerifyResult fbVerify_ = {meta::FbVerify::Blocked,
 					  QStringLiteral("not-verified")};
 	QTcpServer *callbackServer_ = nullptr;
@@ -534,6 +603,17 @@ private:
 	QPushButton *relayToggleButton_ = nullptr;
 	QLabel *relayMsgLabel_ = nullptr;
 	QLabel *relayVodLabel_ = nullptr;
+	// T-078 Fase B (vista simplificada): resumen compuesto global
+	// (encima de titulo/Aplicar) + senal del emisor + Avanzado
+	// colapsado por defecto. Solo widgets/visibilidad; el estado
+	// crudo sigue en fbLastStatus_/fbVerify_/relaySignal_.
+	QLabel *fbSummary_ = nullptr;
+	QLabel *fbSignalLabel_ = nullptr;
+	QPushButton *fbSignalCheck_ = nullptr;
+	QPushButton *fbAdvancedToggle_ = nullptr;
+	QWidget *fbAdvanced_ = nullptr;
+	QString fbLastStatus_;
+	bool fbAdvancedOpen_ = false;
 	std::optional<meta::Platform> expanded_; // none = all cards closed
 	QNetworkAccessManager *net_ = nullptr;
 	// T-041: connection mode (ADR-012). Global for the dock: a single
