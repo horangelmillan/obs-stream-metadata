@@ -18,6 +18,7 @@ secrets in memory + DPAPI-encrypted store, never plaintext/printed/logged.
 #include <QClipboard>
 #include <QComboBox>
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QDesktopServices>
 #include <QEvent>
 #include <QFrame>
@@ -608,6 +609,9 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 	fbDetailLayout->addWidget(relayMsgLabel_);
 	fbDetailLayout->addWidget(relayVodLabel_);
 	updateRelayUi();
+	// T-078 Fase B (vista simplificada): camino feliz arriba +
+	// Avanzado colapsado (reordena widgets existentes, sin logica).
+	buildFbSimplifiedView();
 
 	// Twitch device-flow prompt lives inside the Twitch card detail
 	// (same show/hide call sites as before).
@@ -771,6 +775,9 @@ MetadataDock::MetadataDock(QWidget *parent) : QWidget(parent)
 		meta::connectionModeName(mode_),
 		qPrintable(managedBaseUrl_),
 		managedSupported(meta::Platform::Twitch) ? "yes" : "no");
+	// Fase A auto-preparacion Facebook: un solo intento por arranque,
+	// diferido para no bloquear la UI; sin modales, todo por labels.
+	QTimer::singleShot(0, this, &MetadataDock::maybeFbAutoStart);
 }
 
 MetadataDock::~MetadataDock()
@@ -1079,6 +1086,10 @@ void MetadataDock::refreshContentVisibility()
 	// The legacy "not available" note stays hidden.
 	if (twManagedNote_)
 		twManagedNote_->setVisible(false);
+	// T-078 Fase B: refinamiento camino-feliz/Avanzado (ver visibilidad
+	// condicional en updateFbHappyPath; la base de sesion ya quedo
+	// arriba y el contenedor colapsado manda sobre los hijos).
+	updateFbHappyPath();
 	updateCardVisibility();
 }
 
@@ -1185,6 +1196,22 @@ void MetadataDock::cancelPendingForModeSwitch()
 	// PoC ingestión: el valor pertenece al contexto anterior; al
 	// cambiar de modo se olvida (sesión, sin persistencia).
 	clearFbIngest();
+	// Fase A: el ciclo automatico (arranque/Apply/End) pertenece al
+	// contexto anterior: se cierra sin red adicional. El presupuesto
+	// de arranque no se reutiliza en el modo nuevo.
+	fbAutoActive_ = false;
+	fbAutoDidCreate_ = false;
+	fbAutoDidDelete_ = false;
+	fbAutoDeleteId_.clear();
+	fbAutoPrevId_.clear();
+	fbAutoPrevStatus_.clear();
+	fbAutoPrevTitle_.clear();
+	fbAutoPrevDesc_.clear();
+	fbApplyChain_ = false;
+	fbApplyChainId_.clear();
+	fbApplyChainMsg_.clear();
+	fbEndAutoPending_ = false;
+	fbQuietStatus_ = false;
 	// T-078 Fase 3: el forward apunta a la ingesta del contexto
 	// anterior; parada limpia del relay en el cambio de modo.
 	if (relay_)
@@ -1356,6 +1383,626 @@ void MetadataDock::updateRelayUi()
 				? tr("Stop relay")
 				: tr("Start relay"));
 	}
+	updateFbHappyPath();
+}
+
+// --- T-078 Fase B: vista simplificada Facebook ---------------------------
+// Camino feliz arriba (estado/verificacion/senal + Create/GoLive +
+// relay toggle/indicador); Avanzado colapsado con Page/target, IDs,
+// Refresh, Adopt, Check manual, ingesta, End/Delete, clave persistente
+// y relay fijo. Solo reordena widgets existentes y decide visibilidad
+// por estados Fase A (verify/relay/senal/fbLastStatus_); cero auth,
+// cero red, cero secretos (requestRelaySignal ya existe y solo lee
+// localhost a demanda, sin polling).
+
+void MetadataDock::buildFbSimplifiedView()
+{
+	if (!fbDetail_ || !fbLiveCombo_)
+		return;
+	QVBoxLayout *detail =
+		qobject_cast<QVBoxLayout *>(fbDetail_->layout());
+	if (!detail)
+		return;
+	// 1. Linea compuesta global, literalmente encima de titulo/Aplicar.
+	fbSummary_ = new QLabel(this);
+	fbSummary_->setWordWrap(true);
+	fbSummary_->setAccessibleName(tr("Facebook readiness"));
+	fbSummary_->setVisible(false);
+	if (titleLabel_ && titleLabel_->parentWidget() &&
+	    titleLabel_->parentWidget()->layout()) {
+		if (QVBoxLayout *top = qobject_cast<QVBoxLayout *>(
+			    titleLabel_->parentWidget()->layout())) {
+			top->insertWidget(top->indexOf(titleLabel_),
+					  fbSummary_);
+		}
+	}
+	// 2. Senal del emisor (texto+color, nunca solo color) tras Verify.
+	fbSignalLabel_ = new QLabel(fbDetail_);
+	fbSignalLabel_->setWordWrap(true);
+	fbSignalLabel_->setAccessibleName(tr("Emitter signal"));
+	fbSignalCheck_ = new QPushButton(tr("Check emitter signal"),
+					 fbDetail_);
+	fbSignalCheck_->setToolTip(
+		tr("Reads the local relay signal once (localhost, no "
+		   "Graph). Only available while the relay runs."));
+	fbSignalCheck_->setAccessibleName(tr("Check emitter signal"));
+	connect(fbSignalCheck_, &QPushButton::clicked, this,
+		&MetadataDock::onFbSignalCheck);
+	detail->insertWidget(detail->indexOf(fbVerifyLabel_) + 1,
+			     fbSignalLabel_);
+	detail->insertWidget(detail->indexOf(fbSignalLabel_) + 1,
+			     fbSignalCheck_);
+	// 3. Contenedor Avanzado (colapsado por defecto).
+	fbAdvancedToggle_ = new QPushButton(tr("Advanced >"), fbDetail_);
+	fbAdvancedToggle_->setToolTip(
+		tr("Show advanced Facebook controls (target, IDs, "
+		   "manual check, ingest, End/Delete, relay copy)"));
+	fbAdvancedToggle_->setAccessibleName(
+		tr("Show or hide advanced Facebook controls"));
+	connect(fbAdvancedToggle_, &QPushButton::clicked, this,
+		&MetadataDock::toggleFbAdvanced);
+	fbAdvanced_ = new QWidget(fbDetail_);
+	QVBoxLayout *adv = new QVBoxLayout(fbAdvanced_);
+	adv->setContentsMargins(0, 4, 0, 0);
+	// Mueve (sin recrear: conexiones intactas) lo no-camino-feliz.
+	QWidget *moved[] = {
+		fbTargetLabel_,	  fbTargetCombo_,	  fbLiveLabel_,
+		fbLiveCombo_,	  fbRefreshButton_,	  fbAdoptButton_,
+		fbStatusButton_,  fbPersistentCheck_, fbEndButton_,
+		fbDeleteButton_,  fbIngestLabel_,	  fbIngestEdit_,
+		fbIngestShowButton_, fbIngestCopyButton_,
+		relayFixedEdit_,  relayFixedCopy_,
+	};
+	for (QWidget *w : moved) {
+		if (!w)
+			continue;
+		detail->removeWidget(w);
+		adv->addWidget(w);
+	}
+	detail->addWidget(fbAdvancedToggle_);
+	detail->addWidget(fbAdvanced_);
+	fbAdvanced_->setVisible(false);
+	// El ID manda en Create/GoLive/End/Delete: re-evaluar al cambiar.
+	connect(fbLiveCombo_,
+		static_cast<void (QComboBox::*)(int)>(
+			&QComboBox::currentIndexChanged),
+		this, [this]() { updateFbHappyPath(); });
+	connect(fbLiveCombo_, &QComboBox::editTextChanged, this,
+		[this]() { updateFbHappyPath(); });
+	updateFbHappyPath();
+}
+
+void MetadataDock::updateFbHappyPath()
+{
+	const bool fb = platformUsable(meta::Platform::Facebook);
+	const QString liveId = fb ? currentFbLiveId() : QString();
+	const bool hasId = !liveId.isEmpty();
+	const meta::FbLiveState st = meta::fbLiveState(fbLastStatus_);
+	const bool verified =
+		fbVerify_.outcome == meta::FbVerify::Verified;
+	const bool audPending = fbVerify_.outcome ==
+				meta::FbVerify::AudienceUnverified;
+	const bool verifying = fbQuietStatus_;
+	const bool running = relay::stateIsRunning(relayState_);
+	const bool relayErr = relay::stateIsError(relayState_);
+	const bool fwdOk = (relayState_ == relay::State::ForwardOk);
+
+	// 1. Resumen compuesto global (texto siempre; color solo refuerzo).
+	QString ready;
+	QString rBorder = QStringLiteral("#5a5a5a");
+	QString rBg = QStringLiteral("transparent");
+	if (fb) {
+		if (st == meta::FbLiveState::Live) {
+			ready = tr("Facebook LIVE — transmitting");
+			rBorder = QStringLiteral("#e5484d");
+			rBg = QStringLiteral("rgba(229, 72, 77, 30)");
+		} else if (st == meta::FbLiveState::Ended) {
+			ready = tr("Facebook: live ended (VOD kept unless "
+				   "you delete the video).");
+		} else if (verifying) {
+			ready = tr("Facebook: verifying video…");
+			rBorder = QStringLiteral("#ffc107");
+			rBg = QStringLiteral("rgba(255, 193, 7, 30)");
+		} else if (!hasId) {
+			ready = tr("Facebook connected — no video yet "
+				   "(create one below).");
+		} else if ((verified || audPending) && fwdOk) {
+			ready = audPending
+					? tr("Facebook ready to stream "
+					     "(audience unverified) — "
+					     "relay forward OK.")
+					: tr("Facebook ready to stream — "
+					     "relay forward OK.");
+			rBorder = QStringLiteral("#2da44e");
+			rBg = QStringLiteral("rgba(45, 158, 68, 30)");
+		} else if (verified || audPending) {
+			ready = tr("Facebook: video ready — relay not "
+				   "forwarding (start the relay).");
+			rBorder = QStringLiteral("#ffc107");
+			rBg = QStringLiteral("rgba(255, 193, 7, 30)");
+		} else {
+			// Bloqueado con motivo (el detalle vive en Verify).
+			ready = tr("Facebook: not ready (%1) — Apply, "
+				   "then Check (Advanced).")
+					.arg(fbVerify_.reason.isEmpty()
+						      ? tr("not verified")
+						      : fbVerify_.reason);
+			rBorder = QStringLiteral("#ffc107");
+			rBg = QStringLiteral("rgba(255, 193, 7, 30)");
+		}
+	}
+	if (fbSummary_) {
+		fbSummary_->setText(ready);
+		fbSummary_->setStyleSheet(
+			QStringLiteral("QLabel { border: 1px solid %1; "
+				       "border-radius: 6px; padding: 6px; "
+				       "background: %2; }")
+				.arg(rBorder, rBg));
+		fbSummary_->setVisible(fb);
+	}
+	// 2. Senal del emisor (texto+color, nunca solo color).
+	QString sig;
+	QString sBorder = QStringLiteral("#5a5a5a");
+	QString sBg = QStringLiteral("transparent");
+	if (fb) {
+		if (!running &&
+		    relayState_ == relay::State::Stopped) {
+			sig = tr("Signal: relay stopped (gray)");
+		} else if (relayState_ == relay::State::Starting) {
+			sig = tr("Signal: relay starting… (amber)");
+			sBorder = QStringLiteral("#ffc107");
+			sBg = QStringLiteral("rgba(255, 193, 7, 30)");
+		} else if (relayErr) {
+			sig = tr("Signal: relay error — see relay "
+				 "message (red)");
+			sBorder = QStringLiteral("#e5484d");
+			sBg = QStringLiteral("rgba(229, 72, 77, 30)");
+		} else if (!relaySignal_.present) {
+			sig = tr("Signal: unknown — press Check signal "
+				 "(gray)");
+		} else if (relaySignalHasEmitter()) {
+			sig = tr("Signal: emitter detected (green)");
+			sBorder = QStringLiteral("#2da44e");
+			sBg = QStringLiteral("rgba(45, 158, 68, 30)");
+		} else {
+			sig = tr("Signal: no emitter — point the encoder "
+				 "at rtmp://127.0.0.1:1935/live (amber)");
+			sBorder = QStringLiteral("#ffc107");
+			sBg = QStringLiteral("rgba(255, 193, 7, 30)");
+		}
+	}
+	if (fbSignalLabel_) {
+		fbSignalLabel_->setText(sig);
+		fbSignalLabel_->setStyleSheet(
+			QStringLiteral("QLabel { border: 1px solid %1; "
+				       "border-radius: 6px; padding: 6px; "
+				       "background: %2; }")
+				.arg(sBorder, sBg));
+		fbSignalLabel_->setVisible(fb);
+	}
+	if (fbSignalCheck_)
+		fbSignalCheck_->setVisible(fb && running);
+	// 3. Visibilidad condicional: ningun boton que falle con
+	// "primero haz X". GoLive solo si verify lo permite (el motivo
+	// vive en Verify); Create solo sin video valido; End solo en
+	// LIVE; Delete/Check con ID; Start/Stop segun estado (texto ya
+	// conmuta en updateRelayUi); Advanced colapsado por defecto.
+	if (fbGoLiveButton_)
+		fbGoLiveButton_->setVisible(
+			fb && hasId && (verified || audPending) &&
+			st != meta::FbLiveState::Live);
+	if (fbCreateButton_)
+		fbCreateButton_->setVisible(
+			fb && (!hasId || st == meta::FbLiveState::Ended));
+	const bool adv = fb && fbAdvancedOpen_;
+	if (fbStatusButton_)
+		fbStatusButton_->setVisible(adv && hasId);
+	if (fbEndButton_)
+		fbEndButton_->setVisible(
+			adv && hasId && st == meta::FbLiveState::Live);
+	if (fbDeleteButton_)
+		fbDeleteButton_->setVisible(adv && hasId);
+	if (fbAdoptButton_)
+		fbAdoptButton_->setVisible(adv);
+	if (fbTargetLabel_)
+		fbTargetLabel_->setVisible(adv);
+	if (fbTargetCombo_)
+		fbTargetCombo_->setVisible(adv);
+	if (fbLiveLabel_)
+		fbLiveLabel_->setVisible(adv);
+	if (fbLiveCombo_)
+		fbLiveCombo_->setVisible(adv);
+	if (fbRefreshButton_)
+		fbRefreshButton_->setVisible(adv);
+	if (fbPersistentCheck_)
+		fbPersistentCheck_->setVisible(adv);
+	const bool showIngest = adv && !fbIngest_.isEmpty();
+	if (fbIngestLabel_)
+		fbIngestLabel_->setVisible(showIngest);
+	if (fbIngestEdit_)
+		fbIngestEdit_->setVisible(showIngest);
+	if (fbIngestShowButton_)
+		fbIngestShowButton_->setVisible(showIngest);
+	if (fbIngestCopyButton_)
+		fbIngestCopyButton_->setVisible(showIngest);
+	if (relayFixedEdit_)
+		relayFixedEdit_->setVisible(adv);
+	if (relayFixedCopy_)
+		relayFixedCopy_->setVisible(adv);
+	if (fbAdvancedToggle_) {
+		fbAdvancedToggle_->setVisible(fb);
+		fbAdvancedToggle_->setText(
+			fbAdvancedOpen_ ? tr("Advanced v")
+					: tr("Advanced >"));
+	}
+	if (fbAdvanced_)
+		fbAdvanced_->setVisible(adv);
+}
+
+void MetadataDock::toggleFbAdvanced()
+{
+	fbAdvancedOpen_ = !fbAdvancedOpen_;
+	updateFbHappyPath();
+}
+
+void MetadataDock::onFbSignalCheck()
+{
+	// Solo vista: reusa la lectura a demanda existente (localhost,
+	// sin polling). El resultado llega por Op::RelaySignal y
+	// repinta via updateFbHappyPath.
+	requestRelaySignal();
+	updateFbHappyPath();
+}
+
+// --- Fase A auto-preparacion Facebook (puntos 1/2/4/5) --------------------
+// Un solo intento por arranque, sin loops, sin modales (todo por labels).
+// Punto 1: auto-ensure del relay SOLO con sesion FB valida; ante
+// BinaryMissing/PortBusy solo se informa (ensureStarted ya notifica, sin
+// reintentar aqui). Punto 2: UNA lectura GET si hay persistido;
+// UNPUBLISHED -> crear nuevo + DELETE del anterior (solo ese, nunca
+// LIVE/VOD/ajeno); fallo de create -> fallback reutilizar anterior con
+// mensaje honesto; no-UNPUBLISHED/404 -> crear sin borrar nada ajeno;
+// sin persistido -> crear. Maximo 1 create + 1 delete por arranque.
+// Punto 4: requestRelaySignal (localhost, a demanda, sin polling).
+// Punto 5: un solo create tras End confirmado (canRefire o diferir).
+
+void MetadataDock::maybeFbAutoStart()
+{
+	// Solo con sesion FB valida en el modo activo (Independent o
+	// Managed). Sin sesion: cero red, cero relay, cero mensajes nuevos.
+	if (!platformUsable(meta::Platform::Facebook))
+		return;
+	if (fbAutoActive_ || fbAutoDidCreate_)
+		return; // un solo intento por arranque
+	if (relay_)
+		relay_->ensureStarted(); // punto 1: informa, sin reintentar
+	if (isManaged()) {
+		if (!managedAuth_ || !managedAuth_->hasUserSession())
+			return;
+	}
+	fbAutoActive_ = true;
+	fbAutoDidCreate_ = false;
+	fbAutoDidDelete_ = false;
+	fbAutoPrevId_.clear();
+	fbAutoPrevStatus_.clear();
+	fbAutoPrevTitle_.clear();
+	fbAutoPrevDesc_.clear();
+	fbAutoProbe();
+}
+
+void MetadataDock::fbAutoProbe()
+{
+	const QString persisted = currentFbLiveId();
+	if (persisted.isEmpty()) {
+		// Sin persistido: crear nuevo directo (texto honesto, sin
+		// suponer estado).
+		fbAutoPrevId_.clear();
+		fbAutoPrevStatus_.clear();
+		fbAutoPrevTitle_.clear();
+		fbAutoPrevDesc_.clear();
+		fbAutoCreateFresh(QString(), QString(), QString());
+		return;
+	}
+	fbAutoPrevId_ = persisted;
+	if (isManaged()) {
+		if (!managedAccount(meta::Platform::Facebook).connected)
+			return;
+		fbQuietStatus_ = true;
+		startManagedFbOp(QStringLiteral("status"), persisted);
+		// El lambda de status (Managed) detecta fbAutoActive_ y
+		// encamina a fbAutoHandleRead; ver startManagedFbOp.
+		return;
+	}
+	if (!fb_.connected) {
+		fbAutoActive_ = false;
+		return;
+	}
+	// UNA lectura GET (punto 2). Silenciosa: fbQuietStatus_ evita el
+	// mensaje generico; el resultado lo redacta fbAutoHandleRead.
+	fbQuietStatus_ = true;
+	startFbStatusIndependent(persisted);
+}
+
+void MetadataDock::fbAutoCreateFresh(const QString &prevStatus,
+				     const QString &prevTitle,
+				     const QString &prevDesc)
+{
+	if (fbAutoDidCreate_)
+		return; // presupuesto: maximo 1 create por arranque
+	const QString title = meta::fbAutoCreateTitle(
+		titleEdit_ ? titleEdit_->text() : QString(), prevTitle);
+	const QString desc = meta::fbAutoCreateDesc(
+		descEdit_ ? descEdit_->toPlainText() : QString(), prevDesc);
+	if (title.isEmpty() ||
+	    title.size() > meta::kFacebookTitleMax) {
+		fbAutoActive_ = false;
+		// Sin titulo valido no hay create honesto: si el anterior era
+		// UNPUBLISHED se reutiliza con mensaje honesto.
+		fbAutoHandleCreateFailed(prevStatus);
+		return;
+	}
+	fbAutoPrevStatus_ = prevStatus;
+	fbAutoPrevTitle_ = prevTitle;
+	fbAutoPrevDesc_ = prevDesc;
+	fbAutoDidCreate_ = true;
+	generalMsg_->setText(
+		tr("Facebook: preparing live video…"));
+	if (isManaged()) {
+		// Managed: el lambda de create detecta fbAutoActive_.
+		// El titulo/desc viajan por los widgets (el body del
+		// create Managed los lee de ahi); si el widget estaba vacio
+		// y hay fallback, se fija temporalmente para este envio.
+		if (titleEdit_ && titleEdit_->text().trimmed().isEmpty() &&
+		    !title.isEmpty())
+			titleEdit_->setText(title);
+		if (descEdit_ &&
+		    descEdit_->toPlainText().trimmed().isEmpty() &&
+		    !desc.isEmpty())
+			descEdit_->setPlainText(desc);
+		startManagedFbOp(QStringLiteral("create"), QString());
+		return;
+	}
+	// Independent: body parametrizado (sin mutar widgets).
+	clearFbVerify();
+	fbExpectedTitle_ = title;
+	fbExpectedDesc_ = desc;
+	QString token = fb_.access;
+	const QString target =
+		fbTarget_.isEmpty() ? QStringLiteral("me") : fbTarget_;
+	if (target != QStringLiteral("me"))
+		token = fbPageTokens_.value(target, token);
+	QUrl url(QString::fromLatin1(kFbGraph) + QStringLiteral("/") +
+		 target + QStringLiteral("/live_videos"));
+	const QJsonObject body = meta::facebookCreatePayload(
+		title, desc, fbPersistent_);
+	sendJson(url, QStringLiteral("POST"),
+		 QString::fromUtf8(
+			 QJsonDocument(body).toJson(QJsonDocument::Compact)),
+		 Op::FbCreate, token);
+}
+
+void MetadataDock::fbAutoHandleRead(const QString &id,
+				    const QString &status,
+				    const QString &title, const QString &desc,
+				    bool readOk, bool notFound)
+{
+	if (!fbAutoActive_ || fbAutoDidCreate_)
+		return;
+	if (!readOk) {
+		if (notFound) {
+			// Persistido ya no gestionable (404/VOD/ID ajeno):
+			// crear nuevo SIN borrar nada ajeno.
+			fbAutoCreateFresh(QString(), QString(),
+					  QString());
+		} else {
+			// Fallo de red/rate: no inventar estado; difiere con
+			// mensaje honesto y reutiliza el anterior si era
+			// UNPUBLISHED (fallback), sin crear huerfano.
+			fbAutoHandleCreateFailed(
+				fbAutoPrevStatus_);
+		}
+		return;
+	}
+	const QString st = status.trimmed();
+	if (meta::fbPrevIsReusablePreview(st)) {
+		// UNPUBLISHED -> crear nuevo de todos modos (con fallback
+		// de titulo/desc del anterior) y luego DELETE del anterior.
+		fbAutoCreateFresh(st, title, desc);
+		return;
+	}
+	// LIVE/STOPPED/VOD/otro: crear nuevo sin borrar nada ajeno (solo
+	// el persistido si era nuestro UNPUBLISHED, que aqui no lo es).
+	fbAutoCreateFresh(QString(), QString(), QString());
+}
+
+void MetadataDock::fbAutoHandleCreated(const QString &newId)
+{
+	if (!fbAutoActive_)
+		return;
+	const QString nid = newId.trimmed();
+	if (nid.isEmpty()) {
+		fbAutoHandleCreateFailed(fbAutoPrevStatus_);
+		return;
+	}
+	// Limpieza del huerfano: SOLO si el anterior era UNPUBLISHED
+	// nuestro y distinto del nuevo (puro fbAutoShouldDeletePrev).
+	if (!fbAutoDidDelete_ &&
+	    meta::fbAutoShouldDeletePrev(fbAutoPrevStatus_,
+					 fbAutoPrevId_, nid)) {
+		fbAutoDidDelete_ = true;
+		fbAutoActive_ = false; // el delete cierra el ciclo
+		generalMsg_->setText(
+			tr("Facebook live video prepared (%1) — previous "
+			   "unpublished video %2 removed.")
+				.arg(nid, fbAutoPrevId_.trimmed()));
+		fbAutoDeletePrev();
+		return;
+	}
+	fbAutoActive_ = false;
+	if (fbAutoPrevId_.isEmpty() || !meta::fbPrevIsReusablePreview(
+					       fbAutoPrevStatus_)) {
+		generalMsg_->setText(
+			tr("Facebook live video prepared (%1).").arg(nid));
+	} else {
+		// Anterior reutilizable pero sin delete (mismo ID u otro
+		// motivo puro): mensaje honesto, sin borrar nada.
+		generalMsg_->setText(
+			tr("Facebook live video prepared (%1) — previous "
+			   "video %2 kept (reuse it or delete it manually).")
+				.arg(nid, fbAutoPrevId_.trimmed()));
+	}
+}
+
+void MetadataDock::fbAutoHandleCreateFailed(const QString &prevStatus)
+{
+	fbAutoActive_ = false;
+	// Fallback honesto: reutilizar el anterior valido (UNPUBLISHED) con
+	// mensaje de reenvio pendiente; jamas inventar un ID nuevo.
+	if (meta::fbPrevIsReusablePreview(prevStatus.trimmed()) &&
+	    !fbAutoPrevId_.trimmed().isEmpty()) {
+		setFbLiveId(fbAutoPrevId_.trimmed());
+		generalMsg_->setText(
+			tr("Facebook: could not prepare a new video "
+			   "(rate-limit/network) — previous video %1 reused; "
+			   "resend pending at the next create.")
+				.arg(fbAutoPrevId_.trimmed()));
+		obs_log(LOG_WARNING,
+			"facebook auto-prepare: create failed, fallback "
+			"reuse");
+		return;
+	}
+	generalMsg_->setText(
+		tr("Facebook: could not prepare a live video "
+		   "(rate-limit/network) — retry Create manually."));
+	obs_log(LOG_WARNING,
+		"facebook auto-prepare: create failed, no fallback");
+}
+
+void MetadataDock::fbAutoDeletePrev()
+{
+	const QString prev = fbAutoPrevId_.trimmed();
+	if (prev.isEmpty())
+		return;
+	fbAutoDeleteId_ = prev; // marca el delete automatico (punto 2)
+	if (isManaged()) {
+		if (!managedAccount(meta::Platform::Facebook).connected)
+			return;
+		startManagedFbOp(QStringLiteral("delete"), prev);
+		return;
+	}
+	if (!fb_.connected)
+		return;
+	startFbDeleteIndependent(prev);
+}
+
+// Punto 3: tras UpFb OK, status silencioso -> runFbVerification sin
+// pisar el mensaje de Apply. Patron fbQuietStatus_ del create.
+void MetadataDock::fbChainSilentVerify(const QString &liveId)
+{
+	const QString id = liveId.trimmed();
+	if (id.isEmpty())
+		return;
+	fbApplyChain_ = true;
+	fbApplyChainId_ = id;
+	fbApplyChainMsg_ = fbResult_ ? fbResult_->text() : QString();
+	fbQuietStatus_ = true;
+	if (isManaged()) {
+		if (managedAccount(meta::Platform::Facebook).connected)
+			startManagedFbOp(QStringLiteral("status"), id);
+		else
+			fbApplyChain_ = false;
+		return;
+	}
+	if (fb_.connected)
+		startFbStatusIndependent(id);
+	else
+		fbApplyChain_ = false;
+}
+
+// Punto 5: un solo create tras End confirmado (con canRefire). Sin
+// opt-in nuevo: siempre con mensaje y limpieza posterior por el ciclo
+// normal (el siguiente arranque/end gestiona el huerfano). Si el
+// cooldown bloquea, difiere con mensaje + ID, sin crear huerfano.
+// Presupuesto propio de un intento (fbEndAutoPending_); no consume ni
+// reutiliza el del arranque (punto 2). El terminado queda como VOD:
+// este create jamas borra nada.
+void MetadataDock::fbEndAutoPrepare(const QString &endedId)
+{
+	const QString eid = endedId.trimmed();
+	if (fbEndAutoPending_ || fbAutoActive_)
+		return; // un solo intento; sin pisar el arranque
+	const qint64 now = QDateTime::currentMSecsSinceEpoch();
+	const qint64 lastOk =
+		relay_ ? relay_->lastForwardOkMs() : 0;
+	if (!relay::canRefire(lastOk, now)) {
+		generalMsg_->setText(
+			tr("Facebook live ended (%1) — next video deferred "
+			   "(relay cooldown ~3 min); press Create when ready.")
+				.arg(eid.isEmpty() ? tr("video") : eid));
+		return;
+	}
+	const QString title = meta::fbAutoCreateTitle(
+		titleEdit_ ? titleEdit_->text() : QString(), QString());
+	const QString desc = meta::fbAutoCreateDesc(
+		descEdit_ ? descEdit_->toPlainText() : QString(),
+		QString());
+	if (title.isEmpty() ||
+	    title.size() > meta::kFacebookTitleMax) {
+		generalMsg_->setText(
+			tr("Facebook live ended (%1) — next video deferred "
+			   "(no valid title); press Create when ready.")
+				.arg(eid.isEmpty() ? tr("video") : eid));
+		return;
+	}
+	fbEndAutoPending_ = true;
+	clearFbVerify();
+	fbExpectedTitle_ = title;
+	fbExpectedDesc_ = desc;
+	generalMsg_->setText(
+		tr("Facebook live ended — preparing the next video…"));
+	if (isManaged()) {
+		if (!managedAccount(meta::Platform::Facebook).connected) {
+			fbEndAutoPending_ = false;
+			return;
+		}
+		if (titleEdit_ && titleEdit_->text().trimmed().isEmpty())
+			titleEdit_->setText(title);
+		if (descEdit_ &&
+		    descEdit_->toPlainText().trimmed().isEmpty())
+			descEdit_->setPlainText(desc);
+		startManagedFbOp(QStringLiteral("create"), QString());
+		return;
+	}
+	if (!fb_.connected) {
+		fbEndAutoPending_ = false;
+		return;
+	}
+	QString token = fb_.access;
+	const QString target =
+		fbTarget_.isEmpty() ? QStringLiteral("me") : fbTarget_;
+	if (target != QStringLiteral("me"))
+		token = fbPageTokens_.value(target, token);
+	QUrl url(QString::fromLatin1(kFbGraph) + QStringLiteral("/") +
+		 target + QStringLiteral("/live_videos"));
+	const QJsonObject body = meta::facebookCreatePayload(
+		title, desc, fbPersistent_);
+	sendJson(url, QStringLiteral("POST"),
+		 QString::fromUtf8(
+			 QJsonDocument(body).toJson(QJsonDocument::Compact)),
+		 Op::FbCreate, token);
+}
+
+void MetadataDock::requestRelaySignal()
+{
+	// Localhost unicamente (Control API del relay propio); jamas Graph.
+	// Sin polling: una sola lectura a demanda de la vista.
+	if (!relay_ ||
+	    !relay::stateIsRunning(relayState_))
+		return;
+	const QUrl url(relay::controlBase() +
+		       relay::controlSignalPath());
+	generalMsg_->setText(tr("Checking relay signal…"));
+	sendGet(url, Op::RelaySignal, QString());
 }
 
 // --- managed wiring (T-048; Independent handlers untouched) --------------
@@ -3780,6 +4427,9 @@ void MetadataDock::setFbLiveId(const QString &id)
 
 void MetadataDock::setFbState(const QString &status)
 {
+	// T-078 Fase B: el crudo manda en el resumen compuesto/visibilidad
+	// (vista, sin secretos); se guarda antes del guard de etiqueta.
+	fbLastStatus_ = status;
 	if (!fbStateLabel_)
 		return;
 	const meta::FbLiveState st = meta::fbLiveState(status);
@@ -3793,12 +4443,15 @@ void MetadataDock::setFbState(const QString &status)
 		dot = QStringLiteral("■ Ended");
 	fbStateLabel_->setText(tr("Status: %1 (%2)").arg(
 		dot, status.isEmpty() ? QStringLiteral("—") : status));
+	updateFbHappyPath();
 }
 
 void MetadataDock::setFbVerifyLabel(const QString &text)
 {
 	if (fbVerifyLabel_)
 		fbVerifyLabel_->setText(text);
+	// T-078 Fase B: Verify manda en GoLive/resumen (visibilidad y motivo).
+	updateFbHappyPath();
 }
 
 void MetadataDock::clearFbVerify()
@@ -3964,6 +4617,9 @@ void MetadataDock::clearFbIngest()
 	}
 	if (fbIngestCopyButton_)
 		fbIngestCopyButton_->setVisible(false);
+	// T-078 Fase B: la ingesta vive en Avanzado; re-evaluar su
+	// visibilidad (colapsado => oculta aunque haya valor).
+	updateFbHappyPath();
 }
 
 void MetadataDock::onFbIngestToggled()
@@ -4382,14 +5038,66 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 				return;
 			if (rep.result !=
 			    backend_auth::Result::Ok) {
-				const meta::Outcome oc =
-					rep.result ==
-							backend_auth::Result::
-								NetworkError
-						? meta::Outcome::NetworkError
-						: meta::classifyStatus(
-							  rep.http == 0 ? -1
-									: rep.http);
+				// Fase A: el probe del arranque no inventa
+				// estado. status fallido -> decide (404 =
+				// crear sin borrar; otro fallo = diferir
+				// honesto); create fallido -> fallback.
+				if ((fbAutoActive_ || fbEndAutoPending_) &&
+				    op == QStringLiteral("status")) {
+					const bool nf =
+						(rep.http == 404 ||
+						 meta::classifyStatus(
+							 rep.http == 0
+								 ? -1
+								 : rep.http) ==
+							 meta::Outcome::
+								 NotFound);
+					fbQuietStatus_ = false;
+					fbAutoHandleRead(
+						liveId, QString(),
+						QString(), QString(),
+						false, nf);
+					return;
+				}
+				if ((fbAutoActive_ || fbEndAutoPending_) &&
+				    op == QStringLiteral("create")) {
+					fbAutoHandleCreateFailed(
+						fbAutoPrevStatus_);
+					fbEndAutoPending_ = false;
+					return;
+				}
+				// Fase A punto 2 (Managed): si el DELETE del
+				// huerfano falla, se informa con el ID (sin
+				// reintentar); el vigente queda intacto.
+				if (op == QStringLiteral("delete") &&
+				    !fbAutoDeleteId_.isEmpty()) {
+					const QString prev = fbAutoDeleteId_;
+					fbAutoDeleteId_.clear();
+					generalMsg_->setText(
+						tr("Facebook live video "
+						   "prepared — previous video "
+						   "%1 could not be removed "
+						   "(delete it manually).")
+							.arg(prev));
+					return;
+				}
+				if (fbApplyChain_ &&
+				    op == QStringLiteral("status")) {
+					if (fbResult_ &&
+					    !fbApplyChainMsg_.isEmpty())
+						setResult(
+							meta::Platform::
+								Facebook,
+							true,
+							fbApplyChainMsg_ +
+								tr(" — verification "
+								   "read failed"));
+					fbApplyChain_ = false;
+					fbApplyChainId_.clear();
+					fbApplyChainMsg_.clear();
+					fbQuietStatus_ = false;
+					return;
+				}
 				// T-077 (Fase A): el backend no reenvia el
 				// detail interno (solo logs; el body publico
 				// trae code generico). Si se pidio clave
@@ -4399,6 +5107,14 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 				// persistent-key-not-allowed: mensaje honesto
 				// y condicional (reintentar con la opcion
 				// off), sin afirmar el motivo como unico.
+				const meta::Outcome oc =
+					rep.result ==
+							backend_auth::Result::
+								NetworkError
+						? meta::Outcome::NetworkError
+						: meta::classifyStatus(
+							  rep.http == 0 ? -1
+									: rep.http);
 				if (op == QStringLiteral("create") &&
 				    fbPersistent_ && rep.http == 502)
 					generalMsg_->setText(
@@ -4556,6 +5272,38 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 						tr("Audience not verified "
 						   "(Meta did not return/allow "
 						   "privacy — fallback read)"));
+				// Fase A punto 2 (Managed): el probe del
+				// arranque decide con lo leido (una sola).
+				if (fbAutoActive_ && !fbAutoDidCreate_) {
+					fbQuietStatus_ = false;
+					fbAutoHandleRead(rid, st, rt, rd,
+							 true, false);
+					return;
+				}
+				// Fase A punto 3 (Managed): cadena silenciosa
+				// tras Apply OK; restaura su mensaje + nota
+				// honesta de audiencia (jamas verificado).
+				if (fbApplyChain_ &&
+				    !fbApplyChainId_.isEmpty() &&
+				    rid.trimmed() ==
+					    fbApplyChainId_.trimmed()) {
+					const QString note =
+						meta::fbApplyChainNote(
+							fbVerify_);
+					if (fbResult_ &&
+					    !fbApplyChainMsg_.isEmpty())
+						setResult(
+							meta::Platform::
+								Facebook,
+							true,
+							fbApplyChainMsg_ +
+								note);
+					fbApplyChain_ = false;
+					fbApplyChainId_.clear();
+					fbApplyChainMsg_.clear();
+					fbQuietStatus_ = false;
+					return;
+				}
 			}
 			// PoC ingestión: solo en create (el backend la
 			// reenvía únicamente ahí). Un create nuevo sin URL
@@ -4836,6 +5584,48 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 				clearFbVerify();
 				setFbState(QString());
 			}
+			// Fase A (Managed): create automatico del arranque o tras
+			// End. Punto 2: mensaje honesto + limpieza del huerfano
+			// (solo ese); punto 5: sin delete (el terminado queda
+			// como VOD). Sin loops, sin reintentos.
+			if (op == QStringLiteral("create") &&
+			    fbEndAutoPending_) {
+				fbEndAutoPending_ = false;
+				fbAutoActive_ = false;
+				generalMsg_->setText(
+					tr("Facebook live ended — next video "
+					   "prepared (%1).")
+						.arg(id));
+				return;
+			}
+			if (op == QStringLiteral("create") && fbAutoActive_) {
+				fbAutoHandleCreated(id);
+				return;
+			}
+			// Fase A (Managed): DELETE automatico del huerfano:
+			// solo retira ESE ID del combo; el vigente, su
+			// ingesta y su verificacion quedan intactos.
+			if (op == QStringLiteral("delete") &&
+			    !fbAutoDeleteId_.isEmpty()) {
+				const QString prev = fbAutoDeleteId_;
+				fbAutoDeleteId_.clear();
+				for (int i = fbLiveCombo_->count() - 1;
+				     i >= 0; --i) {
+					if (fbLiveCombo_->itemData(i)
+						    .toString() == prev ||
+					    fbLiveCombo_->itemText(i).contains(
+						    prev))
+						fbLiveCombo_->removeItem(
+							i);
+				}
+				saveStore();
+				generalMsg_->setText(
+					tr("Facebook live video prepared — "
+					   "previous unpublished video %1 "
+					   "removed.")
+						.arg(prev));
+				return;
+			}
 			// go_live Managed: nunca afirmar OK aqui; solo la lectura
 			// encadenada del mismo ID confirma ("Facebook is
 			// LIVE.") o deja bloqueado. Interino explicito.
@@ -4843,13 +5633,16 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 				generalMsg_->setText(
 					tr("Facebook go-live request accepted — "
 					   "confirming status…"));
-			else if (op == QStringLiteral("end"))
+			else if (op == QStringLiteral("end")) {
 				// F-098 (vista honesta): End deja VOD salvo
 				// borrado explicito.
 				generalMsg_->setText(
 					tr("Facebook end OK (VOD kept unless "
 					   "you delete the video)."));
-			else
+				// Fase A punto 5 (Managed): un solo create tras
+				// End confirmado (canRefire o diferir honesto).
+				fbEndAutoPrepare(doneId);
+			} else
 				generalMsg_->setText(
 					tr("Facebook %1 OK.").arg(op));
 		});
@@ -5313,6 +6106,11 @@ void MetadataDock::startManagedFacebookApply()
 						      meta::userMessage(
 							      meta::Outcome::Success,
 							      p));
+					      // Fase A punto 3 (Managed): tras Apply OK, verificacion silenciosa
+					      // (patron fbQuietStatus_): status silencioso -> runFbVerification,
+					      // sin pisar el mensaje de Apply.
+					      if (managedAccount(meta::Platform::Facebook).connected)
+					          fbChainSilentVerify(liveId);
 					      obs_log(LOG_INFO,
 						      "apply %s: ok (managed)",
 						      meta::platformName(p));
@@ -5989,6 +6787,38 @@ void MetadataDock::onReply(QNetworkReply *reply)
 				code = sub;
 			else if (code == 100 && sub == 33)
 				code = 33;
+			// Fase A: el probe del arranque no inventa estado: si
+			// el ID ya no es gestionable (NotFound/404) se crea
+			// nuevo sin borrar nada; otro fallo difiere honesto.
+			if (fbAutoActive_ && !fbAutoDidCreate_) {
+				const bool nf =
+					(http == 404 ||
+					 meta::classifyFb(http, code) ==
+						 meta::Outcome::NotFound);
+				fbQuietStatus_ = false;
+				fbAutoHandleRead(fbStatusId_.isEmpty()
+							 ? currentFbLiveId()
+							 : fbStatusId_,
+						 QString(), QString(),
+						 QString(), false, nf);
+				return;
+			}
+			// Fase A punto 3: la cadena tras Apply no pisa su
+			// mensaje ante un fallo de lectura: lo restaura.
+			if (fbApplyChain_) {
+				if (fbResult_ &&
+				    !fbApplyChainMsg_.isEmpty())
+					setResult(meta::Platform::Facebook,
+						  true,
+						  fbApplyChainMsg_ +
+							  tr(" — verification "
+							     "read failed"));
+				fbApplyChain_ = false;
+				fbApplyChainId_.clear();
+				fbApplyChainMsg_.clear();
+				fbQuietStatus_ = false;
+				return;
+			}
 			const QString spec =
 				meta::fbEligibilityMessage(code);
 			generalMsg_->setText(
@@ -6026,6 +6856,37 @@ void MetadataDock::onReply(QNetworkReply *reply)
 				  st,
 				  meta::facebookPrivacyValue(
 					  o.value(QStringLiteral("privacy"))));
+		// Fase A punto 2: lectura del arranque -> decide (una sola).
+		if (fbAutoActive_ && !fbAutoDidCreate_) {
+			fbQuietStatus_ = false;
+			fbAutoHandleRead(
+				rid, st,
+				o.value(QStringLiteral("title")).toString(),
+				o.value(QStringLiteral("description"))
+					.toString(),
+				true, false);
+			obs_log(LOG_INFO,
+				"facebook auto-prepare: probe done");
+			return;
+		}
+		// Fase A punto 3: verificacion silenciosa tras Apply OK:
+		// restaura el mensaje de Apply + nota honesta de audiencia
+		// (jamas infla a verificado), sin mensaje generico.
+		if (fbApplyChain_ && !fbApplyChainId_.isEmpty() &&
+		    rid.trimmed() == fbApplyChainId_.trimmed()) {
+			const QString note =
+				meta::fbApplyChainNote(fbVerify_);
+			if (fbResult_ && !fbApplyChainMsg_.isEmpty())
+				setResult(meta::Platform::Facebook, true,
+					  fbApplyChainMsg_ + note);
+			fbApplyChain_ = false;
+			fbApplyChainId_.clear();
+			fbApplyChainMsg_.clear();
+			fbQuietStatus_ = false;
+			obs_log(LOG_INFO,
+				"facebook apply chained verify done");
+			return;
+		}
 		// Cambio B: si esta lectura es la encadenada tras go_live,
 		// informa lo observado (manda sobre el mensaje generico).
 		if (fbGoLiveConfirm_)
@@ -6063,6 +6924,35 @@ void MetadataDock::onReply(QNetworkReply *reply)
 				code = sub;
 			else if (code == 100 && sub == 33)
 				code = 33;
+			// Fase A: el retry es la ultima lectura del probe:
+			// encamina igual que el fallo sin reintento.
+			if (fbAutoActive_ && !fbAutoDidCreate_) {
+				const bool nf =
+					(http == 404 ||
+					 meta::classifyFb(http, code) ==
+						 meta::Outcome::NotFound);
+				fbQuietStatus_ = false;
+				fbAutoHandleRead(!fbStatusId_.isEmpty()
+							 ? fbStatusId_
+							 : currentFbLiveId(),
+						 QString(), QString(),
+						 QString(), false, nf);
+				return;
+			}
+			if (fbApplyChain_) {
+				if (fbResult_ &&
+				    !fbApplyChainMsg_.isEmpty())
+					setResult(meta::Platform::Facebook,
+						  true,
+						  fbApplyChainMsg_ +
+							  tr(" — verification "
+							     "read failed"));
+				fbApplyChain_ = false;
+				fbApplyChainId_.clear();
+				fbApplyChainMsg_.clear();
+				fbQuietStatus_ = false;
+				return;
+			}
 			const QString spec =
 				meta::fbEligibilityMessage(code);
 			generalMsg_->setText(
@@ -6102,6 +6992,31 @@ void MetadataDock::onReply(QNetworkReply *reply)
 		if (fbVerifyLabel_)
 			setFbVerifyLabel(fbVerifyLabel_->text() +
 					 tr(" — fallback"));
+		// Fase A punto 2 (retry como probe definitivo del arranque).
+		if (fbAutoActive_ && !fbAutoDidCreate_) {
+			fbQuietStatus_ = false;
+			fbAutoHandleRead(
+				rid, st,
+				o.value(QStringLiteral("title")).toString(),
+				o.value(QStringLiteral("description"))
+					.toString(),
+				true, false);
+			return;
+		}
+		// Fase A punto 3 (cadena tras Apply sobre el retry).
+		if (fbApplyChain_ && !fbApplyChainId_.isEmpty() &&
+		    rid.trimmed() == fbApplyChainId_.trimmed()) {
+			const QString note =
+				meta::fbApplyChainNote(fbVerify_);
+			if (fbResult_ && !fbApplyChainMsg_.isEmpty())
+				setResult(meta::Platform::Facebook, true,
+					  fbApplyChainMsg_ + note);
+			fbApplyChain_ = false;
+			fbApplyChainId_.clear();
+			fbApplyChainMsg_.clear();
+			fbQuietStatus_ = false;
+			return;
+		}
 		// Cambio B: si esta lectura es la encadenada tras go_live,
 		// informa lo observado (manda sobre el mensaje generico).
 		if (fbGoLiveConfirm_)
@@ -6130,9 +7045,23 @@ void MetadataDock::onReply(QNetworkReply *reply)
 			if (meta::facebookIsPersistentKeyError(
 				    err.value(QStringLiteral("message"))
 					    .toString())) {
-				generalMsg_->setText(
-					meta::
-						fbPersistentNotAllowedMessage());
+				if (fbAutoActive_ || fbEndAutoPending_) {
+					fbAutoHandleCreateFailed(
+						fbAutoPrevStatus_);
+					fbEndAutoPending_ = false;
+				} else {
+					generalMsg_->setText(
+						meta::
+							fbPersistentNotAllowedMessage());
+				}
+				return;
+			}
+			// Fase A: fallo del create automatico -> fallback
+			// honesto (reutilizar anterior valido o diferir).
+			if (fbAutoActive_ || fbEndAutoPending_) {
+				fbAutoHandleCreateFailed(
+					fbAutoPrevStatus_);
+				fbEndAutoPending_ = false;
 				return;
 			}
 			int code = err.value(QStringLiteral("code"))
@@ -6158,6 +7087,12 @@ void MetadataDock::onReply(QNetworkReply *reply)
 		const QString nid = o.value(QStringLiteral("id"))
 					    .toString();
 		if (nid.isEmpty()) {
+			if (fbAutoActive_ || fbEndAutoPending_) {
+				fbAutoHandleCreateFailed(
+					fbAutoPrevStatus_);
+				fbEndAutoPending_ = false;
+				return;
+			}
 			generalMsg_->setText(meta::userMessage(
 				meta::Outcome::ServerRetry, P::Facebook));
 			return;
@@ -6197,6 +7132,27 @@ void MetadataDock::onReply(QNetworkReply *reply)
 			generalMsg_->setText(
 				tr("Facebook live video created (%1).")
 					.arg(nid));
+		}
+		// Fase A punto 5: create tras End (un solo intento, sin
+		// delete: el terminado queda como VOD). Mensaje honesto.
+		if (fbEndAutoPending_) {
+			fbEndAutoPending_ = false;
+			fbAutoActive_ = false;
+			generalMsg_->setText(
+				tr("Facebook live ended — next video "
+				   "prepared (%1).")
+					.arg(nid));
+			obs_log(LOG_INFO,
+				"facebook end auto-prepare done");
+			return;
+		}
+		// Fase A punto 2: create del arranque -> mensaje honesto +
+		// limpieza del huerfano (solo ese, nunca LIVE/VOD/ajeno).
+		if (fbAutoActive_) {
+			fbAutoHandleCreated(nid);
+			obs_log(LOG_INFO,
+				"facebook auto-prepare created");
+			return;
 		}
 		obs_log(LOG_INFO, "facebook live video created");
 		return;
@@ -6243,6 +7199,23 @@ void MetadataDock::onReply(QNetworkReply *reply)
 					    "re-handshakes (~3 min "
 					    "observed); wait before "
 					    "retrying.");
+			// Fase A punto 2: si el DELETE del huerfano falla, se
+			// informa con el ID (sin reintentar): el operador lo
+			// borra a mano; el video vigente queda intacto.
+			if (op == Op::FbDelete &&
+			    !fbAutoDeleteId_.isEmpty()) {
+				const QString prev = fbAutoDeleteId_;
+				fbAutoDeleteId_.clear();
+				generalMsg_->setText(
+					tr("Facebook live video prepared — "
+					   "previous video %1 could not be "
+					   "removed (delete it manually).")
+						.arg(prev));
+				obs_log(LOG_WARNING,
+					"facebook auto-prepare orphan delete "
+					"failed");
+				return;
+			}
 			generalMsg_->setText(fbMsg);
 			obs_log(LOG_WARNING, "%s http %d", label, http);
 			return;
@@ -6276,6 +7249,33 @@ void MetadataDock::onReply(QNetworkReply *reply)
 			}
 		}
 		if (op == Op::FbDelete) {
+			// Fase A punto 2: el DELETE automatico del huerfano
+			// (fbAutoDeleteId_) solo retira ESE ID del combo; no
+			// toca el video vigente (combo/store), ni su ingesta
+			// en memoria ni su verificacion. Si falla, el reply
+			// de error ya informo con el ID (ver rama de error).
+			if (!fbAutoDeleteId_.isEmpty()) {
+				const QString prev = fbAutoDeleteId_;
+				fbAutoDeleteId_.clear();
+				for (int i = fbLiveCombo_->count() - 1;
+				     i >= 0; --i) {
+					if (fbLiveCombo_->itemData(i)
+						    .toString() == prev ||
+					    fbLiveCombo_->itemText(i).contains(
+						    prev))
+						fbLiveCombo_->removeItem(
+							i);
+				}
+				saveStore();
+				generalMsg_->setText(
+					tr("Facebook live video prepared — "
+					   "previous unpublished video %1 "
+					   "removed.")
+						.arg(prev));
+				obs_log(LOG_INFO,
+					"facebook auto-prepare orphan removed");
+				return;
+			}
 			const QString liveId = currentFbLiveId();
 			for (int i = fbLiveCombo_->count() - 1; i >= 0;
 			     --i) {
@@ -6323,6 +7323,10 @@ void MetadataDock::onReply(QNetworkReply *reply)
 			generalMsg_->setText(
 				tr("Facebook live ended (VOD kept unless "
 				   "you delete the video)."));
+			// Fase A punto 5: un solo create tras End confirmado
+			// (canRefire o diferir honesto; el terminado queda
+			// como VOD, sin delete). Sin loops ni modales.
+			fbEndAutoPrepare(currentFbLiveId());
 		}
 		obs_log(LOG_INFO, "%s ok", label);
 		return;
@@ -6381,12 +7385,47 @@ void MetadataDock::onReply(QNetworkReply *reply)
 							  "description"))
 						  .toString();
 			noteFbUpdated(refId, refTitle, refDesc);
+			// Fase A punto 3: tras UpFb OK, verificacion
+			// silenciosa (patron fbQuietStatus_ del create):
+			// status silencioso -> runFbVerification, sin pisar
+			// el mensaje de Apply.
+			if (!refId.isEmpty() &&
+			    (fb_.connected || isManaged()))
+				fbChainSilentVerify(refId);
 		}
 		finishPlatform(p, oc == meta::Outcome::Success,
 			       !spec.isEmpty()
 				       ? spec
 				       : meta::userMessage(oc, p));
 		startApplyNext();
+		return;
+	}
+
+	case Op::RelaySignal: {
+		// Fase A punto 4: senal del emisor (localhost unicamente,
+		// jamas Graph). Solo estado para la vista + predicados
+		// puros; el cuerpo (con dests) jamas se loguea ni persiste.
+		const bool ok =
+			!netFail && http >= 200 && http < 300;
+		obs_log(LOG_INFO, "relay signal http=%d",
+			netFail ? 0 : http);
+		if (!ok) {
+			generalMsg_->setText(
+				tr("Relay signal unreadable (is the relay "
+				   "running?)."));
+			updateFbHappyPath();
+			return;
+		}
+		relaySignal_ = relay::parseSignal(replyJson(reply));
+		if (relay::signalHasEmitter(relaySignal_))
+			generalMsg_->setText(
+				tr("Relay signal: live emitter detected."));
+		else
+			generalMsg_->setText(
+				tr("Relay signal: no emitter — point your "
+				   "encoder at rtmp://127.0.0.1:1935/live."));
+		// T-078 Fase B: la senal manda en el indicador del emisor.
+		updateFbHappyPath();
 		return;
 	}
 

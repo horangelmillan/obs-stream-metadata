@@ -10,6 +10,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
@@ -1807,6 +1808,129 @@ int main(int argc, char **argv)
 			      !relay::stateIsError(relay::State::Running) &&
 			      !relay::stateIsError(relay::State::ForwardOk),
 		      "relay-state-error");
+	}
+
+	// Fase A auto-preparacion Facebook: puros de decision/mensajes.
+	// Sin red, sin I/O; valores falsos, jamas secretos.
+	CHECK(meta::fbAutoCreateTitle(QStringLiteral("  Hola  "),
+				      QStringLiteral("Prev")) ==
+		      QStringLiteral("Hola"),
+	      "fbauto-title-widget");
+	CHECK(meta::fbAutoCreateTitle(QString(), QStringLiteral(" Prev ")) ==
+		      QStringLiteral("Prev"),
+	      "fbauto-title-fallback");
+	CHECK(meta::fbAutoCreateDesc(QStringLiteral("D"),
+				     QStringLiteral("P")) ==
+		      QStringLiteral("D"),
+	      "fbauto-desc-widget");
+	CHECK(meta::fbAutoCreateDesc(QString(), QStringLiteral(" P ")) ==
+		      QStringLiteral("P"),
+	      "fbauto-desc-fallback");
+	CHECK(meta::fbPrevIsReusablePreview(
+		      QStringLiteral("UNPUBLISHED")) &&
+		      !meta::fbPrevIsReusablePreview(
+			      QStringLiteral("LIVE")) &&
+		      !meta::fbPrevIsReusablePreview(
+			      QStringLiteral("VOD")) &&
+		      !meta::fbPrevIsReusablePreview(QString()),
+	      "fbauto-prev-reusable");
+	CHECK(meta::fbAutoShouldDeletePrev(QStringLiteral("UNPUBLISHED"),
+					   QStringLiteral("1"),
+					   QStringLiteral("2")) &&
+		      !meta::fbAutoShouldDeletePrev(
+			      QStringLiteral("UNPUBLISHED"),
+			      QStringLiteral("1"), QStringLiteral("1")) &&
+		      !meta::fbAutoShouldDeletePrev(
+			      QStringLiteral("LIVE"), QStringLiteral("1"),
+			      QStringLiteral("2")) &&
+		      !meta::fbAutoShouldDeletePrev(
+			      QStringLiteral("VOD"), QStringLiteral("1"),
+			      QStringLiteral("2")) &&
+		      !meta::fbAutoShouldDeletePrev(
+			      QStringLiteral("UNPUBLISHED"), QString(),
+			      QStringLiteral("2")),
+	      "fbauto-should-delete");
+	{
+		// Punto 3: Verified no anade nota (Apply ya dijo exito);
+		// audiencia no verificada afirma titulo/desc pero jamas
+		// audiencia; Blocked no verifica. Jamas infla a verificado.
+		const meta::FbVerifyResult vOk = {
+			meta::FbVerify::Verified,
+			QStringLiteral("verified")};
+		const meta::FbVerifyResult vAud = {
+			meta::FbVerify::AudienceUnverified,
+			QStringLiteral("privacy-unverified")};
+		const meta::FbVerifyResult vBl = {
+			meta::FbVerify::Blocked,
+			QStringLiteral("mismatch")};
+		CHECK(meta::fbApplyChainNote(vOk).isEmpty(),
+		      "fbauto-chain-verified-empty");
+		CHECK(meta::fbApplyChainNote(vAud).contains(
+			      QStringLiteral("audience")) &&
+			      meta::fbApplyChainNote(vAud).contains(
+				      QStringLiteral("not verified")),
+		      "fbauto-chain-audience");
+		CHECK(!meta::fbApplyChainNote(vAud).contains(
+			      QStringLiteral("Verified")),
+		      "fbauto-chain-no-inflate");
+		CHECK(!meta::fbApplyChainNote(vBl).isEmpty(),
+		      "fbauto-chain-blocked");
+	}
+	// Fase A punto 4: senal del emisor (localhost, puro). Sin red.
+	CHECK(relay::controlSignalPath() ==
+		      QStringLiteral("/v3/config/paths/get/live"),
+	      "relay-signal-path");
+	{
+		const relay::Signal empty =
+			relay::parseSignal(QJsonObject());
+		CHECK(!empty.present &&
+			      !relay::signalHasEmitter(empty),
+		      "relay-signal-empty");
+		QJsonObject live;
+		live[QStringLiteral("ready")] = true;
+		QJsonObject src;
+		src[QStringLiteral("type")] =
+			QStringLiteral("rtmp");
+		live[QStringLiteral("source")] = src;
+		live[QStringLiteral("inboundBytes")] = 12345;
+		QJsonArray fwd;
+		QJsonObject one;
+		one[QStringLiteral("dest")] =
+			QStringLiteral("rtmps://h.example.com:443/rtmp#K");
+		fwd.append(one);
+		live[QStringLiteral("forward")] = fwd;
+		const relay::Signal s =
+			relay::parseSignal(live);
+		CHECK(s.present && s.ready && s.hasSource &&
+			      s.inboundBytes == 12345LL &&
+			      s.forwardDests.size() == 1 &&
+			      relay::signalHasEmitter(s),
+		      "relay-signal-live");
+		QJsonObject idle;
+		idle[QStringLiteral("ready")] = false;
+		const relay::Signal sIdle =
+			relay::parseSignal(idle);
+		CHECK(sIdle.present && !sIdle.ready &&
+			      !relay::signalHasEmitter(sIdle),
+		      "relay-signal-idle");
+		QJsonObject noBytes;
+		noBytes[QStringLiteral("ready")] = true;
+		QJsonObject nsrc;
+		nsrc[QStringLiteral("type")] =
+			QStringLiteral("rtmp");
+		noBytes[QStringLiteral("source")] = nsrc;
+		CHECK(!relay::signalHasEmitter(
+			      relay::parseSignal(noBytes)),
+		      "relay-signal-no-bytes");
+		// readyTime tolerante (variante del API): ready sin
+		// inboundBytes sigue sin emisor (sin inventar senal).
+		QJsonObject rt;
+		rt[QStringLiteral("readyTime")] =
+			QStringLiteral("2026-10-26T00:00:00Z");
+		CHECK(relay::parseSignal(rt).ready &&
+			      !relay::signalHasEmitter(
+				      relay::parseSignal(rt)),
+		      "relay-signal-readytime");
 	}
 
 	std::printf("SELFCHECK OK\n");

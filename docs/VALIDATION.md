@@ -9,6 +9,31 @@
 > `#define`; conteo estático [C], sin ejecutar aquí). Últimos resultados documentados [D]: backend 250 OK
 > (T-076) + SELFCHECK OK (T-073).
 
+## Simplificación Facebook Fase A (auto-prepare) + Fase B (vista) (2026-10-26, sin commit; T-078 sin cambio de estado)
+
+```text
+FUENTE [D, delegada de la sesión implementadora; no re-ejecutada en
+  esta sesión documental]: Fase A auto-prepare + Fase B vista.
+  Build OK; selfcheck 338/0; `git diff --check` y secret-scan limpios.
+  Aquí solo edición de docs + `git diff --check`; sin commit/push,
+  sin secretos, sin staging/dev.env.
+FASE A [D]: auto-prepare (auto-relay si FB conectado; valida ID:
+  crea nuevo + borra anterior UNPUBLISHED; fallback reutilizar con
+  aviso honesto; Apply con verificación silenciosa; señal del emisor
+  vía API local; auto-prepare tras End con cooldown).
+FASE B [D]: vista (línea "Facebook listo"; Avanzado colapsado;
+  botones condicionales; indicador de señal).
+ESTÁTICO [C, esta sesión documental, sin ejecutar]: `git status
+  --porcelain` lista ficheros `src/` modificados sin commit en la rama
+  `feat/facebook-status-port-t077-t078` (HEAD `01ea886`); sin commit/push.
+ESTADO [C contra BACKLOG]: T-078 SIGUE en investigación, sin cambio
+  de estado en esta tarea (canónico BACKLOG; esta entrada no cambia
+  estados).
+PENDIENTE [P]: E2E operador + capturas visuales + instalador con
+  relay+fix.
+FINAL: simplificación documentada; E2E de aceptación pendiente.
+```
+
 ## Fix relay findBinary → data path primero (2026-10-26, sin commit; T-078 sin cambio de estado)
 
 ```text

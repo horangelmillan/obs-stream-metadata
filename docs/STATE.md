@@ -97,7 +97,8 @@
 - **Fix relay findBinary → data path primero (2026-10-26) [D delegada + C estático parcial]:** `findBinary` buscaba junto al programa pero el instalador pone el relay en el data path del módulo; ahora busca primero en `obs_get_module_data_path()/relay/` (causa del "binary missing" del operador con instalador nuevo). Evidencia delegada [D, no re-ejecutada aquí]: build OK, selfcheck 322/0 con relay-find-data 7/7, diff-check y secret-scan limpios. [C en esta sesión: `src/relay_manager.cpp:79` usa `obs_get_module_data_path`, `src/metadata_selfcheck.cpp` contiene 7 checks `relay-find-data-*`, y `git status --porcelain` lista 5 ficheros `src/` modificados sin commit]. Sin cambios de alcance §§23/51 (ADR-016 intacto). T-078 SIGUE en investigación sin cambio de estado (canónico BACKLOG). Pendiente [P]: operador reinstala/reabre OBS → Start relay → E2E instalar→forward→GoLive→LIVE + métricas F-099 + audiencia F-093. Detalle en VALIDATION.md.
 - **Relay Fases 2–6 port lab→plugin (2026-10-26) [D delegada, no re-ejecutada aquí]:** `src/relay.h`/`src/relay.cpp` + `src/relay_manager.*` + vista en el dock + `tools/package.ps1` con relay/MIT (aviso MIT incluido en el empaquetado); build RelWithDebInfo OK; selfcheck 315 PASS/0 FAIL; `git diff --check` 0; secret-scan limpio; `package.ps1 -WhatIf` OK. Excepción acotada §§23/51 (ADR-016): proceso hijo + forward vía `:9997`, destino operador fijo `rtmp://127.0.0.1:1935/live`; sin automatizar Aitum/OBS, sin multistream general. T-078 SIGUE en investigación sin cambio de estado (canónico BACKLOG). Pendientes [P]: E2E operador instalar→relay→forward→GoLive→LIVE, métricas F-099, audiencia F-093, build E2E del instalador con descarga real, capturas visuales. Detalle en VALIDATION.md.
 - **Port lab→plugin Fase D (2026-10-26) [D delegada + C parcial]:** Status sin privacy en ambos modos + fallback, persistent opt-OFF en ambos modos + mapeo `persistent-key-not-allowed`, mensajes F-097 (cooldown ~3 min) y F-098 (auto-VOD) en el dock; NO portado el formato lab base+clave (`#`) ni relay/scripts lab (quedan en `docs/MEDIAMTX-RELAY-FLOW.md` + `lab/**`). Evidencia delegada [D, no re-ejecutada aquí]: backend 334 passed/11 skipped + selfcheck 287/0 DLL OK + diff-check limpio + secret-scan limpio. [C en esta sesión: `git status --porcelain` lista 5 ficheros `src/` modificados sin commit (`metadata.cpp/.h`, `metadata_dock.cpp/.h`, `metadata_selfcheck.cpp`); sin commit/push]. T-077/T-078 siguen en investigación sin cambio de estado (canónico BACKLOG). Pendientes [P]: E2E operador del port + resolución del conflicto de alcance §§23/51. Detalle en VALIDATION.md.
-- **Reforma harness en curso [C, 2026-10-25, Fase 1 documental]:** apertura
+- **Simplificación Facebook Fase A+B (2026-10-26) [D delegada, no re-ejecutada aquí]:** Fase A auto-prepare (auto-relay si FB conectado; valida ID: crea nuevo + borra anterior UNPUBLISHED, fallback reutilizar con aviso honesto; Apply con verificación silenciosa; señal del emisor vía API local; auto-prepare tras End con cooldown) + Fase B vista (línea "Facebook listo", Avanzado colapsado, botones condicionales, indicador de señal). Evidencia delegada [D]: build OK, selfcheck 338/0, diff-check y secret-scan limpios. [C en esta sesión: rama `feat/facebook-status-port-t077-t078` (HEAD `01ea886`) con ficheros `src/` modificados sin commit según `git status --porcelain`; solo docs + `git diff --check` aquí, sin commit/push]. T-078 SIGUE en investigación sin cambio de estado (canónico BACKLOG). Pendientes [P]: E2E operador, capturas visuales, instalador con relay+fix. Detalle en VALIDATION.md.
+- **Reforma harness en curso [C, 2026-10-26, Fase 1 documental]:** apertura
   mínima-privilegio + validación por stack + reparto steward/BACKLOG y
   ejecutor lab (F-088). Cambios solo documentales/permisos, sin código:
   `harness-steward` único escritor de `docs/BACKLOG.md` + dueño de
@@ -147,7 +148,13 @@
 - **Restricción vigente:** `poc/` es evidencia histórica + regresión
   (no tocar salvo corrección justificada); el producto vive en `src/`
   + `backend/`.
-- **Última actualización:** 2026-10-26 — Fix relay findBinary
+- **Última actualización:** 2026-10-26 — Simplificación
+  Facebook Fase A+B documentada (auto-prepare + vista; build OK,
+  selfcheck 338/0, diff-check y scan limpios [D delegada]; T-078 sigue
+  en investigación sin cambio de estado; pendientes [P]: E2E operador,
+  capturas visuales, instalador con relay+fix);
+  sin commit/push en esta tarea documental.
+  Anterior (2026-10-26): Fix relay findBinary
   documentado (data path primero, causa del "binary missing" con
   instalador nuevo; build OK, selfcheck 322/0 con relay-find-data 7/7
   [D delegada + C estático]; T-078 sigue en investigación sin cambio

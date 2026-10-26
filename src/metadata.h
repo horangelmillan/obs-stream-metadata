@@ -107,6 +107,21 @@ QString facebookPayload(const QString &title, const QString &desc);
 // (cada objeto trae su propia ingesta): jamas prometer persistencia.
 QJsonObject facebookCreatePayload(const QString &title,
 				 const QString &desc, bool persistentOptIn);
+// Fase A auto-preparacion (puro, sin I/O/red/logs): titulo/descripcion
+// efectivos para el create automatico. Regla: widgets vigentes si no
+// estan vacios; si estan vacios, los leidos del anterior (fallback).
+// Trim en ambos; vacio solo si ambos vacios (el llamante valida).
+QString fbAutoCreateTitle(const QString &widgetTitle,
+			 const QString &prevTitle);
+QString fbAutoCreateDesc(const QString &widgetDesc,
+			const QString &prevDesc);
+// true solo si el anterior sigue siendo reutilizable/preparado
+// (UNPUBLISHED exacto, case-sensitive como el gate de GoLive).
+bool fbPrevIsReusablePreview(const QString &prevStatus);
+// true solo para limpiar el huerfano propio: anterior UNPUBLISHED,
+// distinto del nuevo y ambos no vacios. Jamas borra LIVE/VOD/ajeno.
+bool fbAutoShouldDeletePrev(const QString &prevStatus,
+			   const QString &prevId, const QString &newId);
 // T-077 (Fase A): campos de la lectura Status Independent, SIN privacy
 // de entrada (paridad con lab/facebook liveStatus: el primer intento
 // ya no pide privacy; FbStatusRetry queda como relectura unica de
@@ -174,6 +189,12 @@ FbVerifyResult facebookVerifyPrepared(const QString &expTitle,
 				     const QString &actDesc,
 				     const QString &actStatus,
 				     const QString &actPrivacy);
+// Fase A punto 3: nota honesta para el mensaje de Apply encadenado.
+// Tras UpFb OK + verificacion silenciosa, sin pisar el mensaje de Apply.
+// Verified -> vacio (Apply ya dijo exito); AudienceUnverified ->
+// sufijo que afirma titulo/desc pero no audiencia; Blocked -> sufijo
+// de mismatch/estado. Jamas infla a verificado. Puro, sin I/O/red/logs.
+QString fbApplyChainNote(const FbVerifyResult &v);
 
 // User-facing message. Never leaks JSON, headers, tokens or URLs (§16).
 QString userMessage(Outcome o, Platform p);

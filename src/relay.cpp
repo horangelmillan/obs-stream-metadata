@@ -259,4 +259,92 @@ QString forwardErrorMessage(int httpStatus)
 		.arg(httpStatus);
 }
 
+// Fase A punto 4: senal del emisor (puro, tolerante a variantes del
+// Control API: /v3/paths/get y /v3/config/paths/get). Sin I/O/red.
+QString controlSignalPath()
+{
+	return QStringLiteral("/v3/config/paths/get/live");
+}
+
+Signal parseSignal(const QJsonObject &o)
+{
+	Signal s;
+	if (o.isEmpty())
+		return s;
+	s.present = true;
+	if (o.value(QStringLiteral("ready")).isBool())
+		s.ready = o.value(QStringLiteral("ready")).toBool();
+	else if (o.value(QStringLiteral("readyTime")).isString())
+		s.ready = !o.value(QStringLiteral("readyTime"))
+				   .toString()
+				   .isEmpty();
+	// Fuente entrante: objeto "source" no vacio, o tipo explicito.
+	const QJsonValue src = o.value(QStringLiteral("source"));
+	if (src.isObject()) {
+		const QJsonObject so = src.toObject();
+		const QString type =
+			so.value(QStringLiteral("type")).toString();
+		s.hasSource = !so.isEmpty() &&
+			      type.compare(QStringLiteral("none"),
+					   Qt::CaseInsensitive) != 0;
+	} else if (src.isString()) {
+		s.hasSource = !src.toString().trimmed().isEmpty() &&
+			      src.toString().compare(QStringLiteral("none"),
+						     Qt::CaseInsensitive) !=
+				      0;
+	} else {
+		const QString st =
+			o.value(QStringLiteral("sourceType")).toString();
+		const QString srcReady =
+			o.value(QStringLiteral("sourceReady")).toString();
+		s.hasSource =
+			!st.isEmpty() &&
+			st.compare(QStringLiteral("none"),
+				   Qt::CaseInsensitive) != 0;
+		if (!srcReady.isEmpty())
+			s.hasSource = s.hasSource ||
+				      srcReady.compare(
+					      QStringLiteral("true"),
+					      Qt::CaseInsensitive) == 0;
+	}
+	// Bytes entrantes: nombre tolerante (varias formas del API).
+	for (const char *k : {"inboundBytes", "bytesReceived",
+			      "inBytes", "bytes_received"}) {
+		const QJsonValue v =
+			o.value(QString::fromLatin1(k));
+		if (v.isDouble()) {
+			s.inboundBytes =
+				static_cast<long long>(v.toDouble());
+			break;
+		}
+	}
+	// Destinos forward configurados (array de {dest} o strings).
+	const QJsonValue fwd = o.value(QStringLiteral("forward"));
+	if (fwd.isArray()) {
+		for (const QJsonValue &v : fwd.toArray()) {
+			if (v.isObject()) {
+				const QString d = v.toObject()
+							  .value(QStringLiteral(
+								  "dest"))
+							  .toString()
+							  .trimmed();
+				if (!d.isEmpty())
+					s.forwardDests << d;
+			} else if (v.isString()) {
+				const QString d =
+					v.toString().trimmed();
+				if (!d.isEmpty())
+					s.forwardDests << d;
+			}
+		}
+	}
+	return s;
+}
+
+bool signalHasEmitter(const Signal &s)
+{
+	return s.present && s.ready && s.hasSource &&
+	       s.inboundBytes > 0;
+}
+
 } // namespace relay
