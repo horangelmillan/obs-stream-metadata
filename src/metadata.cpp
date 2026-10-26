@@ -460,6 +460,22 @@ bool fbRefireDue(qint64 fireAtMs, qint64 nowMs)
 	return nowMs >= fireAtMs;
 }
 
+FbAutoGo fbAutoGoDecision(FbVerify outcome, const QString &reason,
+			  bool proxyOk, bool sameId, bool alreadyLive,
+			  bool inFlight, bool alreadyTried, bool cooldownOk,
+			  bool authed, bool audienceHidden)
+{
+	if (!authed || !proxyOk || !sameId || alreadyLive || inFlight ||
+	    alreadyTried || !cooldownOk)
+		return FbAutoGo::No;
+	if (outcome == FbVerify::Verified)
+		return FbAutoGo::Go;
+	if (outcome == FbVerify::AudienceUnverified &&
+	    reason == QStringLiteral("privacy-unverified"))
+		return audienceHidden ? FbAutoGo::Go : FbAutoGo::Ask;
+	return FbAutoGo::No;
+}
+
 bool fbAutoCreateDefersForward(bool autoActive, bool endAutoPending,
 			       bool sigPrecreated)
 {

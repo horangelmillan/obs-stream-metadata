@@ -1226,6 +1226,12 @@ void MetadataDock::cancelPendingForModeSwitch()
 	fbSignalCancelPending();
 	clearFbGoLiveSession();
 	fbCancelRefire();
+	// Go live automatico: el intento/vuelo/aviso/contador pertenecen
+	// al contexto anterior (por ID); se cancelan sin red.
+	fbGoLiveInFlight_ = false;
+	fbGoLiveAutoTriedId_.clear();
+	fbAutoAudienceAskedId_.clear();
+	fbAutoGoDeferCount_ = 0;
 	// Plan v3 (vista): el contador es solo-aritmética de sesión;
 	// al cambiar de modo se detiene y se oculta sin afirmar nada.
 	if (fbCooldownTick_)
@@ -1300,6 +1306,10 @@ void MetadataDock::onRelayStateChanged(relay::State s)
 	relayState_ = s;
 	obs_log(LOG_INFO, "relay indicator: %s", relay::stateName(s));
 	updateRelayUi();
+	// Go live automatico: el paso a ForwardOk completa la pata proxy
+	// (la otra pata es Apply+verify OK); solo por eventos, sin timers.
+	if (s == relay::State::ForwardOk)
+		tryFbAutoGoLive();
 	emit relayStateChanged(s);
 }
 
@@ -2250,6 +2260,121 @@ void MetadataDock::fbChainSilentVerify(const QString &liveId)
 		startFbStatusIndependent(id);
 	else
 		fbApplyChain_ = false;
+}
+
+// Go live automatico (plan v2/v3): solo por eventos, sin timers de
+// espera. Llamadores: cadena Apply+verify OK (fbApplyChain_ consumida
+// en FbStatus/FbStatusRetry Managed e Independent) y senal proxy OK
+// (Op::RelaySignal con emisor + onRelayStateChanged a ForwardOk).
+// Gates intactos: login Managed, conectado en el modo activo, mismo ID
+// que el verificado, sin LIVE previo, UN SOLO intento por ID,
+// cooldown canRefire. Sin secretos en logs (solo el ID en claro, como
+// el resto de mensajes del ciclo).
+void MetadataDock::tryFbAutoGoLive()
+{
+	if (fbGoLiveInFlight_)
+		return;
+	const QString liveId = currentFbLiveId().trimmed();
+	if (liveId.isEmpty() || liveId != fbVerifyId_.trimmed())
+		return;
+	if (meta::fbLiveState(fbLastStatus_) == meta::FbLiveState::Live)
+		return; // pre-chequeo: ya al aire, no reenviar
+	if (!fbGoLiveAutoTriedId_.trimmed().isEmpty() &&
+	    liveId == fbGoLiveAutoTriedId_.trimmed())
+		return; // un solo intento auto por ID
+	// Login + conectado en el modo activo (cero red aqui; el envio
+	// posterior revalida antes de cualquier operacion remota).
+	bool authed = false;
+	if (isManaged())
+		authed = managedAuth_ &&
+			 managedAuth_->hasUserSession() &&
+			 managedAccount(meta::Platform::Facebook)
+				 .connected;
+	else
+		authed = fb_.connected;
+	const bool proxyOk =
+		relaySignalHasEmitter() &&
+		(relayState_ == relay::State::ForwardOk);
+	const qint64 now = QDateTime::currentMSecsSinceEpoch();
+	const bool cooldownOk = relay_
+					? relay::canRefire(
+						  relay_->lastForwardOkMs(),
+						  now)
+					: true;
+	const meta::FbAutoGo dec = meta::fbAutoGoDecision(
+		fbVerify_.outcome, fbVerify_.reason, proxyOk, true, false,
+		fbGoLiveInFlight_, false, cooldownOk, authed,
+		fbAudienceNoticeHidden());
+	if (dec == meta::FbAutoGo::No) {
+		// Cooldown bloqueado con resto verificado: mensaje honesto +
+		// contador existente (sin reintento en bucle; el proximo
+		// evento — respaldo de senal 3 s o cadena Apply — revalua).
+		if (proxyOk && authed &&
+		    (fbVerify_.outcome ==
+			     meta::FbVerify::Verified ||
+		     (fbVerify_.outcome ==
+			      meta::FbVerify::AudienceUnverified &&
+		      fbVerify_.reason ==
+			      QStringLiteral("privacy-unverified"))) &&
+		    !cooldownOk) {
+			ensureCooldownTick();
+			generalMsg_->setText(
+				tr("Todo listo — espero un poco tras tu último "
+				   "reenvío aceptado y salgo solo."));
+		}
+		return;
+	}
+	if (dec == meta::FbAutoGo::Ask) {
+		// Audiencia sin verificar y aviso visible: pedir el Si UNA
+		// vez por ID con el modal existente; luego sigue manual.
+		if (!fbAutoAudienceAskedId_.trimmed().isEmpty() &&
+		    liveId == fbAutoAudienceAskedId_.trimmed())
+			return;
+		fbAutoAudienceAskedId_ = liveId;
+		QMessageBox::StandardButton ok =
+			QMessageBox::warning(
+				this,
+				tr("Salir al aire sin confirmar el público"),
+				tr("No pude confirmar quién podrá verlo: podría no ser "
+				   "público. Revísalo en Facebook. ¿Seguir?"),
+				QMessageBox::Yes | QMessageBox::No,
+				QMessageBox::No);
+		if (ok != QMessageBox::Yes)
+			return; // sin operacion remota, estado intacto
+	}
+	fbSendAutoGoLive(liveId);
+}
+
+void MetadataDock::fbSendAutoGoLive(const QString &liveId)
+{
+	const QString id = liveId.trimmed();
+	if (id.isEmpty() || id != fbVerifyId_.trimmed())
+		return; // revalidar mismo ID justo antes de enviar
+	if (meta::fbLiveState(fbLastStatus_) == meta::FbLiveState::Live)
+		return;
+	if (fbGoLiveInFlight_)
+		return;
+	// Gates de envio (revalidacion previa a cualquier remota).
+	if (isManaged()) {
+		if (!managedAuth_ ||
+		    !managedAuth_->hasUserSession() ||
+		    !managedAccount(meta::Platform::Facebook).connected)
+			return;
+	} else if (!fb_.connected) {
+		return;
+	}
+	fbGoLiveInFlight_ = true;
+	fbGoLiveAutoTriedId_ = id;
+	obs_log(LOG_INFO, "facebook auto go-live sending");
+	// Go live es intencion real: dispara el forward pendiente del
+	// auto-prepare (mismo ID verificado; con cooldown, cola diferida
+	// honesta). Solo tras los gates de verificacion.
+	fbFirePendingForward();
+	if (isManaged()) {
+		startManagedFbOp(QStringLiteral("go_live"), id);
+		return;
+	}
+	startFbGoLiveIndependent(id);
 }
 
 // Punto 5: un solo create tras End confirmado (con canRefire). Sin
@@ -4599,6 +4724,12 @@ void MetadataDock::wipeLocal(meta::Platform p)
 			relay_->stop();
 		// La verificacion es de sesion: muere con la conexion.
 		clearFbVerify();
+		// Go live automatico: el intento/vuelo/aviso/contador mueren
+		// con la conexion (el ID persistido sobrevive, el intento no).
+		fbGoLiveInFlight_ = false;
+		fbGoLiveAutoTriedId_.clear();
+		fbAutoAudienceAskedId_.clear();
+		fbAutoGoDeferCount_ = 0;
 		fbTargetCombo_->clear();
 		fbPageTokens_.clear();
 		fbTarget_.clear();
@@ -5191,6 +5322,15 @@ void MetadataDock::setFbLiveId(const QString &id)
 	const QString clean = id.trimmed();
 	if (clean.isEmpty() || !fbLiveCombo_)
 		return;
+	// Go live automatico: el intento auto es por ID; un ID distinto
+	// abre un ciclo nuevo (se olvida el intento, el aviso pedido y el
+	// vuelo/contador del anterior).
+	if (clean != currentFbLiveId().trimmed()) {
+		fbGoLiveInFlight_ = false;
+		fbGoLiveAutoTriedId_.clear();
+		fbAutoAudienceAskedId_.clear();
+		fbAutoGoDeferCount_ = 0;
+	}
 	// Plan v3 Fase 1: cambio de ID limpia la sesion GoLive propia
 	// (el LIVE en seguimiento ya no es el vigente; jamas terminar lo
 	// ajeno) y cancela el refire diferido del anterior.
@@ -5543,10 +5683,13 @@ void MetadataDock::onFbGoLive()
 	}
 	// Go live es intencion real: dispara el forward pendiente del
 	// auto-prepare (mismo ID verificado; con cooldown, cola diferida
-	// honesta). Solo tras los gates de verificacion.
+	// honesta). Solo tras los gates de verificacion. El vuelo cubre
+	// tambien el envio manual (el auto no duplica un go_live en curso).
 	fbFirePendingForward();
+	fbGoLiveInFlight_ = true;
 	if (isManaged()) {
 		if (!managedAccount(meta::Platform::Facebook).connected) {
+			fbGoLiveInFlight_ = false;
 			generalMsg_->setText(meta::userMessage(
 				meta::Outcome::AuthRequired,
 				meta::Platform::Facebook));
@@ -5556,6 +5699,7 @@ void MetadataDock::onFbGoLive()
 		return;
 	}
 	if (!fb_.connected) {
+		fbGoLiveInFlight_ = false;
 		generalMsg_->setText(meta::userMessage(
 			meta::Outcome::AuthRequired,
 			meta::Platform::Facebook));
@@ -5911,6 +6055,40 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 						: meta::classifyStatus(
 							  rep.http == 0 ? -1
 									: rep.http);
+				// Go live automatico (plan v2/v3): el reply consume
+				// el vuelo (exito o error: UN SOLO intento por
+				// ID). Unauthorized -> cae la conexion local
+				// (auth doble) y se aborta la cadena; RateLimited
+				// /5xx -> diferir con mensaje + contador, sin
+				// reintento en bucle; el resto, mensaje honesto.
+				if (op == QStringLiteral("go_live")) {
+					fbGoLiveInFlight_ = false;
+					if (rep.result ==
+						    backend_auth::Result::
+							    Unauthorized ||
+					    oc == meta::Outcome::
+						      AuthRequired) {
+						noteManagedAuthFailure(
+							meta::Platform::
+								Facebook);
+						return;
+					}
+					if (oc ==
+						    meta::Outcome::
+							    RateLimited ||
+					    oc == meta::Outcome::
+							   ServerRetry) {
+						++fbAutoGoDeferCount_;
+						generalMsg_->setText(
+							meta::userMessage(
+								oc,
+								meta::Platform::
+									Facebook) +
+							tr(" (auto %1 — saldré solo en el siguiente intento manual).")
+								.arg(fbAutoGoDeferCount_));
+						return;
+					}
+				}
 				if (op == QStringLiteral("create") &&
 				    fbPersistent_ && rep.http == 502)
 					generalMsg_->setText(
@@ -6129,6 +6307,9 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 					fbApplyChainId_.clear();
 					fbApplyChainMsg_.clear();
 					fbQuietStatus_ = false;
+					// Go live automatico: Apply+verify OK
+					// completa su pata (la otra es proxy).
+					tryFbAutoGoLive();
 					return;
 				}
 			}
@@ -6480,11 +6661,14 @@ void MetadataDock::startManagedFbOp(const QString &op, const QString &liveId)
 			// go_live Managed: nunca afirmar OK aqui; solo la lectura
 			// encadenada del mismo ID confirma ("Facebook is
 			// LIVE.") o deja bloqueado. Interino explicito.
-			if (op == QStringLiteral("go_live"))
+			// El reply consume el vuelo auto (UN SOLO intento por
+			// ID); la relectura encadenada informa lo observado.
+			if (op == QStringLiteral("go_live")) {
+				fbGoLiveInFlight_ = false;
 				generalMsg_->setText(
 					tr("Facebook go-live request accepted — "
 					   "confirming status…"));
-			else if (op == QStringLiteral("end")) {
+			} else if (op == QStringLiteral("end")) {
 				// F-098 (vista honesta): End deja VOD salvo
 				// borrado explicito.
 				generalMsg_->setText(
@@ -7747,6 +7931,9 @@ void MetadataDock::onReply(QNetworkReply *reply)
 			fbQuietStatus_ = false;
 			obs_log(LOG_INFO,
 				"facebook apply chained verify done");
+			// Go live automatico: Apply+verify OK completa su
+			// pata (la otra es proxy emisor + ForwardOk).
+			tryFbAutoGoLive();
 			return;
 		}
 		// Plan v3 Fase 1: confirmacion Graph fresca para auto-End:
@@ -7901,6 +8088,9 @@ void MetadataDock::onReply(QNetworkReply *reply)
 			fbApplyChainId_.clear();
 			fbApplyChainMsg_.clear();
 			fbQuietStatus_ = false;
+			// Go live automatico: Apply+verify OK completa su
+			// pata (la otra es proxy emisor + ForwardOk).
+			tryFbAutoGoLive();
 			return;
 		}
 		// Plan v3 Fase 1: confirmacion Graph fresca para auto-End:
@@ -8117,11 +8307,41 @@ void MetadataDock::onReply(QNetworkReply *reply)
 					    "re-handshakes (~3 min "
 					    "observed); wait before "
 					    "retrying.");
-			// Fase A punto 2: si el DELETE del huerfano falla, se
-			// informa con el ID (sin reintentar): el operador lo
-			// borra a mano; el video vigente queda intacto.
+			// Go live automatico (plan v2/v3): el reply consume el
+			// vuelo (UN SOLO intento por ID). AuthRequired -> la
+			// cuenta exige reconexion y se aborta la cadena;
+			// RateLimited/5xx -> diferir con mensaje + contador,
+			// sin reintento en bucle.
+			if (op == Op::FbGoLive)
+				fbGoLiveInFlight_ = false;
+			if (op == Op::FbGoLive &&
+			    fbOc == meta::Outcome::AuthRequired) {
+				fb_.connected = false;
+				setStatus(P::Facebook,
+					  tr("Needs reconnection."));
+				generalMsg_->setText(fbMsg);
+				obs_log(LOG_WARNING, "%s http %d", label,
+					http);
+				return;
+			}
+			if (op == Op::FbGoLive &&
+			    (fbOc == meta::Outcome::RateLimited ||
+			     fbOc == meta::Outcome::ServerRetry)) {
+				++fbAutoGoDeferCount_;
+				generalMsg_->setText(
+					fbMsg +
+					tr(" (auto %1 — saldré solo en el siguiente intento manual).")
+						.arg(fbAutoGoDeferCount_));
+				obs_log(LOG_WARNING, "%s http %d", label,
+					http);
+				return;
+			}
 			if (op == Op::FbDelete &&
 			    !fbAutoDeleteId_.isEmpty()) {
+				// Fase A punto 2: si el DELETE del huerfano
+				// falla, se informa con el ID (sin reintentar):
+				// el operador lo borra a mano; el video vigente
+				// queda intacto.
 				const QString prev = fbAutoDeleteId_;
 				fbAutoDeleteId_.clear();
 				generalMsg_->setText(
@@ -8141,6 +8361,10 @@ void MetadataDock::onReply(QNetworkReply *reply)
 		{
 			const QString liveId = currentFbLiveId();
 			if (op == Op::FbGoLive && !liveId.isEmpty()) {
+				// El reply consume el vuelo auto (UN SOLO
+				// intento por ID); la relectura encadenada
+				// informa lo observado.
+				fbGoLiveInFlight_ = false;
 				// F-085 + Cambio B: refresco encadenado (una
 				// lectura, sin polling). La relectura informa
 				// lo observado (reportFbGoLiveObserved); aqui
@@ -8364,6 +8588,9 @@ void MetadataDock::onReply(QNetworkReply *reply)
 			// forward pendiente del auto-prepare (un disparo;
 			// con cooldown, cola diferida honesta).
 			fbFirePendingForward();
+			// Go live automatico: la senal con emisor completa
+			// la pata proxy (la otra pata es Apply+verify OK).
+			tryFbAutoGoLive();
 		} else
 			generalMsg_->setText(
 				tr("Relay signal: no emitter — point your "

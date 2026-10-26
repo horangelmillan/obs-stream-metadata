@@ -228,6 +228,24 @@ bool fbAutoEndGuardsOk(qint64 goneContinuousMs, qint64 goLiveAtMs,
 // cuando now >= fireAt. Sin reintentos en bucle (un solo disparo).
 bool fbRefireDue(qint64 fireAtMs, qint64 nowMs);
 
+// Go live automatico (plan v2/v3, src/ logica): decision pura del
+// disparo sin red ni UI. proxyOk = senal del emisor + ForwardOk;
+// sameId = liveId vigente == fbVerifyId_; alreadyLive = el estado
+// leido es LIVE (no reenviar); inFlight = go_live ya en vuelo;
+// alreadyTried = este ID ya tuvo su UNICO intento auto; cooldownOk =
+// canRefire vigente; authed = login + conectado en el modo activo;
+// audienceHidden = check global no-volver-a-mostrar marcado.
+// Verified + todo ok -> Go; AudienceUnverified solo por
+// privacy-unverified + todo ok -> Go si hidden, Ask si no; cualquier
+// otro caso (privacy explicita != EVERYONE, mismatch, otro ID/estado,
+// sin proxy, LIVE, en vuelo, ya intentado, cooldown, sin sesion) -> No.
+// Puro QtCore, sin I/O/red/logs.
+enum class FbAutoGo { No, Go, Ask };
+FbAutoGo fbAutoGoDecision(FbVerify outcome, const QString &reason,
+			  bool proxyOk, bool sameId, bool alreadyLive,
+			  bool inFlight, bool alreadyTried, bool cooldownOk,
+			  bool authed, bool audienceHidden);
+
 // User-facing message. Never leaks JSON, headers, tokens or URLs (§16).
 QString userMessage(Outcome o, Platform p);
 
