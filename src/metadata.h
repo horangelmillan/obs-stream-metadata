@@ -310,6 +310,15 @@ enum class CardTone { Neutral, Brand, Error };
 CardTone cardToneFor(bool connected, const QString &statusText,
 		     const QString &resultText);
 
+// Trio operador 2026-10-26 [D]: "Listo" exige emisor. Predicado puro
+// UNICO para el resumen compuesto y el semaforo FB (ambos solo verdes
+// con verifiedOrAudPending + fwdOk + signalHasEmitter). Sin emisor
+// pero resto ok: ReadyNoSignal (ambar "lista pero sin senal"), no
+// verde. Sin I/O/red/logs.
+enum class FbEmitReadiness { NotReady, ReadyNoSignal, Ready };
+FbEmitReadiness fbEmitReadiness(bool verifiedOrAudPending, bool fwdOk,
+				bool hasEmitter);
+
 // Fase 5: borrado de CUENTA (/users/erase) separado del borrado de DATOS
 // F-C2 (/privacy/erase). Rutas canónicas distintas; la respuesta lleva
 // solo conteos por tabla + revocaciones por proveedor (jamás secretos).

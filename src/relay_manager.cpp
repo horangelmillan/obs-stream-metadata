@@ -164,6 +164,7 @@ void RelayManager::ensureStarted()
 void RelayManager::stop()
 {
 	pendingDest_.clear();
+	okCount_ = 0; // el proximo arranque cuenta desde su preparacion
 	if (proc_->state() == QProcess::NotRunning) {
 		setState(relay::State::Stopped);
 		return;
@@ -320,6 +321,7 @@ void RelayManager::onPatchFinished(QNetworkReply *reply)
 		} else {
 			lastOkMs_ =
 				QDateTime::currentMSecsSinceEpoch();
+			++okCount_; // origen del contador de vista
 			setState(relay::State::ForwardOk);
 		}
 		return;

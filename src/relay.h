@@ -92,9 +92,13 @@ long long cooldownRemainingMs(long long lastOkMs, long long nowMs);
 QString vodNoticeMessage();
 
 // Fase A punto 4: senal del emisor (solo localhost, sin Graph).
-// Path de lectura del path live (config get, no patch) + parse
-// tolerante para la vista (a demanda, sin polling aun).
-QString controlSignalPath(); // "/v3/config/paths/get/live"
+// Runtime Path (GET /v3/paths/get/live, esquema "Path" del OpenAPI
+// v1.21.3: online/onlineTime + source {id,type} + inboundBytes). El
+// endpoint de CONFIG (/v3/config/paths/get/...) devuelve PathConf
+// (source: string estatico tipo "publisher", sin ready ni bytes) y
+// JAMAS muestra emisor: no usarlo para la senal. Parse tolerante a
+// variantes (deprecated ready/readyTime/bytesReceived). Sin I/O/red.
+QString controlSignalPath(); // "/v3/paths/get/live"
 // Estado crudo del path live para la vista (puro, sin I/O/red).
 // present=false si el objeto no trae el path; ready=emitiendo
 // configurado; hasSource=hay fuente entrante; inboundBytes=-1 si
@@ -110,6 +114,23 @@ Signal parseSignal(const QJsonObject &o);
 // true si hay emisor real: path presente + ready + fuente + bytes>0.
 // Puro para la vista (el dock expone el estado crudo + este predicado).
 bool signalHasEmitter(const Signal &s);
+// Resumen de diagnostico para el log (solo 0/1 + conteos, jamas
+// URLs/dests/ingestas): distingue "la API dice no-ready" (present=1
+// ready=0...) de "parse roto o endpoint equivocado" (present=0...).
+// Formato: "present=1 ready=1 source=1 bytes=12345 fwd=1".
+QString signalSummary(const Signal &s);
+// Origen del cooldown para el contador de vista (puro, sin I/O).
+// None = sin forward aceptado (jamas mostrar contador); PreparedAtOpen
+// = el unico aceptado es el de la preparacion inicial; LastRefire = ya
+// hubo mas de uno (el vigente es un reenvio). El conteo lo lleva el
+// gestor (forwardOkCount, reseteado al parar).
+enum class CooldownOrigin { None, PreparedAtOpen, LastRefire };
+CooldownOrigin cooldownOrigin(long long lastOkMs, int okCount);
+// Texto corto del contador con causa: "~m:ss · tras preparar el video
+// al abrir" o "~m:ss · tras tu ultimo reenvio (hace Xs)". Vacio si
+// None o sin restante (el llamante oculta entonces el contador).
+QString cooldownCounterText(long long remainingMs, long long elapsedMs,
+			    CooldownOrigin o);
 // Fase 3 (T-078): estado del relay para el indicador. La vista redacta
 // los textos finales; aqui solo estados (puros, testeables) + el nombre
 // corto para logs (sin secretos). El cooldown bloqueado NO es estado:
