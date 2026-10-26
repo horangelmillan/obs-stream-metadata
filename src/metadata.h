@@ -196,6 +196,33 @@ FbVerifyResult facebookVerifyPrepared(const QString &expTitle,
 // de mismatch/estado. Jamas infla a verificado. Puro, sin I/O/red/logs.
 QString fbApplyChainNote(const FbVerifyResult &v);
 
+// Plan v3 Facebook-automatico Fase 1 (src/ logica; sin temporizadores
+// de reintento para el arranque). Puros QtCore, sin I/O/red/logs.
+// Contrato de senales (acordado para release-tooling): dir
+// QDir::tempPath() + "/obs-stream-metadata-relay" con signal.on
+// (emisor en linea, via runOnOnline) y signal.off (via runOnOffline).
+// La escucha en el dock usa QFileSystemWatcher (evento primario) +
+// pregunta local cada 3 s de respaldo (GET paths/get/live, localhost).
+const char *fbSignalDirLeaf(); // "obs-stream-metadata-relay"
+const char *fbSignalOnFile();  // "signal.on"
+const char *fbSignalOffFile(); // "signal.off"
+long long fbSignalBackupMs();  // 3000 (respaldo, sin Graph)
+long long fbSignalFastMs(int step); // 0 -> 2000, 1 -> 1000 (adaptativo)
+// 3 fallos seguidos (~6 s: 3 s + 2 s + 1 s) = apagado probable.
+bool fbSignalDropCountsAsGone(int consecutiveFails);
+// Votacion 2-de-3: 1-2 presentes de 3 = "inestable" (esperar, no
+// terminar). 0/3 = apagado, 3/3 = encendido.
+bool fbSignalBallotUnstable(int presentCount, int total);
+// Guardas de TERMINO del LIVE auto-iniciado: 30 s continuos sin
+// emisor + gracia 5 min post-GoLive + confirmacion Graph fresca del
+// MISMO ID + solo si el LIVE lo inicio el plugin en esta sesion.
+bool fbAutoEndGuardsOk(qint64 goneContinuousMs, qint64 goLiveAtMs,
+		       qint64 nowMs, bool sameIdFreshConfirmed,
+		       bool initiatedByPlugin);
+// Cola diferida de un disparo para el refire en cooldown: vencida
+// cuando now >= fireAt. Sin reintentos en bucle (un solo disparo).
+bool fbRefireDue(qint64 fireAtMs, qint64 nowMs);
+
 // User-facing message. Never leaks JSON, headers, tokens or URLs (§16).
 QString userMessage(Outcome o, Platform p);
 

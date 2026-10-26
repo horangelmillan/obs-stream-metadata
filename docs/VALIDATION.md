@@ -2,12 +2,236 @@
 
 > Nota de lectura (2026-10-24): este archivo es registro histórico de
 > evidencia; se añaden entradas, no se reescribe el pasado (AGENTS.md
-> §55.6). Estado vigente: T-075 y T-076 abajo. Los conteos antiguos
+> §55.6). Estado vigente: plan v3 con Fases lógica + vista completadas
+> abajo (sin commit; E2E pendiente). Los conteos antiguos
 > (134/218/244/249) son fotografías de su sesión, no el estado actual:
-> en este checkout hay 250 métodos `def test_*` en `backend/tests/` y
-> 180 invocaciones `CHECK(` en `src/metadata_selfcheck.cpp` (+1 línea
-> `#define`; conteo estático [C], sin ejecutar aquí). Últimos resultados documentados [D]: backend 250 OK
-> (T-076) + SELFCHECK OK (T-073).
+> en este checkout hay 344 invocaciones `CHECK(` en
+> `src/metadata_selfcheck.cpp` (conteo estático [C], sin ejecutar aquí).
+> Últimos resultados documentados [D]: build OK + selfcheck 344/0
+> (Fases v3, delegado de la sesión implementadora).
+
+## Plan v3 — Fases completadas: lógica + vista (2026-10-26 — IMPLEMENTADO SIN COMMIT; T-078 sin cambio de estado)
+
+> ESTE BLOQUE ES AVANCE DE IMPLEMENTACIÓN, NO E2E: la lógica y la
+> vista del plan v3 están implementadas en el checkout sin commit; la
+> validación E2E con dos directos reales queda pendiente [P]. Solo
+> edición de docs en esta subtarea (`VALIDATION.md`, `STATE.md`,
+> `PROJECT_CONTEXT.md`); sin commit/push, sin secretos, sin
+> `staging/`/`dev.env`. No reescribe historia: el ajuste v3 [P]
+> anterior queda intacto abajo.
+
+```text
+FUENTE [D delegada de las sesiones implementadoras, no re-ejecutada
+  aquí; comunicada en la tarea que autoriza, 2026-10-26]:
+  Fase 1 lógica — arranque exacto por evento E1/E2/E3; escucha
+  QFileSystemWatcher + pregunta cada 3 s de respaldo; algoritmo
+  adaptativo 3→2→1 con votación 2-de-3 e histéresis; pre-create
+  ~6 s; auto-End con cerrojos (solo LIVE auto-iniciado, con
+  confirmación Graph fresca, VOD siempre); cola diferida de un solo
+  disparo con guarda de ID.
+  Avisos runOnOnline/runOnOffline en tools/mediamtx.yml (señal
+  online/offline vía ficheros signal.on/signal.off).
+  Fase vista — semáforo sin texto (rojo/ruedita/triángulo) +
+  contador ~mm:ss informativo + check global de audiencia en
+  Avanzado (defecto OFF) + ~40 textos en lenguaje de persona.
+  Validación — build OK, selfcheck 344/0, diff-check y secret-scan
+  limpios.
+BASE [C, esta subtarea documental]: rama
+  `feat/facebook-status-port-t077-t078` (HEAD `e4ae8ec`);
+  `tools/mediamtx.yml:44-45` contiene los avisos `runOnOnline` /
+  `runOnOffline` (leído en esta sesión); 344 invocaciones `CHECK(`
+  en `src/metadata_selfcheck.cpp` (conteo estático [C], sin
+  ejecutar; coherente con el "344/0" delegado); `git diff --check`
+  limpio antes y después de editar (ver informe); sin commit/push,
+  sin secretos, sin `staging/`/`dev.env`.
+PENDIENTES [P]: E2E operador con dos directos seguidos reales +
+  métricas F-099 + audiencia F-093; capturas visuales del
+  semáforo/contador/avisos; instalador con relay+fix (build E2E con
+  descarga real). Sin afirmar Live/App Review/requisitos (sin
+  evidencia).
+ALCANCE [D delegada]: según lo delegado, dentro de la excepción
+  acotada de ADR-016 (relay local + forward `:9997`, destino
+  operador fijo `rtmp://127.0.0.1:1935/live`); sin multistream
+  general, sin tocar outputs/servicios/escenas/fuentes, sin keys en
+  repo.
+ESTADO [C contra BACKLOG]: T-078 SIGUE en investigación, sin cambio
+  de estado en esta subtarea (canónico BACKLOG; esta entrada no
+  cambia estados). T-077 intacta.
+```
+
+## Plan Facebook-automático v3 — ajuste 2026-10-26 (decisiones nuevas del dueño; PLAN NO IMPLEMENTADO; T-078 sin cambio de estado)
+
+> ESTE BLOQUE ES PLAN, NO EVIDENCIA: nada de lo descrito aquí está
+> implementado ni verificado en esta sesión documental. Ajusta el plan
+> v2 y la validación "dos directos" anteriores (quedan intactos abajo,
+> no se reescriben). Solo edición de docs (`VALIDATION.md`,
+> `STATE.md`, `PROJECT_CONTEXT.md`, `BACKLOG.md` nota sin cambio de
+> estado); sin código, sin commit/push, sin secretos, sin
+> `staging/`/`dev.env`.
+
+```text
+FUENTE [D]: decisiones NUEVAS del dueño comunicadas en la tarea que
+  autoriza (2026-10-26; no re-ejecutadas aquí). Contrasta con:
+  plan v2 (arranque E1/E2/E3 sin timers; Go-live auto; semáforo +
+  contador; auto-End flanco+antirrebote 60s+gracia 5min; auto-prepare)
+  + validación dos-directos (pre-create NO + auto-End NO + cola
+  diferida NO + verify/refire SÍ + Apply blinda SÍ + presupuestos
+  1 uso + ~30 textos + principio no-técnico) + ADR-016 (excepción
+  acotada §§23/51: relay local + forward `:9997`, destino operador
+  fijo `rtmp://127.0.0.1:1935/live`).
+BASE [C, esta subtarea documental]: rama
+  `feat/facebook-status-port-t077-t078` (HEAD `e4ae8ec`);
+  `git status --porcelain` al inicio lista 4 ficheros documentales
+  modificados sin commit (edición paralela v2 en curso de otra
+  subtarea); `git diff --check` limpio; sin commit/push, sin
+  secretos, sin `staging/`/`dev.env`.
+AJUSTES NUEVOS [P, PLAN NO IMPLEMENTADO; nada implementado aquí]:
+  1. Detección por evento como primaria: avisos `runOnOnline` /
+     `runOnOffline` del repetidor (docs oficiales MediaMTX v1.21
+     [D: citado en la tarea que autoriza; consulta directa de la
+     doc pendiente [P]]) + pregunta cada 3 s de respaldo +
+     confirmación 30 s seguidos. Matiza v2 ("sin timers" [D
+     histórico]): el evento manda, el poll solo respalda.
+  2. Algoritmo adaptativo 3→2→1 con votación 2-de-3 e histéresis
+     [P]: rápido para pre-crear (~6 s), prudente 30 s para terminar.
+     Base: detector de parpadeo Nagios + histéresis [D: citado en
+     la tarea]; Phi-accrual evaluado y DESCARTADO por
+     sobredimensionado para localhost [D: citado en la tarea].
+     Sustituye el antirrebote fijo 60 s de v2 [D histórico].
+  3. Check global "no volver a mostrar" del aviso de audiencia en
+     Avanzado, defecto OFF, persistente en plaintext con texto de
+     riesgo F-093 [P]. Precisa v2 (check global en Avanzado
+     defecto OFF [D histórico]): SOLO salta ese aviso; F-093
+     (`privacy` ilegible + badge "Solo yo" pese a EVERYONE 200)
+     sigue vigente como riesgo a comunicar [D: FINDINGS.md].
+  4. Contador ~mm:ss junto al semáforo [P]: estimación local, con
+     `~`, informativo; no bloquea ni reintenta solo. Precisa v2
+     (contador cooldown [D histórico]).
+  5. Semáforo sin texto (rojo/ruedita/triángulo) + textos internos
+     en lenguaje de persona [P]: continúa dos-directos (lista de
+     ~30 textos con jerga a reescribir + principio "el usuario
+     jamás espera ni decide nada técnico" [D]); la lista de ~30
+     textos queda pendiente de reescritura [P].
+  6. Auto-End SOLO LIVE auto-iniciado (flanco + gracia 5 min +
+     confirmación Graph fresca, VOD siempre) + pre-creación del
+     siguiente al detectarse la caída + cola diferida de un solo
+     disparo con guarda de ID [P]. Cambia dos-directos [D
+     histórico]: pre-create (antes NO existe) pasa a planificado
+     al detectarse la caída; cola diferida (antes NO existe) pasa
+     a planificada de un solo disparo con guarda de ID; auto-End
+     (antes NO existe) pasa a planificado con las guardas citadas.
+ALCANCE [P]: todo lo anterior respeta la excepción acotada de
+  ADR-016 (relay local + forward `:9997`, destino operador fijo
+  `rtmp://127.0.0.1:1935/live`); sin multistream general, sin tocar
+  outputs/servicios/escenas/fuentes, sin keys en repo.
+ESTADO [C contra BACKLOG]: T-078 SIGUE en investigación, sin cambio
+  de estado en esta subtarea (canónico BACKLOG; esta entrada no cambia
+  estados). T-077 intacta.
+FINAL: ajuste v3 consolidado como [P]; redacción UX + implementación
+  + E2E operador real (dos directos seguidos) + métricas F-099 +
+  audiencia F-093 pendientes.
+```
+
+## Validación "dos directos seguidos" (2026-10-26 — VALIDACIÓN/PLAN, NO evidencia de implementación; T-078 sin cambio de estado)
+
+> ESTE BLOQUE ES VALIDACIÓN/PLAN, NO EVIDENCIA: nada de lo descrito
+> aquí está implementado ni verificado en esta sesión documental. Solo
+> edición de docs (`VALIDATION.md`, `STATE.md`, `PROJECT_CONTEXT.md`,
+> `BACKLOG.md` nota sin cambio de estado); sin código, sin commit/
+> push, sin secretos, sin `staging/`/`dev.env`. No reescribe historia:
+> el plan v2 anterior queda intacto abajo.
+
+```text
+FUENTE [D]: informes de trazabilidad obs-plugin + mensajes ux-ui de
+  esta sesión, comunicados en la tarea que autoriza (2026-10-26; no
+  re-ejecutados aquí). Veredictos comunicados [D]:
+  NO existe pre-create al apagarse; NO existe auto-End; NO existe
+  cola diferida; SÍ existen verify/refire independientes; Apply SÍ
+  blinda la carrera; presupuestos de un solo uso; lista de ~30 textos
+  con jerga a reescribir; textos propuestos en inglés; principio "el
+  usuario jamás espera ni decide nada técnico".
+BASE [C, esta subtarea documental]: rama
+  `feat/facebook-status-port-t077-t078` (HEAD `e4ae8ec`);
+  `git status --porcelain` al inicio lista 4 ficheros documentales
+  modificados sin commit (plan v2 en curso de otra edición paralela);
+  en esta subtarea solo edición de docs + `git diff --check`, sin
+  commit/push, sin secretos, sin `staging/`/`dev.env`.
+ESCENARIO [P, validado en papel, NO implementado]: dos directos
+  seguidos sobre el mismo LiveVideo propio (segundo marcó LIVE sin
+  crear nada nuevo en el caso trazado).
+VEREDICTOS [D, trazabilidad comunicada; implementación [P]]:
+  1. Pre-create al apagarse: NO existe (nada se crea al apagar) [D].
+  2. Auto-End: NO existe (ningún End automático en el caso trazado) [D].
+  3. Cola diferida: NO existe (nada queda encolado para después) [D].
+  4. Verify/refire independientes: SÍ existen como operaciones
+     separadas [D]; su E2E real queda pendiente [P].
+  5. Apply blinda la carrera: SÍ (Apply cubre la ventana de carrera
+     del escenario en el diseño validado) [D]; E2E pendiente [P].
+  6. Presupuestos: de un solo uso [D]; sin reutilización entre
+     directos [P por implementar/verificar].
+UX [D, mensajes ux-ui comunicados; implementación [P]]: lista de ~30
+  textos con jerga a reescribir + textos propuestos en inglés;
+  principio rector: "el usuario jamás espera ni decide nada técnico".
+  La redacción final en el dock queda pendiente [P].
+ALCANCE [P]: todo lo anterior respeta la excepción acotada de
+  ADR-016 (relay local + forward `:9997`, destino operador fijo
+  `rtmp://127.0.0.1:1935/live`); sin multistream general, sin tocar
+  outputs/servicios/escenas/fuentes, sin keys en repo.
+ESTADO [C contra BACKLOG]: T-078 SIGUE en investigación, sin cambio
+  de estado en esta subtarea (canónico BACKLOG; esta entrada no cambia
+  estados). T-077 intacta.
+FINAL: validación en papel consolidada como [P]; redacción UX +
+  implementación + E2E operador (dos directos seguidos reales) +
+  métricas F-099 + audiencia F-093 pendientes.
+```
+
+## Plan consolidado v2 Facebook-automático (2026-10-26 — PLAN NO IMPLEMENTADO; T-078 sin cambio de estado)
+
+> ESTE BLOQUE ES PLAN, NO EVIDENCIA: nada de lo descrito aquí está
+> implementado ni verificado en esta sesión documental. Solo edición
+> de docs (`VALIDATION.md`, `STATE.md`, `PROJECT_CONTEXT.md`,
+> `BACKLOG.md` nota sin cambio de estado); sin código, sin commit/
+> push, sin secretos, sin `staging/`/`dev.env`.
+
+```text
+FUENTE [D]: ADR-016 (Fase 1 documental: relay local MediaMTX,
+  excepción acotada AGENTS.md §§23/51) + E2E lab T-078 (forward +
+  caliente PASS, 2 emisiones LIVE+DIRECTO sin tocar Aitum) +
+  simplificación Fase A+B (auto-prepare + vista; build OK, selfcheck
+  338/0 [D delegada de la sesión implementadora, no re-ejecutada
+  aquí]) + fix findBinary (data path primero; build OK, selfcheck
+  322/0 con relay-find-data 7/7 [D delegada]) + relay Fases 2–6 port
+  (build OK, selfcheck 315/0 [D delegada]) + PRs #73/#75/#76/#77 e
+  instaladores [D: citados en la tarea que autoriza, 2026-10-26; sin
+  verificación remota en esta sesión — github MCP sin autenticación
+  en este entorno, no se afirma acceso remoto].
+BASE [C, esta sesión documental]: rama
+  `feat/facebook-status-port-t077-t078` (HEAD `e4ae8ec`);
+  `git status --porcelain` vacío al inicio y al final; solo
+  `git diff --check` como verificación (limpio antes y después de
+  editar); sin commit/push.
+DECISIONES DEL DUEÑO PENDIENTES DE IMPLEMENTAR [P, origen: tarea que
+  autoriza, 2026-10-26; nada implementado aquí]:
+  1. Arranque exacto por evento (E1/E2/E3, sin timers) [P].
+  2. Go live automático (señal proxy relay+forward; audiencia: check
+     global en Avanzado, defecto OFF) [P].
+  3. Semáforo sin texto (rojo/ruedita/triángulo) + contador ~mm:ss
+     de cooldown [P].
+  4. Auto-End por pérdida de señal (solo LIVE auto-iniciado;
+     flanco+antirrebote 60s + gracia 5min + confirmación Graph
+     fresca; VOD siempre) [P].
+  5. Auto-prepare tras End (create nuevo + borra anterior
+     UNPUBLISHED; fallback reutilizar) [P].
+ALCANCE [P]: todo lo anterior respeta la excepción acotada de
+  ADR-016 (relay local + forward `:9997`, destino operador fijo
+  `rtmp://127.0.0.1:1935/live`); sin multistream general, sin tocar
+  outputs/servicios/escenas/fuentes, sin keys en repo.
+ESTADO [C contra BACKLOG]: T-078 SIGUE en investigación, sin cambio
+  de estado en esta tarea (canónico BACKLOG; esta entrada no cambia
+  estados). T-077 intacta.
+FINAL: plan v2 consolidado como [P]; implementación + E2E operador +
+  métricas F-099 + audiencia F-093 pendientes.
+```
 
 ## Simplificación Facebook Fase A (auto-prepare) + Fase B (vista) (2026-10-26, sin commit; T-078 sin cambio de estado)
 

@@ -46,6 +46,7 @@ class QStackedWidget;
 class QTabWidget;
 class QTcpServer;
 class QTimer;
+class QFileSystemWatcher;
 
 namespace meta {
 }
@@ -237,6 +238,15 @@ private slots:
 	// ID, sin crear huerfano inutil).
 	void maybeFbAutoStart();
 	void fbAutoProbe();
+	// Plan v3 Fase 1: punto UNICO de arranque exacto (sin timers de
+	// reintento para el arranque). INVARIANTE: llamar SOLO desde
+	// finishManagedConnected(p == Facebook) y desde la rama
+	// "connected" del lambda de silentRevalidateManaged. JAMAS desde
+	// managedPollTimer_/onManagedPollTimeout, backoff/scheduleBackoff
+	// ni polls Twitch (onTwitchPollTimeout/TwPoll). El flag
+	// fbAutoActive_ se fija DENTRO, post-GET fresco (en
+	// fbAutoHandleRead/fbAutoCreateFresh), jamas desde snapshot.
+	void fbAutoStartFromConnected(meta::Platform p);
 	void fbAutoCreateFresh(const QString &prevStatus,
 			       const QString &prevTitle,
 			       const QString &prevDesc);
@@ -256,6 +266,12 @@ private slots:
 	// observado (LIVE leido => publicado; otro estado => no
 	// confirmado, sigue bloqueado). Consume fbGoLiveConfirm_.
 	void reportFbGoLiveObserved(const QString &status);
+	// Plan v3 Fase 1: create Managed parametrizado (body con titulo/
+	// desc dados). En Managed NO muta widgets (a diferencia del camino
+	// manual que los lee): la pre-creacion tras corte cita el titulo
+	// usado sin tocar la UI.
+	void startManagedFbCreateWithTitle(const QString &title,
+					  const QString &desc);
 	// PoC ingestión: fija/limpia fbIngest_ + visibilidad (sin logs,
 	// sin persistencia). clearFbIngest oculta directo (sin refresh
 	// global) para usarlo en disconnect/delete/mode-switch.
@@ -305,8 +321,61 @@ private slots:
 	// sin sentido: cada boton solo visible con su condicion cumplida.
 	void buildFbSimplifiedView();
 	void updateFbHappyPath();
+	// Plan v3 (vista): semaforo en cabecera FB (icono sin texto +
+	// AccessibleName/tooltip con frase, formas distintas por estado,
+	// cache para no repintar) + contador ~mm:ss junto al semaforo
+	// (visible solo con restante>0, tick 1 s solo-aritmetica, se
+	// detiene en 0 sin afirmar nada). Solo vista: jamas red, jamas
+	// secretos, jamas afirma estado del proveedor.
+	void buildFbHeaderBadges();
+	void updateFbSemaphore();
+	void ensureCooldownTick();
+	void tickFbCooldown();
+	QString fbPersonStateWord(const QString &raw) const;
+	// Plan v3 (vista): check global no-volver-a-mostrar del aviso de
+	// audiencia en Avanzado (defecto OFF, persistente plaintext en
+	// QSettings que la logica puede leer via fbAudienceNoticeHidden();
+	// la vista solo expone el widget + el detalle de riesgo F-093 en
+	// lenguaje de persona). Sin secretos, sin red.
+	void setFbAudienceNoticeHidden(bool on);
+	bool fbAudienceNoticeHidden() const { return fbAudienceHide_; }
 	void toggleFbAdvanced();
 	void onFbSignalCheck();
+	// Plan v3 Fase 1: escucha de senal del repetidor (evento primario
+	// QFileSystemWatcher sobre el dir de senales + pregunta local cada
+	// 3 s de respaldo via GET paths/get/live, localhost, sin Graph).
+	// Contrato de archivos-senal: signal.on = emisor en linea
+	// (runOnOnline); signal.off = apagado (runOnOffline).
+	// Adaptativo: al primer corte re-pregunta a 2 s y 1 s; 3 fallos
+	// seguidos (~6 s) = apagado probable -> pre-crea siguiente
+	// (fallback titulo + mensaje citando el titulo usado; en Managed
+	// NO muta widgets); votacion 2-de-3 repetida = "inestable"
+	// (espera sin terminar); para TERMINAR exige ademas 30 s continuos
+	// + gracia 5 min post-GoLive + confirmacion Graph fresca del MISMO
+	// ID + solo si el LIVE lo inicio el plugin en esta sesion (flags
+	// fbAutoGoLiveSession_/Id_/AtMs, limpiados en End/Delete/Adopt/
+	// mode-switch/cambio de ID). Si la senal vuelve, cancela pendientes.
+	QString fbSignalDir() const;
+	void ensureFbSignalWatch();
+	void onFbSignalDirChanged(const QString &path);
+	void onFbSignalBackup();
+	void onFbSignalFast();
+	void fbSignalNoteResult(bool hasEmitter);
+	void fbSignalCancelPending();
+	void fbSignalMaybePrecreate();
+	void fbMaybeAutoEnd();
+	void noteFbGoLiveSession(const QString &liveId);
+	void clearFbGoLiveSession();
+	// Cola diferida de un disparo para el refire en cooldown: crea ya,
+	// difiere solo el PATCH. Al disparar revalida liveId ==
+	// currentFbLiveId() y estado; cancela en clearForward/nuevo
+	// create/Delete/mode-switch. Sin reintentos en bucle.
+	void fbScheduleRefire(const QString &liveId, const QString &dest);
+	void fbFireRefire();
+	void fbCancelRefire();
+	// Crea ya, difiere solo el PATCH (un disparo, guarda de ID).
+	void fbRefireOrDefer(const QString &liveId,
+			     const QString &ingest);
 
 private:
 	// One request at a time; replies carry their Op in a property.
@@ -419,6 +488,10 @@ private:
 	// verificacion silenciosa pendiente (no pisa el mensaje de Apply).
 	// fbEndAutoArmed_=create pendiente tras End confirmado.
 	bool fbAutoActive_ = false;
+	// Plan v3 Fase 1: armado del arranque exacto (probe GET en vuelo).
+	// fbAutoActive_ SOLO se fija DENTRO, post-GET fresco (en
+	// fbAutoHandleRead/fbAutoCreateFresh); jamas desde snapshot.
+	bool fbAutoArmed_ = false;
 	QString fbAutoPrevId_;
 	QString fbAutoPrevStatus_;
 	QString fbAutoPrevTitle_;
@@ -436,6 +509,41 @@ private:
 	QString fbAutoDeleteId_;
 	// Fase A punto 4: ultima senal del relay (sesion, sin persistencia).
 	relay::Signal relaySignal_;
+	// Override de un solo uso para el create Managed parametrizado
+	// (pre-creacion v3 sin mutar widgets): lo consume
+	// startManagedFbOp("create") para body + expected.
+	QString fbCreateTitleOverride_;
+	QString fbCreateDescOverride_;
+	bool fbUseCreateOverride_ = false;
+	// Plan v3 Fase 1: escucha del repetidor (QFileSystemWatcher +
+	// respaldo 3 s) + sesion GoLive propia + cola diferida refire.
+	// Sin Graph en el respaldo (solo localhost paths/get/live).
+	QFileSystemWatcher *fbSigWatcher_ = nullptr;
+	QTimer *fbSigBackup_ = nullptr;
+	QTimer *fbSigFast_ = nullptr;
+	int fbSigFails_ = 0;
+	int fbSigFastStep_ = 0;
+	qint64 fbSigGoneSince_ = 0;
+	QList<bool> fbSigBallot_;
+	QString fbSigLastTitle_;
+	bool fbSigPrecreated_ = false;
+	// LIVE iniciado por el plugin en ESTA sesion (guardas de auto-End).
+	// Se fija en noteFbGoLiveSession tras GoLive aceptado+confirmado;
+	// se limpia en End/Delete/Adopt/mode-switch/cambio de ID.
+	bool fbAutoGoLiveSession_ = false;
+	QString fbAutoGoLiveId_;
+	qint64 fbAutoGoLiveAtMs_ = 0;
+	// Confirmacion Graph fresca pendiente para el auto-End (un solo
+	// status del MISMO ID; el reply decide el End).
+	bool fbSigEndConfirm_ = false;
+	// Cola diferida de un disparo para el refire en cooldown.
+	struct FbRefire {
+		QString liveId;
+		QString dest;
+		qint64 fireAtMs = 0;
+		QTimer *timer = nullptr;
+	};
+	FbRefire fbRefire_;
 	meta::FbVerifyResult fbVerify_ = {meta::FbVerify::Blocked,
 					  QStringLiteral("not-verified")};
 	QTcpServer *callbackServer_ = nullptr;
@@ -612,6 +720,20 @@ private:
 	QPushButton *fbSignalCheck_ = nullptr;
 	QPushButton *fbAdvancedToggle_ = nullptr;
 	QWidget *fbAdvanced_ = nullptr;
+	// Plan v3 (vista): semaforo en cabecera FB (icono sin texto) +
+	// contador ~mm:ss junto al semaforo. Solo widgets + cache; el
+	// estado crudo sigue en fbLastStatus_/fbVerify_/relaySignal_.
+	QLabel *fbSemaLabel_ = nullptr;
+	QLabel *fbCooldownLabel_ = nullptr;
+	QTimer *fbCooldownTick_ = nullptr;
+	QString fbSemaCache_;
+	QString fbCooldownCache_;
+	// Plan v3 (vista): check global no-volver-a-mostrar del aviso de
+	// audiencia (defecto OFF) + detalle de riesgo F-093 en lenguaje
+	// de persona. Persistente plaintext (QSettings); sin secretos.
+	QCheckBox *fbAudienceHideCheck_ = nullptr;
+	QLabel *fbAudienceRisk_ = nullptr;
+	bool fbAudienceHide_ = false;
 	QString fbLastStatus_;
 	bool fbAdvancedOpen_ = false;
 	std::optional<meta::Platform> expanded_; // none = all cards closed
