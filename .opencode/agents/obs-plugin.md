@@ -47,6 +47,8 @@ permission:
     "cmake*": allow
     "ctest*": allow
     "msbuild*": allow
+    "powershell*": allow
+    "pwsh*": allow
   glob: allow
   grep: allow
   list: allow
@@ -89,6 +91,7 @@ storage DPAPI, `backend_auth` (cliente Managed) y selfchecks.
 ## Alcance de escritura (cerrado)
 
 - `src/` y solo dentro de la tarea asignada por el orquestador.
+- Excepción package-commercial 2026-10-26 [D], usuario: puede EJECUTAR `tools/package.ps1 -Flavor commercial -BackendUrl <canónica>` (y `-WhatIf` previo) con autorización explícita por run; el usuario aparta `dev.env` él mismo antes (los agentes jamás tocan `.env`/`dev.env`); jamás otros sabores contra prod sin orden expresa; jamás secretos en salidas. Excepción G5 2026-10-26 [D]: apartar/devolver `dev.env` (rename ciego, sin leer, solo si `git check-ignore` dice ignorado) cuando el build commercial lo exija y el usuario lo haya autorizado en el run.
 - Nunca: `backend/`, infraestructura, secretos, cuentas de
   proveedores, despliegues, operaciones externas, Git mutante
   (commit/push/PR/merge).
