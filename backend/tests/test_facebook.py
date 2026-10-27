@@ -879,8 +879,9 @@ class PrivacyFallbackStatusTest(unittest.TestCase):
             self.assertEqual(res["status"], "UNPUBLISHED")
             self.assertEqual(res["privacy"], "")
             self.assertEqual(res["privacy_fallback"], True)
-            # Exactamente 2 lecturas del MISMO ID: con y sin privacy.
-            self.assertEqual(len(seen_urls), 2,
+            # Dos lecturas de status (con y sin privacy) + UNA aislada
+            # de ingesta Via B (mismo ID, solo secure_stream_url).
+            self.assertEqual(len(seen_urls), 3,
                              f"{http_status} {payload}")
             for u in seen_urls:
                 self.assertIn(LIVE_ID, u)
@@ -890,6 +891,9 @@ class PrivacyFallbackStatusTest(unittest.TestCase):
             self.assertEqual(q.get("fields"),
                              "id,title,description,status")
             self.assertNotIn("privacy", q.get("fields", ""))
+            q3 = dict(urllib.parse.parse_qsl(
+                urllib.parse.urlparse(seen_urls[2]).query))
+            self.assertEqual(q3.get("fields"), "secure_stream_url")
 
     def test_both_reads_fail_raises_general_no_partial(self):
         seen_urls = []
@@ -1370,6 +1374,184 @@ class AdoptOutcomeTest(unittest.TestCase):
                                            "live_video_id": LIVE_ID,
                                            "title": "T"})
         self.assertEqual(ctx.exception.code, ErrorCode.INVALID_REQUEST)
+
+
+class StatusIngestionViaBTest(unittest.TestCase):
+    """Via B best-effort (T-077/T-078): UNA lectura aislada de ingesta.
+
+    `GET /{id}?fields=secure_stream_url` tras los dos intentos de
+    status (orden/fallback F-093 intactos). Solo `secure_stream_url`
+    se reenvia (transito); `stream_url` plano jamas. Fallo/ausencia
+    -> ingesta ausente sin tocar status. Sin red: fakes inyectados.
+    Marcadores falsos (longitud/presencia, jamas URLs reales).
+    """
+
+    def _connected(self, transport):
+        svc, _ = make_service(transport)
+        started = svc.start("inst-fb", "http://localhost:0/cb")
+        txn = svc._transactions.load(started["transaction_id"])
+        svc.callback(txn["state"], "code-fb")
+        return svc
+
+    def _status_urls(self, transport_calls):
+        return transport_calls
+
+    def test_present_on_success_branch(self):
+        seen = []
+
+        def transport(method, url, fields):
+            if method == "GET" and LIVE_ID in url:
+                seen.append(url)
+                q = dict(urllib.parse.parse_qsl(
+                    urllib.parse.urlparse(url).query))
+                if q.get("fields") == "secure_stream_url":
+                    return 200, {"id": LIVE_ID,
+                                 "secure_stream_url": "INGEST-A"}
+                return 200, {"id": LIVE_ID, "title": "T",
+                             "description": "D", "status": "LIVE",
+                             "privacy": {"value": "EVERYONE"}}
+            return fake_facebook_ok(method, url, fields)
+
+        svc = self._connected(transport)
+        out = svc.apply_metadata("inst-fb", {"op": "status",
+                                             "live_video_id": LIVE_ID})
+        res = out["result"]
+        self.assertIn("secure_stream_url", res)
+        self.assertTrue(len(res["secure_stream_url"]) > 0)
+        # Status intacto + sin fallback alterado.
+        self.assertEqual(res["status"], "LIVE")
+        self.assertEqual(res["privacy"], "EVERYONE")
+        self.assertEqual(res["privacy_fallback"], False)
+        self.assertNotIn("stream_url", {k for k in res
+                                        if k != "secure_stream_url"})
+        # Orden: status, ingesta (2 lecturas: exito al primer intento).
+        self.assertEqual(len(seen), 2)
+        self.assertIn("privacy", seen[0])
+
+    def test_present_on_fallback_branch(self):
+        seen = []
+
+        def transport(method, url, fields):
+            if method == "GET" and LIVE_ID in url:
+                seen.append(url)
+                q = dict(urllib.parse.parse_qsl(
+                    urllib.parse.urlparse(url).query))
+                if q.get("fields") == "secure_stream_url":
+                    return 200, {"id": LIVE_ID,
+                                 "secure_stream_url": "INGEST-B"}
+                if "privacy" in url:
+                    return 400, {"error": {"code": 100}}
+                return 200, {"id": LIVE_ID, "title": "Tf",
+                             "description": "Df", "status": "UNPUBLISHED"}
+            return fake_facebook_ok(method, url, fields)
+
+        svc = self._connected(transport)
+        out = svc.apply_metadata("inst-fb", {"op": "status",
+                                             "live_video_id": LIVE_ID})
+        res = out["result"]
+        self.assertIn("secure_stream_url", res)
+        self.assertTrue(len(res["secure_stream_url"]) > 0)
+        self.assertEqual(res["privacy"], "")
+        self.assertEqual(res["privacy_fallback"], True)
+        self.assertEqual(res["title"], "Tf")
+        self.assertEqual(len(seen), 3)
+
+    def test_absent_or_empty_field_means_no_ingestion(self):
+        for ingestion_body in ({}, {"id": LIVE_ID},
+                               {"secure_stream_url": ""},
+                               {"secure_stream_url": None},
+                               {"stream_url": "PLAIN-ONLY"}):
+            def transport(method, url, fields, _b=ingestion_body):
+                if method == "GET" and LIVE_ID in url:
+                    q = dict(urllib.parse.parse_qsl(
+                        urllib.parse.urlparse(url).query))
+                    if q.get("fields") == "secure_stream_url":
+                        return 200, dict(_b)
+                    return 200, {"id": LIVE_ID, "title": "T",
+                                 "description": "D",
+                                 "status": "UNPUBLISHED",
+                                 "privacy": {"value": "EVERYONE"}}
+                return fake_facebook_ok(method, url, fields)
+
+            svc = self._connected(transport)
+            out = svc.apply_metadata("inst-fb", {"op": "status",
+                                                 "live_video_id": LIVE_ID})
+            res = out["result"]
+            # Byte-identico al status anterior: sin clave de ingesta.
+            self.assertEqual(res, {"id": LIVE_ID, "title": "T",
+                                   "description": "D",
+                                   "status": "UNPUBLISHED",
+                                   "privacy": "EVERYONE",
+                                   "privacy_fallback": False})
+
+    def test_ingestion_http_error_keeps_status(self):
+        def transport(method, url, fields):
+            if method == "GET" and LIVE_ID in url:
+                q = dict(urllib.parse.parse_qsl(
+                    urllib.parse.urlparse(url).query))
+                if q.get("fields") == "secure_stream_url":
+                    return 500, {"error": {"code": 1}}
+                return 200, {"id": LIVE_ID, "title": "T",
+                             "description": "D", "status": "LIVE",
+                             "privacy": "EVERYONE"}
+            return fake_facebook_ok(method, url, fields)
+
+        svc = self._connected(transport)
+        out = svc.apply_metadata("inst-fb", {"op": "status",
+                                             "live_video_id": LIVE_ID})
+        res = out["result"]
+        self.assertEqual(res["status"], "LIVE")
+        self.assertEqual(res["privacy"], "EVERYONE")
+        self.assertNotIn("secure_stream_url", res)
+
+    def test_ingestion_400_keeps_status_without_retries(self):
+        seen = []
+
+        def transport(method, url, fields):
+            if method == "GET" and LIVE_ID in url:
+                seen.append(url)
+                q = dict(urllib.parse.parse_qsl(
+                    urllib.parse.urlparse(url).query))
+                if q.get("fields") == "secure_stream_url":
+                    return 400, {"error": {"code": 100,
+                                           "error_subcode": 33}}
+                return 200, {"id": LIVE_ID, "title": "T",
+                             "description": "D", "status": "LIVE",
+                             "privacy": {"value": "EVERYONE"}}
+            return fake_facebook_ok(method, url, fields)
+
+        svc = self._connected(transport)
+        out = svc.apply_metadata("inst-fb", {"op": "status",
+                                             "live_video_id": LIVE_ID})
+        res = out["result"]
+        self.assertEqual(res["status"], "LIVE")
+        self.assertEqual(res["privacy_fallback"], False)
+        self.assertNotIn("secure_stream_url", res)
+        # Exito al primer intento + UNA ingesta: exactamente 2, sin
+        # reintento de la lectura de ingesta.
+        ingestion_reads = [u for u in seen
+                           if "secure_stream_url" in u]
+        self.assertEqual(len(seen), 2)
+        self.assertEqual(len(ingestion_reads), 1)
+
+    def test_create_unchanged(self):
+        seen_gets = []
+
+        def transport(method, url, fields):
+            if method == "POST" and "live_videos" in url:
+                return 200, {"id": "6001",
+                             "secure_stream_url": "INGEST-C"}
+            if method == "GET" and "live_videos" in url:
+                seen_gets.append(url)
+            return fake_facebook_ok(method, url, fields)
+
+        svc = self._connected(transport)
+        out = svc.apply_metadata("inst-fb", {"op": "create",
+                                             "title": "T"})
+        self.assertEqual(out["result"]["id"], "6001")
+        self.assertIn("secure_stream_url", out["result"])
+        self.assertTrue(len(out["result"]["secure_stream_url"]) > 0)
+        self.assertEqual(seen_gets, [])
 
 
 if __name__ == "__main__":

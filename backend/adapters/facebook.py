@@ -347,6 +347,16 @@ class FacebookProvider(OAuthProvider):
         retorna `privacy=""` + `privacy_fallback=True` (sin reutilizar
         privacy previa); si tambien falla se eleva el error del
         segundo intento. Exito del intento 1 -> `privacy_fallback=False`.
+
+        Via B (T-077/T-078, best-effort, sin alterar la emision): tras
+        los dos intentos de status (intacto su orden/fallback F-093),
+        UNA lectura aislada del MISMO ID con
+        `GET /{id}?fields=secure_stream_url`. Si viene no vacia se
+        adjunta `out["secure_stream_url"]` (solo transito, jamas
+        persistir/loguear/dividir; `stream_url` plano jamas se expone).
+        Cualquier fallo (HTTP!=200, error Meta, campo ausente/vacio)
+        -> ingesta ausente, SIN tocar el resultado de status (ni
+        error, ni reintento, ni cambio de `privacy_fallback`).
         """
 
         def _privacy_of(resp: dict) -> str:
@@ -368,25 +378,42 @@ class FacebookProvider(OAuthProvider):
         status, resp = _graph("GET", url, access_token, None,
                               self._transport)
         if status == 200 and _ok(resp):
-            return {"id": str(resp.get("id", live_id)),
-                    "title": str(resp.get("title", "")),
-                    "description": str(resp.get("description", "")),
-                    "status": str(resp.get("status", "")),
-                    "privacy": _privacy_of(resp),
-                    "privacy_fallback": False}
-        url2 = (f"{GRAPH_URL}/{live_id}?" + urllib.parse.urlencode(
-            {"fields": "id,title,description,status"}))
-        status2, resp2 = _graph("GET", url2, access_token, None,
-                                self._transport)
-        if status2 != 200 or not _ok(resp2):
-            raise classify_facebook_error(
-                resp2 if isinstance(resp2, dict) else {}, status2)
-        return {"id": str(resp2.get("id", live_id)),
-                "title": str(resp2.get("title", "")),
-                "description": str(resp2.get("description", "")),
-                "status": str(resp2.get("status", "")),
-                "privacy": "",
-                "privacy_fallback": True}
+            out = {"id": str(resp.get("id", live_id)),
+                   "title": str(resp.get("title", "")),
+                   "description": str(resp.get("description", "")),
+                   "status": str(resp.get("status", "")),
+                   "privacy": _privacy_of(resp),
+                   "privacy_fallback": False}
+        else:
+            url2 = (f"{GRAPH_URL}/{live_id}?" + urllib.parse.urlencode(
+                {"fields": "id,title,description,status"}))
+            status2, resp2 = _graph("GET", url2, access_token, None,
+                                    self._transport)
+            if status2 != 200 or not _ok(resp2):
+                raise classify_facebook_error(
+                    resp2 if isinstance(resp2, dict) else {}, status2)
+            out = {"id": str(resp2.get("id", live_id)),
+                   "title": str(resp2.get("title", "")),
+                   "description": str(resp2.get("description", "")),
+                   "status": str(resp2.get("status", "")),
+                   "privacy": "",
+                   "privacy_fallback": True}
+        # Via B best-effort: UNA lectura aislada de ingesta por el
+        # mismo ID. Nunca altera status: sin reintento, sin error, sin
+        # tocar privacy/privacy_fallback. Sin logs del valor.
+        try:
+            url3 = (f"{GRAPH_URL}/{live_id}?" + urllib.parse.urlencode(
+                {"fields": "secure_stream_url"}))
+            status3, resp3 = _graph("GET", url3, access_token, None,
+                                    self._transport)
+            if (status3 == 200 and isinstance(resp3, dict)
+                    and "error" not in resp3):
+                secure = resp3.get("secure_stream_url", "")
+                if isinstance(secure, str) and secure:
+                    out["secure_stream_url"] = secure
+        except Exception:
+            pass
+        return out
 
     def find_active_live_video(self, access_token: str) -> dict:
         """Adopta el LiveVideo en vivo actual (solo lectura, sin escribir).
